@@ -1,7 +1,16 @@
-# Hook library for CUDA Environments
+# HAMi-core —— Hook library for CUDA Environments
 
+## Introduction
+
+HAMi-core is the in-container gpu resource controller, it has beed adopted by [HAMi](https://github.com/HAMi-project/HAMi), [volcano-vgpu-device-plugin](https://github.com/volcano-sh/devices)
+
+## Features
+
+HAMi-core has the following features:
+1. Virtualize device meory
 ![image](docs/images/sample_nvidia-smi.png)
-
+2. Limit device utilization by self-implemented time shard
+3. Real-time device utilization monitor 
 
 ## Build
 
@@ -12,7 +21,7 @@ sh build.sh
 ## Build in Docker
 
 ```bash
-docker build .
+docker build . -f dockerfiles/Dockerfile.{arch}
 ```
 
 ## Usage
@@ -47,39 +56,13 @@ docker run ${LIBRARY_MOUNTS} ${DEVICE_MOUNTS} -it \
 
 Use environment variable LIBCUDA_LOG_LEVEL to set the visibility of logs
 
-| LIBCUDA_LOG_LEVEL | description |
+| LIBCUDA_LOG_LEVEL | description |
 | ----------------- | ----------- |
+|  0          | errors only |
 |  not set          | errors,warnings,messages |
 |  3                | infos,errors,warnings,messages |
 |  4                | debugs,errors,warnings,messages |
 
-## Test with Frameworks
-
-Run operations which requires at least 4GB device memory, thus will OOM under 1GB limit
-
-- TensorFlow
-  
-    ```bash
-    python test/python/limit_tensorflow.py --device=0 --tensor_shape=1024,1024,1024
-    ```
-
-- TensorFlow 2.0   
-
-	```bash
-	python test/python/limit_tensorflow2.py --device=0 --tensor_shape=1024,1024,1024
-	```
-
-- Pytorch
-
-	```bash
-	python test/python/limit_pytorch.py --device=0 --tensor_shape=1024,1024,1024
-	```
-
-- MxNet
-
-	```bash
-	python test/python/limit_mxnet.py --device=0 --tensor_shape=1024,1024,1024
-	```
 
 ## Test Raw APIs
 
