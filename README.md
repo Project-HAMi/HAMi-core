@@ -17,6 +17,12 @@ HAMi-core has the following features:
 
 3. Real-time device utilization monitor 
 
+## Design
+
+HAMi-core operates by Hijacking the API-call between CUDA-Runtime(libcudart.so) and CUDA-Driver(libcuda.so), as the figure below:
+
+<img src="./docs/images/hami-core-position.png" width = "600" />
+
 ## Build
 
 ```bash
