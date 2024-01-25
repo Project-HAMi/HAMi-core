@@ -2,14 +2,19 @@
 
 ## Introduction
 
-HAMi-core is the in-container gpu resource controller, it has beed adopted by [HAMi](https://github.com/HAMi-project/HAMi), [volcano-vgpu-device-plugin](https://github.com/volcano-sh/devices)
+HAMi-core is the in-container gpu resource controller, it has beed adopted by [HAMi](https://github.com/HAMi-project/HAMi), [volcano](https://github.com/volcano-sh/devices)
+
+<img src="./docs/images.png" width = "600" /> 
 
 ## Features
 
 HAMi-core has the following features:
 1. Virtualize device meory
+
 ![image](docs/images/sample_nvidia-smi.png)
+
 2. Limit device utilization by self-implemented time shard
+
 3. Real-time device utilization monitor 
 
 ## Build
@@ -59,7 +64,7 @@ Use environment variable LIBCUDA_LOG_LEVEL to set the visibility of logs
 | LIBCUDA_LOG_LEVEL | description |
 | ----------------- | ----------- |
 |  0          | errors only |
-|  not set          | errors,warnings,messages |
+|  1(default),2          | errors,warnings,messages |
 |  3                | infos,errors,warnings,messages |
 |  4                | debugs,errors,warnings,messages |
 
