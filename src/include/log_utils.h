@@ -11,29 +11,29 @@
 #else
 #define LOG_DEBUG(msg, ...) { \
     if ((getenv("LIBCUDA_LOG_LEVEL")!=NULL) && (atoi(getenv("LIBCUDA_LOG_LEVEL"))>=4)) \
-       fprintf(stderr, "[4pdvGPU Debug(%d:%ld:%s:%d)]: "msg"\n",getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); }
+       fprintf(stderr, "[HAMI-core Debug(%d:%ld:%s:%d)]: "msg"\n",getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); }
 #endif
 
 #define LOG_INFO(msg, ...) { \
     if ( \
          /*(getenv("LIBCUDA_LOG_LEVEL")==NULL) || */\
          (getenv("LIBCUDA_LOG_LEVEL")!=NULL) && (atoi(getenv("LIBCUDA_LOG_LEVEL"))>=3)) \
-       fprintf(stderr, "[4pdvGPU Info(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); }
+       fprintf(stderr, "[HAMI-core Info(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); }
 
 #define LOG_WARN(msg, ...) { \
     if ( \
         (getenv("LIBCUDA_LOG_LEVEL")==NULL) || \
         ((getenv("LIBCUDA_LOG_LEVEL")!=NULL) && (atoi(getenv("LIBCUDA_LOG_LEVEL"))>=2))) \
-       fprintf(stderr, "[4pdvGPU Warn(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); }
+       fprintf(stderr, "[HAMI-core Warn(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); }
 
 #define LOG_MSG(msg, ...) { \
     if ( \
         (getenv("LIBCUDA_LOG_LEVEL")==NULL) || \
         ((getenv("LIBCUDA_LOG_LEVEL")!=NULL) && (atoi(getenv("LIBCUDA_LOG_LEVEL"))>=2))) \
-       fprintf(stderr, "[4pdvGPU Msg(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); }
+       fprintf(stderr, "[HAMI-core Msg(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); }
 
 #define LOG_ERROR(msg, ...) { \
-    fprintf(stderr, "[4pdvGPU ERROR (pid:%d thread=%ld %s:%d)]: "msg"\n", getpid(), pthread_self(), basename(__FILE__),__LINE__, ##__VA_ARGS__); \
+    fprintf(stderr, "[HAMI-core ERROR (pid:%d thread=%ld %s:%d)]: "msg"\n", getpid(), pthread_self(), basename(__FILE__),__LINE__, ##__VA_ARGS__); \
 }
 
 #define CHECK_DRV_API(f)  {                   \
