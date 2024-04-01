@@ -8,7 +8,7 @@ extern int ctx_activate[16];
 
 CUresult cuDevicePrimaryCtxGetState( CUdevice dev, unsigned int* flags, int* active ){
     LOG_DEBUG("into cuDevicePrimaryCtxGetState dev=%d",dev);
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxGetState,dev,flags,&active);
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxGetState,dev,flags,active);
     return res;
 }
 
