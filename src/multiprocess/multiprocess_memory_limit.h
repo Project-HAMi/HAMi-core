@@ -64,10 +64,17 @@ typedef struct {
 } device_memory_t;
 
 typedef struct {
+    uint64_t dec_util;
+    uint64_t enc_util;
+    uint64_t sm_util;
+} device_util_t;
+
+typedef struct {
     int32_t pid;
     int32_t hostpid;
     device_memory_t used[CUDA_DEVICE_MAX_COUNT];
     uint64_t monitorused[CUDA_DEVICE_MAX_COUNT];
+    device_util_t device_util[CUDA_DEVICE_MAX_COUNT];
     int32_t status;
 } shrreg_proc_slot_t;
 
@@ -124,6 +131,8 @@ int get_utilization_switch();
 int set_env_utilization_switch();
 
 int set_gpu_device_memory_monitor(int32_t pid,int dev,size_t monitor);
+int set_gpu_device_sm_utilization(int32_t pid,int dev, unsigned int smUtil);
+int init_gpu_device_sm_utilization();
 int add_gpu_device_memory_usage(int32_t pid,int dev,size_t usage,int type);
 int rm_gpu_device_memory_usage(int32_t pid,int dev,size_t usage,int type);
 
