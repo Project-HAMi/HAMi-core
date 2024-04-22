@@ -154,6 +154,7 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
               summonitor += infos[i].usedGpuMemory;
           }
           set_gpu_device_memory_monitor(infos[i].pid,cudadev,summonitor);
+          set_gpu_device_sm_utilization(infos[i].pid,cudadev,0);
         } 
         continue;
       }
@@ -172,6 +173,7 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
               //}
           }
           set_gpu_device_memory_monitor(processes_sample[i].pid,cudadev,summonitor);
+          set_gpu_device_sm_utilization(processes_sample[i].pid,cudadev,processes_sample[i].smUtil);
       }
       if (sum < 0)
         sum = 0;
@@ -194,6 +196,7 @@ void* utilization_watcher() {
           if (pidfound==0)
             continue;
         }
+        init_gpu_device_sm_utilization();
         get_used_gpu_utilization(userutil,&sysprocnum);
         //if (sysprocnum == 1 &&
         //    userutil < upper_limit / 10) {

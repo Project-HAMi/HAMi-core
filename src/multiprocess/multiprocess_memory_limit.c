@@ -34,6 +34,10 @@
 #define SEM_WAIT_RETRY_TIMES 30
 #endif
 
+#ifndef CUDA_DEVICE_MAX_COUNT
+#define CUDA_DEVICE_MAX_COUNT 16
+#endif
+
 int pidfound;
 
 int ctx_activate[32];
@@ -220,6 +224,7 @@ int rm_quitted_process(){
             }
             region_info.shared_region->procs[cnt].pid=region_info.shared_region->procs[i].pid;
             memcpy(region_info.shared_region->procs[cnt].used,region_info.shared_region->procs[i].used,sizeof(device_memory_t)*CUDA_DEVICE_MAX_COUNT);
+            memcpy(region_info.shared_region->procs[cnt].device_util,region_info.shared_region->procs[i].device_util,sizeof(device_util_t)*CUDA_DEVICE_MAX_COUNT);
             cnt++;
         }
         region_info.shared_region->proc_num=cnt;
@@ -276,6 +281,35 @@ int set_gpu_device_memory_monitor(int32_t pid,int dev,size_t monitor){
         if (region_info.shared_region->procs[i].hostpid == pid){
             LOG_INFO("set_gpu_device_memory_monitor:%d %d %lu->%lu",pid,dev,region_info.shared_region->procs[i].used[dev].total,monitor);
             region_info.shared_region->procs[i].monitorused[dev] = monitor;
+            break;
+        }
+    }
+    unlock_shrreg();
+    return 1;
+}
+
+int set_gpu_device_sm_utilization(int32_t pid,int dev, unsigned int smUtil){  // new function
+    int i;
+    ensure_initialized();
+    lock_shrreg();
+    for (i=0;i<region_info.shared_region->proc_num;i++){
+        if (region_info.shared_region->procs[i].hostpid == pid){
+            LOG_INFO("set_gpu_device_sm_utilization:%d %d %lu->%lu",pid,dev,region_info.shared_region->procs[i].device_util[dev].sm_util,smUtil);
+            region_info.shared_region->procs[i].device_util[dev].sm_util = smUtil;
+            break;
+        }
+    }
+    unlock_shrreg();
+    return 1;
+}
+
+int init_gpu_device_sm_utilization(){
+    int i,dev;
+    ensure_initialized();
+    lock_shrreg();
+    for (i=0;i<region_info.shared_region->proc_num;i++){
+        for (dev=0;dev<CUDA_DEVICE_MAX_COUNT;dev++){
+            region_info.shared_region->procs[i].device_util[dev].sm_util = 0;
             break;
         }
     }
@@ -440,6 +474,7 @@ void exit_handler() {
         while (slot < region->proc_num) {
             if (region->procs[slot].pid == region_info.pid) {
                 memset(region->procs[slot].used,0,sizeof(device_memory_t)*CUDA_DEVICE_MAX_COUNT);
+                memset(region->procs[slot].device_util,0,sizeof(device_util_t)*CUDA_DEVICE_MAX_COUNT);
                 region->proc_num--;
                 region->procs[slot] = region->procs[region->proc_num];
                 break;
@@ -551,6 +586,7 @@ void init_proc_slot_withlock() {
         if (region->procs[i].pid == current_pid) {
             region->procs[i].status = 1;
             memset(region->procs[i].used,0,sizeof(device_memory_t)*CUDA_DEVICE_MAX_COUNT);
+            memset(region->procs[i].device_util,0,sizeof(device_util_t)*CUDA_DEVICE_MAX_COUNT);
             found = 1;
             break;
         }
@@ -559,6 +595,7 @@ void init_proc_slot_withlock() {
         region->procs[region->proc_num].pid = current_pid;
         region->procs[region->proc_num].status = 1;
         memset(region->procs[region->proc_num].used,0,sizeof(device_memory_t)*CUDA_DEVICE_MAX_COUNT);
+        memset(region->procs[region->proc_num].device_util,0,sizeof(device_util_t)*CUDA_DEVICE_MAX_COUNT);
         region->proc_num++;
     }
 
