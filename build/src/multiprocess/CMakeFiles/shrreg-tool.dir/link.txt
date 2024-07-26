@@ -1,1 +1,0 @@
-/usr/bin/cc -g -rdynamic CMakeFiles/shrreg-tool.dir/shrreg_tool.c.o CMakeFiles/multiprocess_mod.dir/multiprocess_memory_limit.c.o CMakeFiles/multiprocess_mod.dir/multiprocess_utilization_watcher.c.o -o ../../shrreg-tool  -lpthread -lcuda -lnvidia-ml 

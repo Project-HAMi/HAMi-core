@@ -1,9 +1,0 @@
-#define MULTIPROCESS_LIMIT_ENABLE
-/* #undef MEMORY_LIMIT_DEBUG */
-#define DLSYM_HOOK_ENABLE
-/* #undef DLSYM_HOOK_DEBUG */
-#define HOOK_MEMINFO_ENABLE
-#define HOOK_NVML_ENABLE
-size_t GIT_HASH_;
-size_t GIT_BRANCH_;
-

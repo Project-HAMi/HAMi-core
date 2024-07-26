@@ -1,1 +1,0 @@
-/usr/bin/c++ -g -rdynamic CMakeFiles/test_runtime_alloc_managed.dir/test_runtime_alloc_managed.c.o -o test_runtime_alloc_managed  /usr/local/cuda/lib64/libcudart_static.a -ldl -lrt -lrt -lpthread -lnvidia-ml -lcuda -lcudart -L/usr/local/cuda/lib64 

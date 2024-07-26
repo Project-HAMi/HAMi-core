@@ -1,1 +1,0 @@
-/usr/bin/c++ -g -rdynamic CMakeFiles/test_create_array.dir/test_create_array.c.o -o test_create_array  /usr/local/cuda/lib64/libcudart_static.a -ldl -lrt -lrt -lpthread -lnvidia-ml -lcuda -lcudart -L/usr/local/cuda/lib64 

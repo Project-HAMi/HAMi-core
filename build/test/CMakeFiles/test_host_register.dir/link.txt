@@ -1,1 +1,0 @@
-/usr/bin/c++ -g -rdynamic CMakeFiles/test_host_register.dir/test_host_register.c.o -o test_host_register  /usr/local/cuda/lib64/libcudart_static.a -ldl -lrt -lrt -lpthread -lnvidia-ml -lcuda -lcudart -L/usr/local/cuda/lib64 
