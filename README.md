@@ -32,7 +32,7 @@ sh build.sh
 ## Build in Docker
 
 ```bash
-docker build . -f dockerfiles/Dockerfile.{arch}
+docker build . -f dockerfiles/Dockerfile
 ```
 
 ## Usage

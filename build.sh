@@ -5,7 +5,7 @@ cd $root_dir
 mkdir -p build; cd build
 
 [[ -z "$J" ]] && J=`nproc | awk '{print int(($0 + 1)/ 2)}'`
-CMAKE=${CMAKE-"cmake3"}
+CMAKE=${CMAKE-"cmake"}
 CMAKE_OPTIONS=${CMAKE_OPTIONS-""}
 #CMAKE_OPTIONS+=" -DMEMORY_LIMIT_DEBUG=1"
 CMAKE_OPTIONS+=" -DDLSYM_HOOK_ENABLE=1"
