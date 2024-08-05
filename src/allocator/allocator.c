@@ -192,3 +192,63 @@ int free_raw(CUdeviceptr dptr){
     return tmp;
 }
 
+int free_raw_async(CUdeviceptr dptr, CUstream hStream){
+    pthread_mutex_lock(&mutex);
+    unsigned int tmp = remove_chunk_async(device_overallocated,dptr,hStream);
+    pthread_mutex_unlock(&mutex);
+    return tmp;
+}
+
+int remove_chunk_async(allocated_list *a_list, CUdeviceptr dptr, CUstream hStream){
+    size_t t_size;
+    if (a_list->length==0) {
+        return -1;
+    }
+    allocated_list_entry *val;
+    for (val=a_list->head;val!=NULL;val=val->next){
+        if (val->entry->address==dptr){
+            t_size=val->entry->length;
+            cuMemFreeAsync(dptr,hStream);
+            LIST_REMOVE(a_list,val);
+
+            CUdevice dev;
+            cuCtxGetDevice(&dev);
+            rm_gpu_device_memory_usage(getpid(),dev,t_size,2);
+            return 0;
+        }
+    }
+    return -1;
+}
+
+int allocate_async_raw(CUdeviceptr *dptr, size_t size, CUstream hStream){
+    int tmp;
+    pthread_mutex_lock(&mutex);
+    tmp = add_chunk_async(dptr,size,hStream);
+    pthread_mutex_unlock(&mutex);
+    return tmp;
+}
+
+int add_chunk_async(CUdeviceptr *address,size_t size, CUstream hStream){
+    size_t addr=0;
+    size_t allocsize;
+    CUresult res = CUDA_SUCCESS;
+    CUdevice dev;
+    cuCtxGetDevice(&dev);
+    if (oom_check(dev,size))
+        return -1;
+
+    allocated_list_entry *e;
+    INIT_ALLOCATED_LIST_ENTRY(e,addr,size);
+    res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemAllocAsync,&e->entry->address,size,hStream);
+    if (res!=CUDA_SUCCESS){
+        LOG_ERROR("cuMemoryAllocate failed res=%d",res);
+        return res;
+    }
+    LIST_ADD(device_overallocated,e);
+    //uint64_t t_size;
+    *address = e->entry->address;
+    allocsize = size;
+    cuCtxGetDevice(&dev);
+    add_gpu_device_memory_usage(getpid(),dev,allocsize,2);
+    return 0;
+}
