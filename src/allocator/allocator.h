@@ -153,6 +153,8 @@ int oom_check(const int dev,size_t addon);
 int allocate_raw(CUdeviceptr *dptr, size_t size);
 int free_raw(CUdeviceptr dptr);
 int add_chunk_only(CUdeviceptr address,size_t size);
+int allocate_async_raw(CUdeviceptr *dptr, size_t size, CUstream hStream);
+int free_raw_async(CUdeviceptr dptr, CUstream hStream);
 
 // Checks memory type
 int check_memory_type(CUdeviceptr address);
