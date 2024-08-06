@@ -131,6 +131,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemCreate"},
     {.name = "cuMemMap"},
     {.name = "cuMemAllocAsync"},
+    {.name = "cuMemFreeAsync"},
     /* cuda11.7 new api memory part */
     {.name = "cuMemHostGetDevicePointer_v2"},
     {.name = "cuMemHostGetFlags"},
