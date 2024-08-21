@@ -115,9 +115,6 @@ int setspec() {
 }
 
 int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
-    nvmlProcessUtilizationSample_t processes_sample[SHARED_REGION_MAX_PROCESS_NUM];
-    unsigned int processes_num = SHARED_REGION_MAX_PROCESS_NUM;
-    nvmlDevice_t device;
     struct timeval cur;
     size_t microsec;
 
@@ -137,14 +134,22 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
       cudadev = nvml_to_cuda_map((unsigned int)(devi));
       if (cudadev<0)
         continue;
+      nvmlDevice_t device;
+      char uuid[NVML_DEVICE_UUID_BUFFER_SIZE];
       CHECK_NVML_API(nvmlDeviceGetHandleByIndex(cudadev, &device));
+        // Get device UUID
+     CHECK_NVML_API(nvmlDeviceGetUUID(device, uuid, NVML_DEVICE_UUID_BUFFER_SIZE));
       nvmlReturn_t res = nvmlDeviceGetComputeRunningProcesses(device,&infcount,infos);
       if (res==NVML_ERROR_INSUFFICIENT_SIZE){
         continue;
       }
       gettimeofday(&cur,NULL);
       microsec = (cur.tv_sec - 1) * 1000UL * 1000UL + cur.tv_usec;
+      nvmlProcessUtilizationSample_t processes_sample[SHARED_REGION_MAX_PROCESS_NUM];
+      unsigned int processes_num = SHARED_REGION_MAX_PROCESS_NUM;
       res = nvmlDeviceGetProcessUtilization(device,processes_sample,&processes_num,microsec);
+      LOG_DEBUG("processes_num=%d\n",processes_num);
+      LOG_DEBUG("Device UUID: %s\n", uuid);
       if (res==NVML_ERROR_INSUFFICIENT_SIZE){
         userutil[cudadev] = 0;
         for (i=0; i<infcount; i++){
