@@ -541,7 +541,7 @@ CUresult cuMipmappedArrayDestroy(CUmipmappedArray hMipmappedArray) {
 
 CUresult cuLaunchKernel ( CUfunction f, unsigned int  gridDimX, unsigned int  gridDimY, unsigned int  gridDimZ, unsigned int  blockDimX, unsigned int  blockDimY, unsigned int  blockDimZ, unsigned int  sharedMemBytes, CUstream hStream, void** kernelParams, void** extra ){
     ENSURE_RUNNING();
-
+    pre_launch_kernel();
     if (pidfound==1){ 
         rate_limiter(gridDimX * gridDimY * gridDimZ,
                    blockDimX * blockDimY * blockDimZ);
@@ -553,6 +553,7 @@ CUresult cuLaunchKernel ( CUfunction f, unsigned int  gridDimX, unsigned int  gr
 
 CUresult cuLaunchCooperativeKernel ( CUfunction f, unsigned int  gridDimX, unsigned int  gridDimY, unsigned int  gridDimZ, unsigned int  blockDimX, unsigned int  blockDimY, unsigned int  blockDimZ, unsigned int  sharedMemBytes, CUstream hStream, void** kernelParams ){
     ENSURE_RUNNING();
+    pre_launch_kernel();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuLaunchCooperativeKernel,f,gridDimX,gridDimY,gridDimZ,blockDimX,blockDimY,blockDimZ,sharedMemBytes,hStream,kernelParams);
     return res;
 }

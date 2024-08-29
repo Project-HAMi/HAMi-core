@@ -42,12 +42,15 @@ int pidfound;
 
 int ctx_activate[32];
 
-static shared_region_info_t region_info = {0, -1, PTHREAD_ONCE_INIT, NULL};
+static shared_region_info_t region_info = {0, -1, PTHREAD_ONCE_INIT, NULL, 0};
 //size_t initial_offset=117440512;
 int env_utilization_switch;
 int enable_active_oom_killer;
 int context_size;
 size_t initial_offset=0;
+//lock for record kernel time
+pthread_mutex_t _kernel_mutex;
+int _record_kernel_interval = 1;
 
 // forwards
 void clear_proc_slot_nolock(int32_t, int);
@@ -241,6 +244,32 @@ int active_oom_killer() {
     }
     return 0;
 }
+
+void pre_launch_kernel() {
+    uint64_t now = time(NULL);
+    pthread_mutex_lock(&_kernel_mutex);
+    if (now - region_info.last_kernel_time < _record_kernel_interval) {
+        pthread_mutex_unlock(&_kernel_mutex);
+        return;
+    }
+    region_info.last_kernel_time = now;
+    pthread_mutex_unlock(&_kernel_mutex);
+    LOG_INFO("write last kernel time: %ld", now)
+    lock_shrreg();
+    if (region_info.shared_region->last_kernel_time < now) {
+        region_info.shared_region->last_kernel_time = now;
+    }
+    unlock_shrreg();
+}
+
+int shrreg_major_version() {
+    return MAJOR_VERSION;
+}
+
+int shrreg_minor_version() {
+    return MINOR_VERSION;
+}
+
 
 size_t get_gpu_memory_monitor(const int dev) {
     LOG_DEBUG("get_gpu_memory_monitor dev=%d",dev);
@@ -653,6 +682,7 @@ void try_create_shrreg() {
 
     region_info.pid = getpid();
     region_info.fd = -1;
+    region_info.last_kernel_time = time(NULL);
 
     umask(0);
 
@@ -695,6 +725,8 @@ void try_create_shrreg() {
     put_device_info();
     if (region->initialized_flag != 
           MULTIPROCESS_SHARED_REGION_MAGIC_FLAG) {
+        region->major_version = MAJOR_VERSION;
+        region->minor_version = MINOR_VERSION;
         do_init_device_memory_limits(
             region->limit, CUDA_DEVICE_MAX_COUNT);
         do_init_device_sm_limits(
@@ -711,6 +743,13 @@ void try_create_shrreg() {
             region->priority = atoi(getenv(CUDA_TASK_PRIORITY_ENV));
         region->initialized_flag = MULTIPROCESS_SHARED_REGION_MAGIC_FLAG;
     } else {
+        if (region->major_version != MAJOR_VERSION || 
+                region->minor_version != MINOR_VERSION) {
+            LOG_ERROR("The current version number %d.%d"
+                    " is different from the file's version number %d.%d",
+                    MAJOR_VERSION, MINOR_VERSION,
+                    region->major_version, region->minor_version);
+        }
         uint64_t local_limits[CUDA_DEVICE_MAX_COUNT];
         do_init_device_memory_limits(local_limits, CUDA_DEVICE_MAX_COUNT);
         int i;
@@ -731,6 +770,7 @@ void try_create_shrreg() {
             }
         }
     }
+    region->last_kernel_time = region_info.last_kernel_time;
     if (lockf(fd, F_ULOCK, SHARED_REGION_SIZE_MAGIC) != 0) {
         LOG_ERROR("Fail to unlock shrreg %s: errno=%d", shr_reg_file, errno);
     }
@@ -738,6 +778,11 @@ void try_create_shrreg() {
 }
 
 void initialized() {
+    pthread_mutex_init(&_kernel_mutex, NULL);
+    char* _record_kernel_interval_env = getenv("RECORD_KERNEL_INTERVAL");
+    if (_record_kernel_interval_env) {
+        _record_kernel_interval = atoi(_record_kernel_interval_env);
+    }
     try_create_shrreg();
     init_proc_slot_withlock();
 }

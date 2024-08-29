@@ -55,18 +55,23 @@
 
 #define FACTOR 32
 
+#define MAJOR_VERSION 1
+#define MINOR_VERSION 1
+
 typedef struct {
     uint64_t context_size;
     uint64_t module_size;
     uint64_t data_size;
     uint64_t offset;
     uint64_t total;
+    uint64_t unused[3];
 } device_memory_t;
 
 typedef struct {
     uint64_t dec_util;
     uint64_t enc_util;
     uint64_t sm_util;
+    uint64_t unused[3];
 } device_util_t;
 
 typedef struct {
@@ -76,12 +81,15 @@ typedef struct {
     uint64_t monitorused[CUDA_DEVICE_MAX_COUNT];
     device_util_t device_util[CUDA_DEVICE_MAX_COUNT];
     int32_t status;
+    uint64_t unused[3];
 } shrreg_proc_slot_t;
 
 typedef char uuid[96];
 
 typedef struct {
     int32_t initialized_flag;
+    uint32_t major_version;
+    uint32_t minor_version;
     int32_t sm_init_flag;
     size_t owner_pid;
     sem_t sem;
@@ -94,6 +102,8 @@ typedef struct {
     int utilization_switch;
     int recent_kernel;
     int priority;
+    uint64_t last_kernel_time;
+    uint64_t unused[4];
 } shared_region_t;
 
 typedef struct {
@@ -101,6 +111,7 @@ typedef struct {
     int fd;
     pthread_once_t init_status;
     shared_region_t* shared_region; 
+    uint64_t last_kernel_time; // cache for current process
 } shared_region_info_t;
 
 
@@ -138,6 +149,11 @@ int rm_gpu_device_memory_usage(int32_t pid,int dev,size_t usage,int type);
 
 shrreg_proc_slot_t *find_proc_by_hostpid(int hostpid);
 int active_oom_killer();
+
+void pre_launch_kernel();
+
+int shrreg_major_version();
+int shrreg_minor_version();
 
 //void inc_current_device_memory_usage(const int dev, const uint64_t usage);
 //void decl_current_device_memory_usage(const int dev, const uint64_t usage);

@@ -18,6 +18,8 @@ add_library(${LIBVGPU} SHARED libvgpu.c utils.c $<TARGET_OBJECTS:nvml_mod> $<TAR
 target_compile_options(${LIBVGPU} PUBLIC ${LIBRARY_COMPILE_FLAGS})
 target_link_libraries(${LIBVGPU} PUBLIC -lcuda -lnvidia-ml)
 
+if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
 add_custom_target(strip_symbol ALL
     COMMAND strip -x ${CMAKE_BINARY_DIR}/lib${LIBVGPU}.so
     DEPENDS ${LIBVGPU})
+endif()
