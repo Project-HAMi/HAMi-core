@@ -12,22 +12,22 @@ CUresult cuEventDestroy_v2 ( CUevent hEvent ){
 }
 
 CUresult cuModuleLoad ( CUmodule* module, const char* fname ){
-    LOG_WARN(" cuModuleLoad fname=%s",fname);
+    LOG_DEBUG(" cuModuleLoad fname=%s",fname);
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuModuleLoad,module,fname);
 }
 
 CUresult cuModuleLoadData( CUmodule* module, const void* image){
-    LOG_WARN("cuModuleLoadData module=%p",module);
+    LOG_DEBUG("cuModuleLoadData module=%p",module);
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuModuleLoadData,module,image);
 }
 
 CUresult cuModuleLoadDataEx ( CUmodule* module, const void* image, unsigned int  numOptions, CUjit_option* options, void** optionValues ){
-    LOG_WARN("cuModuleLoadDataEx module=%p",module);
+    LOG_DEBUG("cuModuleLoadDataEx module=%p",module);
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuModuleLoadDataEx,module,image,numOptions,options,optionValues);
 }
 
 CUresult cuModuleLoadFatBinary ( CUmodule* module, const void* fatCubin ){
-    LOG_WARN("cuModuleLoadFatBinary module=%p",module);
+    LOG_DEBUG("cuModuleLoadFatBinary module=%p",module);
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuModuleLoadFatBinary,module,fatCubin);
 }
 
@@ -57,31 +57,31 @@ CUresult CUDAAPI cuModuleGetSurfRef(CUsurfref *pSurfRef, CUmodule hmod, const ch
 }
 
 CUresult cuLinkAddData_v2 ( CUlinkState state, CUjitInputType type, void* data, size_t size, const char* name, unsigned int  numOptions, CUjit_option* options, void** optionValues ) {
-    LOG_WARN("into cuLinkAddData_v2");
+    LOG_DEBUG("into cuLinkAddData_v2");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuLinkAddData_v2,state,type,data,size,name,numOptions,options,optionValues);
 }
 
 CUresult cuLinkCreate_v2 ( unsigned int  numOptions, CUjit_option* options, void** optionValues, CUlinkState* stateOut ) {
-    LOG_WARN("into cuLinkCreate_v2");
+    LOG_DEBUG("into cuLinkCreate_v2");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuLinkCreate_v2,numOptions,options,optionValues,stateOut);
 }
 
 CUresult CUDAAPI
 cuLinkAddFile_v2(CUlinkState state, CUjitInputType type, const char *path,
     unsigned int numOptions, CUjit_option *options, void **optionValues) {
-    LOG_WARN("cuLinkAddFile_v2");
+    LOG_DEBUG("cuLinkAddFile_v2");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuLinkAddFile_v2,state,type,path,numOptions,options,optionValues);
     }
 
 CUresult CUDAAPI
 cuLinkComplete(CUlinkState state, void **cubinOut, size_t *sizeOut) {
-    LOG_WARN("cuLinkComplete");
+    LOG_DEBUG("cuLinkComplete");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuLinkComplete,state,cubinOut,sizeOut);
 }
 
 CUresult CUDAAPI
 cuLinkDestroy(CUlinkState state) {
-    LOG_WARN("cuLinkDestroy");
+    LOG_DEBUG("cuLinkDestroy");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuLinkDestroy,state);
 }
 

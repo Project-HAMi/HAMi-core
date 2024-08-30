@@ -25,7 +25,7 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
 
 
 CUresult cuDevicePrimaryCtxSetFlags_v2( CUdevice dev, unsigned int  flags ){
-    LOG_WARN("into cuDevicePrimaryCtxSetFlags dev=%d flags=%d",dev,flags);
+    LOG_DEBUG("into cuDevicePrimaryCtxSetFlags dev=%d flags=%d",dev,flags);
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxSetFlags_v2,dev,flags);
 }
 
@@ -41,13 +41,13 @@ CUresult cuCtxGetDevice(CUdevice* device) {
 }
 
 CUresult cuCtxCreate_v2 ( CUcontext* pctx, unsigned int  flags, CUdevice dev ){
-    LOG_WARN("into cuCtxCreate pctx=%p flags=%d dev=%d",pctx,flags,dev);
+    LOG_DEBUG("into cuCtxCreate pctx=%p flags=%d dev=%d",pctx,flags,dev);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxCreate_v2,pctx,flags,dev);
     return res;
 }
 
 CUresult cuCtxDestroy_v2 ( CUcontext ctx ){
-    LOG_WARN("into cuCtxDestroy_v2 ctx=%p",ctx);
+    LOG_DEBUG("into cuCtxDestroy_v2 ctx=%p",ctx);
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxDestroy_v2,ctx);
 }
 
@@ -61,7 +61,7 @@ CUresult cuCtxGetApiVersion ( CUcontext ctx, unsigned int* version ){
 }
 
 CUresult cuCtxGetCacheConfig ( CUfunc_cache* pconfig ){
-    LOG_WARN("into cuCtxGetCacheConfig");
+    LOG_DEBUG("into cuCtxGetCacheConfig");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxGetCacheConfig,pconfig);
 }
 
@@ -71,24 +71,24 @@ CUresult cuCtxGetCurrent ( CUcontext* pctx ){
 }
 
 CUresult cuCtxGetFlags ( unsigned int* flags ){
-    LOG_WARN("into cuCtxGetFlags flags=%p",flags);
+    LOG_DEBUG("into cuCtxGetFlags flags=%p",flags);
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxGetFlags,flags);
 }
 
 CUresult cuCtxGetLimit ( size_t* pvalue, CUlimit limit ){
-    LOG_WARN("into cuCtxGetLimit pvalue=%p",pvalue);
+    LOG_DEBUG("into cuCtxGetLimit pvalue=%p",pvalue);
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxGetLimit,pvalue,limit);
 }
 
 CUresult cuCtxGetSharedMemConfig ( CUsharedconfig* pConfig ){
-    LOG_WARN("cuCtxGetSharedMemConfig pConfig=%p",pConfig);
+    LOG_DEBUG("cuCtxGetSharedMemConfig pConfig=%p",pConfig);
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxGetSharedMemConfig,pConfig);
 }
 
 CUresult cuCtxGetStreamPriorityRange ( int* leastPriority, int* greatestPriority ){
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxGetStreamPriorityRange,leastPriority,greatestPriority);
     if (res!=CUDA_SUCCESS){
-        LOG_WARN("cuCtxGetStreamPriorityRange err=%d",res);
+        LOG_ERROR("cuCtxGetStreamPriorityRange err=%d",res);
     }
     return res;
 }
@@ -104,25 +104,25 @@ CUresult cuCtxPushCurrent_v2 ( CUcontext ctx ){
 }
 
 CUresult cuCtxSetCacheConfig ( CUfunc_cache config ){
-    LOG_WARN("cuCtxSetCacheConfig config=%d",config);
+    LOG_DEBUG("cuCtxSetCacheConfig config=%d",config);
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxSetCacheConfig,config);
 }
 
 CUresult cuCtxSetCurrent ( CUcontext ctx ){
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxSetCurrent,ctx);
     if (res!=CUDA_SUCCESS){
-        LOG_WARN("cuCtxSetCurrent failed res=%d",res);
+        LOG_ERROR("cuCtxSetCurrent failed res=%d",res);
     }
     return res;
 }
 
 CUresult cuCtxSetLimit ( CUlimit limit, size_t value ){
-    LOG_WARN("cuCtxSetLimit");
+    LOG_DEBUG("cuCtxSetLimit");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxSetLimit,limit,value);
 }
 
 CUresult cuCtxSetSharedMemConfig ( CUsharedconfig config ){
-    LOG_WARN("cuCtxSetSharedMemConfig");
+    LOG_DEBUG("cuCtxSetSharedMemConfig");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxSetSharedMemConfig,config);
 }
 
