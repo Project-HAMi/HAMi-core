@@ -53,10 +53,10 @@ struct region_list_struct{
 };
 typedef struct region_list_struct region_list;
 
-region_list *r_list;
-allocated_list *device_overallocated;
-allocated_list *array_list;
-pthread_mutex_t mutex;
+extern region_list *r_list;
+extern allocated_list *device_overallocated;
+extern allocated_list *array_list;
+extern pthread_mutex_t mutex;
 
 #define LIST_INIT(list) {   \
     list->head=NULL;         \
