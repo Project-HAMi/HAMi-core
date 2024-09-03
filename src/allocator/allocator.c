@@ -9,6 +9,10 @@ size_t IPCSIZE = 2097152;
 size_t OVERSIZE = 134217728;
 //int pidfound;
 
+region_list *r_list;
+allocated_list *device_overallocated;
+allocated_list *array_list;
+
 
 #define ALIGN       2097152
 #define MULTI_PARAM 1
