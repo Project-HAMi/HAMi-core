@@ -3,5 +3,4 @@ COPY . /libvgpu
 WORKDIR /libvgpu
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get -y update; apt-get -y install cmake
-RUN rm -r ./build
 RUN bash ./build.sh
