@@ -65,13 +65,13 @@ CUresult cuDeviceGetUuid(CUuuid* uuid,CUdevice dev) {
 }
 
 CUresult cuDeviceGetDefaultMemPool(CUmemoryPool *pool_out, CUdevice dev) {
-    LOG_WARN("cuDeviceGetDefaultMemPool");
+    LOG_DEBUG("cuDeviceGetDefaultMemPool");
     return CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGetDefaultMemPool,
                          pool_out, dev);
 }
 
 CUresult cuDeviceGetMemPool(CUmemoryPool *pool, CUdevice dev){
-    LOG_WARN("cuDeviceGetMemPool");
+    LOG_DEBUG("cuDeviceGetMemPool");
     return CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGetMemPool, pool, dev);
 }
 
@@ -105,16 +105,16 @@ CUresult cuDriverGetVersion(int *driverVersion) {
 }
 
 CUresult cuDeviceGetTexture1DLinearMaxWidth(size_t *maxWidthInElements, CUarray_format format, unsigned numChannels, CUdevice dev){
-    LOG_WARN("cuDeviceGetTexture1DLinearMaxWidth");
+    LOG_DEBUG("cuDeviceGetTexture1DLinearMaxWidth");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuDeviceGetTexture1DLinearMaxWidth,maxWidthInElements,format,numChannels,dev);
 }
 
 CUresult cuDeviceSetMemPool(CUdevice dev, CUmemoryPool pool) {
-    LOG_WARN("cuDeviceSetMemPool");
+    LOG_DEBUG("cuDeviceSetMemPool");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuDeviceSetMemPool,dev,pool);
 }
 
 CUresult cuFlushGPUDirectRDMAWrites(CUflushGPUDirectRDMAWritesTarget target, CUflushGPUDirectRDMAWritesScope scope) {
-   LOG_WARN("cuFlushGPUDirectRDMAWrites");
+   LOG_DEBUG("cuFlushGPUDirectRDMAWrites");
    return CUDA_OVERRIDE_CALL(cuda_library_entry,cuFlushGPUDirectRDMAWrites,target,scope);
 }

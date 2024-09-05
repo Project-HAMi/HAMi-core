@@ -110,7 +110,7 @@ nvmlReturn_t set_task_pid() {
         do{
             res = nvmlDeviceGetComputeRunningProcesses(device, &previous, tmp_pids_on_device);
             if ((res != NVML_SUCCESS) && (res != NVML_ERROR_INSUFFICIENT_SIZE)) {
-                LOG_WARN("Device2GetComputeRunningProcesses failed %d,%d\n",res,i);
+                LOG_ERROR("Device2GetComputeRunningProcesses failed %d,%d\n",res,i);
                 return res;
             }
         }while(res==NVML_ERROR_INSUFFICIENT_SIZE); 
@@ -129,7 +129,7 @@ nvmlReturn_t set_task_pid() {
         do{
             res = nvmlDeviceGetComputeRunningProcesses(device, &running_processes, tmp_pids_on_device);
             if ((res != NVML_SUCCESS) && (res != NVML_ERROR_INSUFFICIENT_SIZE)) {
-                LOG_WARN("Device2GetComputeRunningProcesses failed %d\n",res);
+                LOG_ERROR("Device2GetComputeRunningProcesses failed %d\n",res);
                 return res;
             }
         }while(res == NVML_ERROR_INSUFFICIENT_SIZE);
@@ -143,7 +143,7 @@ nvmlReturn_t set_task_pid() {
     }
     unsigned int hostpid = getextrapid(previous,running_processes,pre_pids_on_device,pids_on_device); 
     if (hostpid==0) {
-        LOG_WARN("host pid is error!");
+        LOG_ERROR("host pid is error!");
         return NVML_ERROR_DRIVER_NOT_LOADED;
     }
     LOG_INFO("hostPid=%d",hostpid);
@@ -180,7 +180,7 @@ int parse_cuda_visible_env() {
     for (i=0;i<16;i++){
         LOG_INFO("device %d -> %d",i,cuda_to_nvml_map[i]);
     }
-    LOG_WARN("get default cuda from %s",getenv("CUDA_VISIBLE_DEVICES"));
+    LOG_DEBUG("get default cuda from %s",getenv("CUDA_VISIBLE_DEVICES"));
     return count;
 }
 
@@ -214,7 +214,7 @@ int need_cuda_virtualize() {
     if (res != CUDA_SUCCESS) {
         return 1;
     }
-    LOG_WARN("count1=%d",count1);
+    LOG_DEBUG("count1=%d",count1);
     if (fromenv ==count1) {
         return 1;
     }
