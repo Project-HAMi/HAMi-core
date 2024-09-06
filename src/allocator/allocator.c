@@ -9,6 +9,9 @@ size_t IPCSIZE = 2097152;
 size_t OVERSIZE = 134217728;
 //int pidfound;
 
+region_list *r_list;
+allocated_list *device_overallocated;
+allocated_list *array_list;
 
 #define ALIGN       2097152
 #define MULTI_PARAM 1
@@ -21,6 +24,7 @@ extern CUresult cuMemoryAllocate(CUdeviceptr* dptr, size_t bytesize, size_t* byt
 extern CUresult cuMemoryFree(CUdeviceptr dptr);
 
 pthread_once_t allocator_allocate_flag = PTHREAD_ONCE_INIT;
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 size_t round_up(size_t size,size_t unit){
     if (size & (unit-1))
