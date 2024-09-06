@@ -583,7 +583,17 @@ CUresult cuMemMap( CUdeviceptr ptr, size_t size, size_t offset, CUmemGenericAllo
 
 CUresult  cuMemAllocAsync(CUdeviceptr *dptr, size_t bytesize, CUstream hStream) {
     LOG_DEBUG("cuMemAllocAsync:%ld",bytesize);
-    return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemAllocAsync,dptr,bytesize,hStream);
+    return allocate_async_raw(dptr,bytesize,hStream);
+}
+
+CUresult  cuMemFreeAsync(CUdeviceptr dptr, CUstream hStream) {
+    LOG_DEBUG("cuMemFreeAsync dptr=%llx",dptr);
+    if (dptr == 0) {  // NULL
+        return CUDA_SUCCESS;
+    }
+    CUresult res = free_raw_async(dptr,hStream);
+    LOG_DEBUG("after free_raw_async dptr=%p res=%d",(void *)dptr,res);
+    return res;
 }
 
 CUresult cuMemHostGetDevicePointer_v2(CUdeviceptr *pdptr, void *p, unsigned int Flags){
