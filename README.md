@@ -4,7 +4,7 @@
 
 HAMi-core is the in-container gpu resource controller, it has beed adopted by [HAMi](https://github.com/HAMi-project/HAMi), [volcano](https://github.com/volcano-sh/devices)
 
-<img src="./docs/images/hami-arch.jpg" width = "600" /> 
+<img src="./docs/images/hami-arch.png" width = "600" /> 
 
 ## Features
 
