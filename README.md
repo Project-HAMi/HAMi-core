@@ -26,13 +26,13 @@ HAMi-core operates by Hijacking the API-call between CUDA-Runtime(libcudart.so) 
 ## Build
 
 ```bash
-sh build.sh
+make
 ```
 
 ## Build in Docker
 
 ```bash
-docker build . -f dockerfiles/Dockerfile
+make build-in-docker
 ```
 
 ## Usage
