@@ -150,7 +150,7 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
       res = nvmlDeviceGetProcessUtilization(device,processes_sample,&processes_num,microsec);
       LOG_DEBUG("processes_num=%d\n",processes_num);
       LOG_DEBUG("Device UUID: %s\n", uuid);
-      if (res==NVML_ERROR_INSUFFICIENT_SIZE){
+      if ((res==NVML_ERROR_INSUFFICIENT_SIZE) || (res==NVML_ERROR_NOT_FOUND)){
         userutil[cudadev] = 0;
         for (i=0; i<infcount; i++){
           proc = find_proc_by_hostpid(infos[i].pid);
