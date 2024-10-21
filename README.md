@@ -12,6 +12,7 @@ HAMi-core has the following features:
 1. Virtualize device meory
 
 ![image](docs/images/sample_nvidia-smi.png)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi-core.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi-core?ref=badge_shield)
 
 2. Limit device utilization by self-implemented time shard
 
@@ -80,3 +81,7 @@ Use environment variable LIBCUDA_LOG_LEVEL to set the visibility of logs
 ```bash
 ./test/test_alloc
 ```
+
+
+## License
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi-core.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi-core?ref=badge_large)
