@@ -131,6 +131,7 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
       sum=0;
       summonitor=0;
       shrreg_proc_slot_t *proc;
+      userutil[cudadev] = 0;
       cudadev = nvml_to_cuda_map((unsigned int)(devi));
       if (cudadev<0)
         continue;
