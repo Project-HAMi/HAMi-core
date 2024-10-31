@@ -274,11 +274,12 @@ void load_nvml_libraries() {
     char driver_filename[FILENAME_MAX];
     int i;
 
-    if (real_dlsym==NULL){
-        LOG_WARN("Warning dlsym not found before libraries load")
-        real_dlsym = _dl_sym(RTLD_NEXT, "dlsym", dlsym);
+    if (real_dlsym == NULL) {
+        real_dlsym = dlvsym(RTLD_NEXT,"dlsym","GLIBC_2.2.5");
         if (real_dlsym == NULL) {
-            LOG_ERROR("real dlsym not found");
+            real_dlsym = _dl_sym(RTLD_NEXT, "dlsym", dlsym);
+            if (real_dlsym == NULL)
+                LOG_ERROR("real dlsym not found");
         }
     }
     snprintf(driver_filename, FILENAME_MAX - 1, "%s", "libnvidia-ml.so.1");
