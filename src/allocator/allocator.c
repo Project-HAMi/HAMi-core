@@ -196,13 +196,6 @@ int free_raw(CUdeviceptr dptr){
     return tmp;
 }
 
-int free_raw_async(CUdeviceptr dptr, CUstream hStream){
-    pthread_mutex_lock(&mutex);
-    unsigned int tmp = remove_chunk_async(device_overallocated,dptr,hStream);
-    pthread_mutex_unlock(&mutex);
-    return tmp;
-}
-
 int remove_chunk_async(allocated_list *a_list, CUdeviceptr dptr, CUstream hStream){
     size_t t_size;
     if (a_list->length==0) {
@@ -224,10 +217,9 @@ int remove_chunk_async(allocated_list *a_list, CUdeviceptr dptr, CUstream hStrea
     return -1;
 }
 
-int allocate_async_raw(CUdeviceptr *dptr, size_t size, CUstream hStream){
-    int tmp;
+int free_raw_async(CUdeviceptr dptr, CUstream hStream){
     pthread_mutex_lock(&mutex);
-    tmp = add_chunk_async(dptr,size,hStream);
+    unsigned int tmp = remove_chunk_async(device_overallocated,dptr,hStream);
     pthread_mutex_unlock(&mutex);
     return tmp;
 }
@@ -256,3 +248,12 @@ int add_chunk_async(CUdeviceptr *address,size_t size, CUstream hStream){
     add_gpu_device_memory_usage(getpid(),dev,allocsize,2);
     return 0;
 }
+
+int allocate_async_raw(CUdeviceptr *dptr, size_t size, CUstream hStream){
+    int tmp;
+    pthread_mutex_lock(&mutex);
+    tmp = add_chunk_async(dptr,size,hStream);
+    pthread_mutex_unlock(&mutex);
+    return tmp;
+}
+
