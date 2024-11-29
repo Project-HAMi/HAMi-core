@@ -134,6 +134,7 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
       cudadev = nvml_to_cuda_map((unsigned int)(devi));
       if (cudadev<0)
         continue;
+      userutil[cudadev] = 0;
       nvmlDevice_t device;
       char uuid[NVML_DEVICE_UUID_BUFFER_SIZE];
       CHECK_NVML_API(nvmlDeviceGetHandleByIndex(cudadev, &device));
