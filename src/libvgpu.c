@@ -240,8 +240,10 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuModuleGetFunction);
     DLSYM_HOOK_FUNC(cuModuleUnload);
     DLSYM_HOOK_FUNC(cuModuleGetGlobal_v2);
-    // DLSYM_HOOK_FUNC(cuModuleGetTexRef);
-    // DLSYM_HOOK_FUNC(cuModuleGetSurfRef);
+#ifdef HOOK_CUDA_DEPRECATED_ENABLE
+    DLSYM_HOOK_FUNC(cuModuleGetTexRef);
+    DLSYM_HOOK_FUNC(cuModuleGetSurfRef);
+#endif
     DLSYM_HOOK_FUNC(cuLinkAddData_v2);
     DLSYM_HOOK_FUNC(cuLinkCreate_v2);
     DLSYM_HOOK_FUNC(cuLinkAddFile_v2);
