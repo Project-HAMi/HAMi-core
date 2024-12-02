@@ -1,58 +1,58 @@
-# HAMi-core —— Hook library for CUDA Environments
+# HAMi-core —— CUDA 环境的 Hook 库
 
-English | [中文](README_CN.md)
+[English](README.md) | 中文
 
-## Introduction
+## 介绍
 
-HAMi-core is the in-container gpu resource controller, it has beed adopted by [HAMi](https://github.com/Project-HAMi/HAMi), [volcano](https://github.com/volcano-sh/devices)
+HAMi-core 是一个容器内的 GPU 资源控制器，已被 [HAMi](https://github.com/Project-HAMi/HAMi) 和 [volcano](https://github.com/volcano-sh/devices) 等项目采用。
 
 <img src="./docs/images/hami-arch.png" width = "600" /> 
 
-## Features
+## 特性
 
-HAMi-core has the following features:
-1. Virtualize device meory
-2. Limit device utilization by self-implemented time shard
-3. Real-time device utilization monitor 
+HAMi-core 具有以下特性：
+1. GPU 显存虚拟化
+2. 通过自实现的时间片方式限制设备利用率
+3. 实时设备利用率监控
 
 ![image](docs/images/sample_nvidia-smi.png)
 
-## Design
+## 设计原理
 
-HAMi-core operates by Hijacking the API-call between CUDA-Runtime(libcudart.so) and CUDA-Driver(libcuda.so), as the figure below:
+HAMi-core 通过劫持 CUDA-Runtime(libcudart.so) 和 CUDA-Driver(libcuda.so) 之间的 API 调用来实现功能，如下图所示：
 
 <img src="./docs/images/hami-core-position.png" width = "400" />
 
-## Build in Docker
+## 在Docker中编译
 
 ```bash
 make build-in-docker
 ```
 
-## Usage
+## 使用方法
 
-_CUDA_DEVICE_MEMORY_LIMIT_ indicates the upper limit of device memory (eg 1g,1024m,1048576k,1073741824) 
+_CUDA_DEVICE_MEMORY_LIMIT_ 用于指定设备内存的上限（例如：1g、1024m、1048576k、1073741824）
 
-_CUDA_DEVICE_SM_LIMIT_ indicates the sm utility percentage of each device
+_CUDA_DEVICE_SM_LIMIT_ 用于指定每个设备的 SM 利用率百分比
 
 ```bash
-# Add 1GiB memory limit and set max SM utility to 50% for all devices
+# 为挂载的设备添加 1GiB 内存限制并将最大 SM 利用率设置为 50%
 export LD_PRELOAD=./libvgpu.so
 export CUDA_DEVICE_MEMORY_LIMIT=1g
 export CUDA_DEVICE_SM_LIMIT=50
 ```
 
-## Docker Images
+## Docker镜像使用
 
 ```bash
-# Build docker image
+# 构建 Docker 镜像
 docker build . -f=dockerfiles/Dockerfile -t cuda_vmem:tf1.8-cu90
 
-# Configure GPU device and library mounts for container
+# 配置容器的 GPU 设备和库挂载选项
 export DEVICE_MOUNTS="--device /dev/nvidia0:/dev/nvidia0 --device /dev/nvidia-uvm:/dev/nvidia-uvm --device /dev/nvidiactl:/dev/nvidiactl"
 export LIBRARY_MOUNTS="-v /usr/cuda_files:/usr/cuda_files -v $(which nvidia-smi):/bin/nvidia-smi"
 
-# Run container and check nvidia-smi output
+# 运行容器并查看 nvidia-smi 输出
 docker run ${LIBRARY_MOUNTS} ${DEVICE_MOUNTS} -it \
     -e CUDA_DEVICE_MEMORY_LIMIT=2g \
     -e LD_PRELOAD=/libvgpu/build/libvgpu.so \
@@ -60,7 +60,7 @@ docker run ${LIBRARY_MOUNTS} ${DEVICE_MOUNTS} -it \
     nvidia-smi
 ```
 
-After running, you will see nvidia-smi output similar to the following, showing memory limited to 2GiB:
+运行后，您将看到类似以下的 nvidia-smi 输出，显示内存被限制在 2GiB：
 
 ```
 ...
@@ -87,19 +87,18 @@ Mon Dec  2 04:38:12 2024
 [HAMI-core Msg(1:140235494377280:multiprocess_memory_limit.c:497)]: Calling exit handler 1
 ```
 
-## Log
+## 日志级别
 
-Use environment variable LIBCUDA_LOG_LEVEL to set the visibility of logs
+使用环境变量 LIBCUDA_LOG_LEVEL 来设置日志的可见性
 
-| LIBCUDA_LOG_LEVEL | description |
+| LIBCUDA_LOG_LEVEL | 描述 |
 | ----------------- | ----------- |
-|  0          | errors only |
-|  1(default),2          | errors,warnings,messages |
-|  3                | infos,errors,warnings,messages |
-|  4                | debugs,errors,warnings,messages |
+|  0          | 仅错误信息 |
+|  1(默认),2   | 错误、警告和消息 |
+|  3          | 信息、错误、警告和消息 |
+|  4          | 调试、错误、警告和消息 |
 
-## Test Raw APIs
+## 测试原始API
 
 ```bash
 ./test/test_alloc
-```
