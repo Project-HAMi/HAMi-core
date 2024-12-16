@@ -314,16 +314,18 @@ void nvml_preInit() {
 void nvml_postInit() {
 }
 
-nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,nvmlMemory_t* memory,int version) {
+nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device, void* memory_p, int version) {
     unsigned int dev_id;
     LOG_DEBUG("into nvmlDeviceGetMemoryInfo");
 
+    nvmlMemory_t* memory = (nvmlMemory_t*)memory_p;
+
     switch (version){
         case 1:
-            CHECK_NVML_API(NVML_OVERRIDE_CALL(nvml_library_entry,nvmlDeviceGetMemoryInfo, device, memory));
+            CHECK_NVML_API(NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetMemoryInfo, device, memory));
             break;
         case 2:
-            CHECK_NVML_API(NVML_OVERRIDE_CALL(nvml_library_entry,nvmlDeviceGetMemoryInfo_v2, device, (nvmlMemory_v2_t *)memory));
+            CHECK_NVML_API(NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetMemoryInfo_v2, device, (nvmlMemory_v2_t *)memory));
     }
     LOG_DEBUG("origin_free=%lld total=%lld\n",memory->free,memory->total);
     CHECK_NVML_API(nvmlDeviceGetIndex(device, &dev_id));
