@@ -93,7 +93,7 @@ typedef struct {
     int32_t sm_init_flag;
     size_t owner_pid;
     sem_t sem;
-    uint64_t num;
+    uint64_t device_num;
     uuid uuids[CUDA_DEVICE_MAX_COUNT];
     uint64_t limit[CUDA_DEVICE_MAX_COUNT];
     uint64_t sm_limit[CUDA_DEVICE_MAX_COUNT];
@@ -143,7 +143,7 @@ int set_env_utilization_switch();
 
 int set_gpu_device_memory_monitor(int32_t pid,int dev,size_t monitor);
 int set_gpu_device_sm_utilization(int32_t pid,int dev, unsigned int smUtil);
-int init_gpu_device_sm_utilization();
+int init_gpu_device_utilization();
 int add_gpu_device_memory_usage(int32_t pid,int dev,size_t usage,int type);
 int rm_gpu_device_memory_usage(int32_t pid,int dev,size_t usage,int type);
 
@@ -172,6 +172,7 @@ void suspend_all();
 void resume_all();
 int wait_status_self(int status);
 int wait_status_all(int status);
+void print_all();
 
 int load_env_from_file(char *filename);
 int comparelwr(const char *s1,char *s2);
