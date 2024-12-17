@@ -1,0 +1,68 @@
+on:
+  push:
+    branches:
+      - main
+    tags-ignore:
+      - "**"
+
+name: on-commit-to-main
+
+jobs:
+  send-pull-requests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Checkout everything to get access to the tags
+          ref: ${{github.event.pull_request.head.ref}}
+          repository: ${{github.event.pull_request.head.repo.full_name}}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Send pull-request
+        run: |
+          LATEST_TAG=$(git describe --tags --always --abbrev=0)
+          REPOSITORY="wawa0210/HAMi"
+          FOLDER="bin/$REPOSITORY"
+          BRANCH_NAME="sync-submodule-$LATEST_TAG"
+
+          # Clone the remote repository and change working directory to the
+          # folder it was cloned to.
+          git clone \
+            --depth=1 \
+            --branch=main \
+            https://some-user:${{ secrets.ACCESS_TOKEN }}@github.com/$REPOSITORY \
+            $FOLDER
+
+          cd $FOLDER
+
+          # Setup the committers identity.
+          git config user.email "xiozhang0210@hotmail.com"
+          git config user.name "wawa0210"
+
+          # Create a new feature branch for the changes.
+          git checkout -b $BRANCH_NAME
+
+          # Update the submodule to the latest version.
+
+          git submodule add https://github.com/wawa0210/HAMi-core libvgpu
+
+          git submodule update --init --recursive
+
+          # Commit the changes and push the feature branch to origin
+          git add .
+          git commit -m "sync git submodule to $LATEST_TAG"
+          git push origin $BRANCH_NAME
+
+          # Store the PAT in a file that can be accessed by the
+          # GitHub CLI.
+          echo "${{ secrets.ACCESS_TOKEN }}" > token.txt
+
+          # Authorize GitHub CLI for the current repository and
+          # create a pull-requests containing the updates.
+          gh auth login --with-token < token.txt
+          gh pr create \
+            --body "" \
+            --title "chore: update scripts to $LATEST_TAG" \
+            --head "$BRANCH_NAME" \
+            --base "main"
