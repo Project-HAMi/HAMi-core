@@ -2,6 +2,7 @@ cmake_minimum_required (VERSION 2.8.11)
 
 project(libvgpu)
 
+
 # Set CUDA_HOME if not defined
 if (NOT DEFINED ENV{CUDA_HOME})
     set(CUDA_HOME /usr/local/cuda)

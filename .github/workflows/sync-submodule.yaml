@@ -1,4 +1,7 @@
 on:
+  # Run this workflow every time a new commit pushed to upstream/fork repository.
+  # Run workflow on fork repository will help contributors find and resolve issues before sending a PR.
+  pull_request:
   push:
     branches:
       - main
@@ -30,7 +33,7 @@ jobs:
           # folder it was cloned to.
           git clone \
             --depth=1 \
-            --branch=main \
+            --branch=master \
             https://some-user:${{ secrets.ACCESS_TOKEN }}@github.com/$REPOSITORY \
             $FOLDER
 
@@ -45,9 +48,11 @@ jobs:
 
           # Update the submodule to the latest version.
 
-          git submodule add https://github.com/wawa0210/HAMi-core libvgpu
+          # git submodule add https://github.com/wawa0210/HAMi-core libvgpu
 
           git submodule update --init --recursive
+
+          git submodule update --remote --recursive
 
           # Commit the changes and push the feature branch to origin
           git add .
@@ -56,11 +61,10 @@ jobs:
 
           # Store the PAT in a file that can be accessed by the
           # GitHub CLI.
-          echo "${{ secrets.ACCESS_TOKEN }}" > token.txt
 
           # Authorize GitHub CLI for the current repository and
           # create a pull-requests containing the updates.
-          gh auth login --with-token < token.txt
+          # gh auth login --with-token < token.txt
           gh pr create \
             --body "" \
             --title "chore: update scripts to $LATEST_TAG" \
