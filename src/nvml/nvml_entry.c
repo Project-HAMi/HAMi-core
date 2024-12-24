@@ -1490,7 +1490,7 @@ nvmlGpuInstanceCreateComputeInstance(nvmlGpuInstance_t gpuInstance,
 }
 
 nvmlReturn_t nvmlGpuInstanceDestroy(nvmlGpuInstance_t gpuInstance) {
-  return NVML_OVERRIDE_CALL(cuda_library_entry, nvmlGpuInstanceDestroy,
+  return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlGpuInstanceDestroy,
                          gpuInstance);
 }
 
