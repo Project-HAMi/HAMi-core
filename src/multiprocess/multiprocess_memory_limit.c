@@ -323,7 +323,7 @@ int set_gpu_device_sm_utilization(int32_t pid,int dev, unsigned int smUtil){  //
     lock_shrreg();
     for (i=0;i<region_info.shared_region->proc_num;i++){
         if (region_info.shared_region->procs[i].hostpid == pid){
-            LOG_INFO("set_gpu_device_sm_utilization:%d %d %lu->%lu",pid,dev,region_info.shared_region->procs[i].device_util[dev].sm_util,smUtil);
+            LOG_INFO("set_gpu_device_sm_utilization:%d %d %lu->%u",pid,dev,region_info.shared_region->procs[i].device_util[dev].sm_util,smUtil);
             region_info.shared_region->procs[i].device_util[dev].sm_util = smUtil;
             break;
         }

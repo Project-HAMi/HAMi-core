@@ -18,7 +18,7 @@
     if ( \
          /*(getenv("LIBCUDA_LOG_LEVEL")==NULL) || */\
          (getenv("LIBCUDA_LOG_LEVEL")!=NULL) && (atoi(getenv("LIBCUDA_LOG_LEVEL"))>=3)) \
-       fprintf(stderr, "[HAMI-core Info(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); }
+       fprintf(stderr, "[HAMI-core Info(%d:%lu:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); }
 
 #define LOG_WARN(msg, ...) { \
     if ( \
