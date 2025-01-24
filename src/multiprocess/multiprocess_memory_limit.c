@@ -119,16 +119,16 @@ size_t get_limit_from_env(const char* env_name) {
     return scaled_res;
 }
 
-int put_device_info() {
+int init_device_info() {
     unsigned int i,nvmlDevicesCount;
     CHECK_NVML_API(nvmlDeviceGetCount_v2(&nvmlDevicesCount));
-    LOG_INFO("put_device_info finished %d",nvmlDevicesCount);
-    region_info.shared_region->num=nvmlDevicesCount;
+    region_info.shared_region->device_num=nvmlDevicesCount;
     nvmlDevice_t dev;
     for(i=0;i<nvmlDevicesCount;i++){
         CHECK_NVML_API(nvmlDeviceGetHandleByIndex(i, &dev));
         CHECK_NVML_API(nvmlDeviceGetUUID(dev,region_info.shared_region->uuids[i],96));
     }
+    LOG_INFO("put_device_info finished %d",nvmlDevicesCount);
     return 0;
 }
 
@@ -332,13 +332,14 @@ int set_gpu_device_sm_utilization(int32_t pid,int dev, unsigned int smUtil){  //
     return 1;
 }
 
-int init_gpu_device_sm_utilization(){
+int init_gpu_device_utilization(){
     int i,dev;
     ensure_initialized();
     lock_shrreg();
     for (i=0;i<region_info.shared_region->proc_num;i++){
         for (dev=0;dev<CUDA_DEVICE_MAX_COUNT;dev++){
             region_info.shared_region->procs[i].device_util[dev].sm_util = 0;
+            region_info.shared_region->procs[i].monitorused[dev] = 0;
             break;
         }
     }
@@ -722,11 +723,11 @@ void try_create_shrreg() {
     if (lockf(fd, F_LOCK, SHARED_REGION_SIZE_MAGIC) != 0) {
         LOG_ERROR("Fail to lock shrreg %s: errno=%d", shr_reg_file, errno);
     }
-    put_device_info();
     if (region->initialized_flag != 
           MULTIPROCESS_SHARED_REGION_MAGIC_FLAG) {
         region->major_version = MAJOR_VERSION;
         region->minor_version = MINOR_VERSION;
+        init_device_info();
         do_init_device_memory_limits(
             region->limit, CUDA_DEVICE_MAX_COUNT);
         do_init_device_sm_limits(
@@ -953,6 +954,17 @@ shrreg_proc_slot_t *find_proc_by_hostpid(int hostpid) {
             return &region_info.shared_region->procs[i];
     }
     return NULL;
+}
+
+void print_all() {
+    int i;
+    LOG_INFO("Total process: %d",region_info.shared_region->proc_num);
+    for (i=0;i<region_info.shared_region->proc_num;i++) {
+        for (int dev=0;dev<CUDA_DEVICE_MAX_COUNT;dev++){
+            LOG_INFO("Process %d hostPid: %d, sm: %d, memory: %d, record: %d",region_info.shared_region->procs[i].pid, region_info.shared_region->procs[i].hostpid, 
+            region_info.shared_region->procs[i].device_util[dev].sm_util, region_info.shared_region->procs[i].monitorused[dev], region_info.shared_region->procs[i].used[dev].total);
+        }
+    }
 }
 
 int comparelwr(const char *s1,char *s2){
