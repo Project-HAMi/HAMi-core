@@ -213,6 +213,7 @@ int remove_chunk_async(allocated_list *a_list, CUdeviceptr dptr, CUstream hStrea
         if (val->entry->address==dptr){
             t_size=val->entry->length;
             cuMemFreeAsync(dptr,hStream);
+            CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemFreeAsync,dptr,hStream);
             LIST_REMOVE(a_list,val);
 
             CUdevice dev;

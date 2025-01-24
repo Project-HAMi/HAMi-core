@@ -308,7 +308,7 @@ CUresult _cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, c
     }
 }
 
-CUresult cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ) {
+CUresult hacked_cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ) {
     LOG_INFO("into cuGetProcAddress symbol=%s:%d",symbol,cudaVersion);
     *pfn = find_symbols_in_table(symbol);
     if (strcmp(symbol,"cuGetProcAddress")==0) {
@@ -340,7 +340,7 @@ CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, c
     } 
 }
 
-CUresult cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags, CUdriverProcAddressQueryResult *symbolStatus){
+CUresult hacked_cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags, CUdriverProcAddressQueryResult *symbolStatus){
     LOG_INFO("into cuGetProcAddress_v2 symbol=%s:%d",symbol,cudaVersion);
     *pfn = find_symbols_in_table(symbol);
     if (strcmp(symbol,"cuGetProcAddress_v2")==0) {
