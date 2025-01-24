@@ -9,80 +9,80 @@
 
 extern int cuda_to_nvml_map[16];
 
-CUresult cuDeviceGetAttribute ( int* pi, CUdevice_attribute attrib, CUdevice dev ) {
+CUresult hacked_cuDeviceGetAttribute ( int* pi, CUdevice_attribute attrib, CUdevice dev ) {
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDeviceGetAttribute,pi,attrib,dev);
     LOG_DEBUG("[%d]cuDeviceGetAttribute dev=%d attrib=%d %d",res,dev,(int)attrib,*pi);
     return res;
 }
 
-CUresult cuDeviceGet(CUdevice *device,int ordinal){
+CUresult hacked_cuDeviceGet(CUdevice *device,int ordinal){
     LOG_DEBUG("into cuDeviceGet ordinal=%d\n",ordinal);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDeviceGet,device,ordinal);
     return res;
 }
 
-CUresult cuDeviceGetCount( int* count ) {
+CUresult hacked_cuDeviceGetCount( int* count ) {
     LOG_DEBUG("into cuDeviceGetCount");
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDeviceGetCount,count);
     LOG_DEBUG("cuDeviceGetCount res=%d count=%d",res,*count);
     return res;
 }
 
-CUresult cuDeviceGetName(char *name, int len, CUdevice dev) {
+CUresult hacked_cuDeviceGetName(char *name, int len, CUdevice dev) {
     LOG_DEBUG("into cuDeviceGetName");
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGetName, name, len, dev);
     return res;
 }
 
-CUresult cuDeviceCanAccessPeer( int* canAccessPeer, CUdevice dev, CUdevice peerDev ) {
+CUresult hacked_cuDeviceCanAccessPeer( int* canAccessPeer, CUdevice dev, CUdevice peerDev ) {
     LOG_INFO("into cuDeviceCanAccessPeer %d %d",dev,peerDev);
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuDeviceCanAccessPeer,canAccessPeer,dev,peerDev);
 }
 
-CUresult cuDeviceGetP2PAttribute(int *value, CUdevice_P2PAttribute attrib,
+CUresult hacked_cuDeviceGetP2PAttribute(int *value, CUdevice_P2PAttribute attrib,
                                  CUdevice srcDevice, CUdevice dstDevice) {
     LOG_DEBUG("into cuDeviceGetP2PAttribute\n");
     return CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGetP2PAttribute, value,
                          attrib, srcDevice, dstDevice);
 }
 
-CUresult cuDeviceGetByPCIBusId(CUdevice *dev, const char *pciBusId) {
+CUresult hacked_cuDeviceGetByPCIBusId(CUdevice *dev, const char *pciBusId) {
     return CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGetByPCIBusId, dev,
                          pciBusId);
 }
 
-CUresult cuDeviceGetPCIBusId(char *pciBusId, int len, CUdevice dev) {
+CUresult hacked_cuDeviceGetPCIBusId(char *pciBusId, int len, CUdevice dev) {
     LOG_INFO("into cuDeviceGetPCIBusId dev=%d len=%d",dev,len);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGetPCIBusId, pciBusId, len,
                         dev);
     return res;
 }
 
-CUresult cuDeviceGetUuid(CUuuid* uuid,CUdevice dev) {
+CUresult hacked_cuDeviceGetUuid(CUuuid* uuid,CUdevice dev) {
     LOG_DEBUG("into cuDeviceGetUuid dev=%d",dev);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDeviceGetUuid,uuid,dev);
     return res;
 }
 
-CUresult cuDeviceGetDefaultMemPool(CUmemoryPool *pool_out, CUdevice dev) {
+CUresult hacked_cuDeviceGetDefaultMemPool(CUmemoryPool *pool_out, CUdevice dev) {
     LOG_DEBUG("cuDeviceGetDefaultMemPool");
     return CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGetDefaultMemPool,
                          pool_out, dev);
 }
 
-CUresult cuDeviceGetMemPool(CUmemoryPool *pool, CUdevice dev){
+CUresult hacked_cuDeviceGetMemPool(CUmemoryPool *pool, CUdevice dev){
     LOG_DEBUG("cuDeviceGetMemPool");
     return CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGetMemPool, pool, dev);
 }
 
-CUresult cuDeviceGetLuid(char *luid, unsigned int *deviceNodeMask,
+CUresult hacked_cuDeviceGetLuid(char *luid, unsigned int *deviceNodeMask,
                          CUdevice dev) {
   LOG_DEBUG("cuDeviceGetLuid");
   return CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGetLuid, luid,
                          deviceNodeMask, dev);
 }
 
-CUresult cuDeviceTotalMem_v2 ( size_t* bytes, CUdevice dev ) {
+CUresult hacked_cuDeviceTotalMem_v2 ( size_t* bytes, CUdevice dev ) {
     LOG_DEBUG("into cuDeviceTotalMem");
     ENSURE_INITIALIZED();
     size_t limit = get_current_device_memory_limit(dev);
@@ -90,7 +90,7 @@ CUresult cuDeviceTotalMem_v2 ( size_t* bytes, CUdevice dev ) {
     return CUDA_SUCCESS;
 }
 
-CUresult cuDriverGetVersion(int *driverVersion) {
+CUresult hacked_cuDriverGetVersion(int *driverVersion) {
     LOG_DEBUG("into cuDriverGetVersion__");
     
     //stub dlsym to prelaod cuda functions
@@ -104,17 +104,17 @@ CUresult cuDriverGetVersion(int *driverVersion) {
     return res;
 }
 
-CUresult cuDeviceGetTexture1DLinearMaxWidth(size_t *maxWidthInElements, CUarray_format format, unsigned numChannels, CUdevice dev){
+CUresult hacked_cuDeviceGetTexture1DLinearMaxWidth(size_t *maxWidthInElements, CUarray_format format, unsigned numChannels, CUdevice dev){
     LOG_DEBUG("cuDeviceGetTexture1DLinearMaxWidth");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuDeviceGetTexture1DLinearMaxWidth,maxWidthInElements,format,numChannels,dev);
 }
 
-CUresult cuDeviceSetMemPool(CUdevice dev, CUmemoryPool pool) {
+CUresult hacked_cuDeviceSetMemPool(CUdevice dev, CUmemoryPool pool) {
     LOG_DEBUG("cuDeviceSetMemPool");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuDeviceSetMemPool,dev,pool);
 }
 
-CUresult cuFlushGPUDirectRDMAWrites(CUflushGPUDirectRDMAWritesTarget target, CUflushGPUDirectRDMAWritesScope scope) {
+CUresult hacked_cuFlushGPUDirectRDMAWrites(CUflushGPUDirectRDMAWritesTarget target, CUflushGPUDirectRDMAWritesScope scope) {
    LOG_DEBUG("cuFlushGPUDirectRDMAWrites");
    return CUDA_OVERRIDE_CALL(cuda_library_entry,cuFlushGPUDirectRDMAWrites,target,scope);
 }
