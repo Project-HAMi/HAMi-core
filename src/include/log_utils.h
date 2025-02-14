@@ -5,35 +5,47 @@
 #include <assert.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <stdlib.h>
+#include <stdio.h>
 
 #ifdef MEMORY_LIMIT_DEBUG
 #define LOG_DEBUG(msg, ...) fprintf(stderr, msg"\n", ##__VA_ARGS__);
 #else
 #define LOG_DEBUG(msg, ...) { \
+    FILE *st=fopen("/tmp/tmp.txt","a"); \ 
     if ((getenv("LIBCUDA_LOG_LEVEL")!=NULL) && (atoi(getenv("LIBCUDA_LOG_LEVEL"))>=4)) \
-       fprintf(stderr, "[HAMI-core Debug(%d:%ld:%s:%d)]: "msg"\n",getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); }
+       fprintf(st, "[HAMI-core Debug(%d:%ld:%s:%d)]: "msg"\n",getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
+    fclose(st); }
 #endif
 
 #define LOG_INFO(msg, ...) { \
+    FILE *st=fopen("/tmp/tmp.txt","a"); \ 
     if ( \
          /*(getenv("LIBCUDA_LOG_LEVEL")==NULL) || */\
          (getenv("LIBCUDA_LOG_LEVEL")!=NULL) && (atoi(getenv("LIBCUDA_LOG_LEVEL"))>=3)) \
-       fprintf(stderr, "[HAMI-core Info(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); }
+       fprintf(st, "[HAMI-core Info(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
+    fclose(st); }
 
 #define LOG_WARN(msg, ...) { \
+    FILE *st=fopen("/tmp/tmp.txt","a"); \ 
     if ( \
         (getenv("LIBCUDA_LOG_LEVEL")==NULL) || \
         ((getenv("LIBCUDA_LOG_LEVEL")!=NULL) && (atoi(getenv("LIBCUDA_LOG_LEVEL"))>=2))) \
-       fprintf(stderr, "[HAMI-core Warn(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); }
+       fprintf(st, "[HAMI-core Warn(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
+    fclose(st); }
 
 #define LOG_MSG(msg, ...) { \
+    FILE *st=fopen("/tmp/tmp.txt","a"); \ 
     if ( \
         (getenv("LIBCUDA_LOG_LEVEL")==NULL) || \
         ((getenv("LIBCUDA_LOG_LEVEL")!=NULL) && (atoi(getenv("LIBCUDA_LOG_LEVEL"))>=2))) \
-       fprintf(stderr, "[HAMI-core Msg(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); }
+       fprintf(st, "[HAMI-core Msg(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
+    fclose(st); }
 
 #define LOG_ERROR(msg, ...) { \
-    fprintf(stderr, "[HAMI-core ERROR (pid:%d thread=%ld %s:%d)]: "msg"\n", getpid(), pthread_self(), basename(__FILE__),__LINE__, ##__VA_ARGS__); \
+    FILE *st=fopen("/tmp/tmp.txt","a"); \ 
+    fprintf(st, "[HAMI-core ERROR (pid:%d thread=%ld %s:%d)]: "msg"\n", getpid(), pthread_self(), basename(__FILE__),__LINE__, ##__VA_ARGS__); \
+    fclose(st); \
 }
 
 #define CHECK_DRV_API(f)  {                   \
