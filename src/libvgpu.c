@@ -20,6 +20,7 @@ extern int set_host_pid(int hostpid);
 extern void allocator_init(void);
 void preInit();
 char *(*real_realpath)(const char *path, char *resolved_path);
+void *vgpulib;
 
 pthread_once_t pre_cuinit_flag = PTHREAD_ONCE_INIT;
 pthread_once_t post_cuinit_flag = PTHREAD_ONCE_INIT;
@@ -79,7 +80,9 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
     LOG_DEBUG("into dlsym %s",symbol);
     if (real_dlsym == NULL) {
         real_dlsym = dlvsym(RTLD_NEXT,"dlsym","GLIBC_2.2.5");
+        vgpulib = dlopen("/usr/local/vgpu/libvgpu.so",RTLD_LAZY);
         if (real_dlsym == NULL) {
+            LOG_ERROR("real dlsym not found");
             real_dlsym = _dl_sym(RTLD_NEXT, "dlsym", dlsym);
             if (real_dlsym == NULL)
                 LOG_ERROR("real dlsym not found");
@@ -99,9 +102,18 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
     }
     if (symbol[0] == 'c' && symbol[1] == 'u') {
         pthread_once(&pre_cuinit_flag,(void(*)(void))preInit);
-        void* f = __dlsym_hook_section(handle, symbol);
-        if (f != NULL)
+        void *f = real_dlsym(vgpulib,symbol);
+        if (f!=NULL)
             return f;
+        /*
+        void* f = __dlsym_hook_section(handle, symbol);
+        if (f != NULL) {
+            void *ff = dlopen("/models/half_plus_two_gpu/libvgpu.so",RTLD_LAZY);
+            f = real_dlsym(ff,symbol);
+            LOG_WARN("f=%p %p",f,cuInit);
+            //cuInit(0);
+            return f;
+        }*/
     }
 #ifdef HOOK_NVML_ENABLE
     if (symbol[0] == 'n' && symbol[1] == 'v' &&

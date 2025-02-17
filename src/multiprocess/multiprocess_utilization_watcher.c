@@ -120,16 +120,16 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
 
     int i,sum=0;
     unsigned int infcount;
-    size_t summonitor=0;
     nvmlProcessInfo_v1_t infos[SHARED_REGION_MAX_PROCESS_NUM];
 
     unsigned int nvmlCounts;
     CHECK_NVML_API(nvmlDeviceGetCount(&nvmlCounts));
+    lock_shrreg();
 
     int devi,cudadev;
     for (devi=0;devi<nvmlCounts;devi++){
       sum=0;
-      summonitor=0;
+      infcount = SHARED_REGION_MAX_PROCESS_NUM;
       shrreg_proc_slot_t *proc;
       cudadev = nvml_to_cuda_map((unsigned int)(devi));
       if (cudadev<0)
@@ -138,52 +138,39 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
       nvmlDevice_t device;
       char uuid[NVML_DEVICE_UUID_BUFFER_SIZE];
       CHECK_NVML_API(nvmlDeviceGetHandleByIndex(cudadev, &device));
-        // Get device UUID
-     CHECK_NVML_API(nvmlDeviceGetUUID(device, uuid, NVML_DEVICE_UUID_BUFFER_SIZE));
+
+      //Get Memory for container
       nvmlReturn_t res = nvmlDeviceGetComputeRunningProcesses(device,&infcount,infos);
-      if (res==NVML_ERROR_INSUFFICIENT_SIZE){
-        continue;
+      if (res == NVML_SUCCESS) {
+        for (i=0; i<infcount; i++){
+          proc = find_proc_by_hostpid(infos[i].pid);
+          if (proc != NULL){
+              LOG_DEBUG("pid=%u monitor=%lld\n", infos[i].pid, infos[i].usedGpuMemory);
+              proc->monitorused[cudadev] += infos[i].usedGpuMemory;
+          }
+        }
       }
+      // Get SM util for container
+
       gettimeofday(&cur,NULL);
       microsec = (cur.tv_sec - 1) * 1000UL * 1000UL + cur.tv_usec;
       nvmlProcessUtilizationSample_t processes_sample[SHARED_REGION_MAX_PROCESS_NUM];
       unsigned int processes_num = SHARED_REGION_MAX_PROCESS_NUM;
       res = nvmlDeviceGetProcessUtilization(device,processes_sample,&processes_num,microsec);
-      LOG_DEBUG("processes_num=%d\n",processes_num);
-      LOG_DEBUG("Device UUID: %s\n", uuid);
-      if ((res==NVML_ERROR_INSUFFICIENT_SIZE) || (res==NVML_ERROR_NOT_FOUND)){
-        userutil[cudadev] = 0;
-        for (i=0; i<infcount; i++){
-          proc = find_proc_by_hostpid(infos[i].pid);
-          if (proc != NULL){
-              LOG_DEBUG("pid=%u monitor=%lld\n",infos[i].pid,infos[i].usedGpuMemory);
-              summonitor += infos[i].usedGpuMemory;
-          }
-          set_gpu_device_memory_monitor(infos[i].pid,cudadev,summonitor);
-          set_gpu_device_sm_utilization(infos[i].pid,cudadev,0);
-        } 
-        continue;
-      }
-      for (i=0; i<processes_num; i++){
-          //if (processes_sample[i].timeStamp >= microsec){
+      if (res == NVML_SUCCESS) {
+        for (i=0; i<processes_num; i++){
           proc = find_proc_by_hostpid(processes_sample[i].pid);
           if (proc != NULL){
-              //LOG_WARN("pid=%u num=%d\n",processes_sample[i].pid,processes_num);
-              //proc = find_proc_by_hostpid(processes_sample[i].pid);
-              //if (proc!=NULL) {
-              //    printf("inner pid=%u\n",proc->pid);
               sum += processes_sample[i].smUtil;
-              summonitor += infos[i].usedGpuMemory;
-              //LOG_WARN("monitorused=%lld %d %d %d",infos[i].usedGpuMemory,proc->hostpid,proc->pid,pidfound);
-              //LOG_WARN("smutil=%d %d %lu %u %u %u\n",virtual_map[devi],devi,summonitor,processes_sample[i].smUtil,processes_sample[i].encUtil,processes_sample[i].decUtil);
-              //}
+              LOG_DEBUG("pid=%u smUtil=%d\n", processes_sample[i].pid, processes_sample[i].smUtil);
+              proc->device_util[cudadev].sm_util += processes_sample[i].smUtil;
           }
-          set_gpu_device_memory_monitor(processes_sample[i].pid,cudadev,summonitor);
-          set_gpu_device_sm_utilization(processes_sample[i].pid,cudadev,processes_sample[i].smUtil);
+        }
       }
       if (sum < 0)
         sum = 0;
       userutil[cudadev] = sum;
+      unlock_shrreg();
     }
     return 0;
 }
@@ -194,6 +181,7 @@ void* utilization_watcher() {
     int sysprocnum;
     int share = 0;
     int upper_limit = get_current_device_sm_limit(0);
+    ensure_initialized();
     LOG_DEBUG("upper_limit=%d\n",upper_limit);
     while (1){
         nanosleep(&g_wait, NULL);
@@ -202,7 +190,7 @@ void* utilization_watcher() {
           if (pidfound==0)
             continue;
         }
-        init_gpu_device_sm_utilization();
+        init_gpu_device_utilization();
         get_used_gpu_utilization(userutil,&sysprocnum);
         //if (sysprocnum == 1 &&
         //    userutil < upper_limit / 10) {
