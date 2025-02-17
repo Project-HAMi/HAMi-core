@@ -26,15 +26,15 @@
 
 static int g_sm_num;
 static int g_max_thread_per_sm;
-static volatile int g_cur_cuda_cores = 0;
-static volatile int g_total_cuda_cores = 0;
+static volatile long g_cur_cuda_cores = 0;
+static volatile long g_total_cuda_cores = 0;
 extern int pidfound;
 int cuda_to_nvml_map[16];
 
 void rate_limiter(int grids, int blocks) {
-  int before_cuda_cores = 0;
-  int after_cuda_cores = 0;
-  int kernel_size = grids;
+  long before_cuda_cores = 0;
+  long after_cuda_cores = 0;
+  long kernel_size = grids;
 
   while (get_recent_kernel()<0) {
     sleep(1);
@@ -45,12 +45,12 @@ void rate_limiter(int grids, int blocks) {
   if (get_utilization_switch()==0)
       return;
   LOG_DEBUG("grid: %d, blocks: %d", grids, blocks);
-  LOG_DEBUG("launch kernel %d, curr core: %d", kernel_size, g_cur_cuda_cores);
+  LOG_DEBUG("launch kernel %ld, curr core: %ld", kernel_size, g_cur_cuda_cores);
   //if (g_vcuda_config.enable) {
     do {
 CHECK:
       before_cuda_cores = g_cur_cuda_cores;
-      LOG_DEBUG("current core: %d", g_cur_cuda_cores);
+      LOG_DEBUG("current core: %ld", g_cur_cuda_cores);
       if (before_cuda_cores < 0) {
         nanosleep(&g_cycle, NULL);
         goto CHECK;
@@ -60,10 +60,10 @@ CHECK:
   //}
 }
 
-static void change_token(int delta) {
+static void change_token(long delta) {
   int cuda_cores_before = 0, cuda_cores_after = 0;
 
-  LOG_DEBUG("delta: %d, curr: %d", delta, g_cur_cuda_cores);
+  LOG_DEBUG("delta: %ld, curr: %ld", delta, g_cur_cuda_cores);
   do {
     cuda_cores_before = g_cur_cuda_cores;
     cuda_cores_after = cuda_cores_before + delta;
@@ -74,22 +74,22 @@ static void change_token(int delta) {
   } while (!CAS(&g_cur_cuda_cores, cuda_cores_before, cuda_cores_after));
 }
 
-int delta(int up_limit, int user_current, int share) {
+long delta(int up_limit, int user_current, long share) {
   int utilization_diff =
       abs(up_limit - user_current) < 5 ? 5 : abs(up_limit - user_current);
-  int increment =
-      g_sm_num * g_sm_num * g_max_thread_per_sm * utilization_diff / 2560;
-    
+  long increment =
+      (long)g_sm_num * (long)g_sm_num * (long)g_max_thread_per_sm * (long)utilization_diff / 2560;
+
   /* Accelerate cuda cores allocation when utilization vary widely */
   if (utilization_diff > up_limit / 2) {
     increment = increment * utilization_diff * 2 / (up_limit + 1);
   }
 
   if (user_current <= up_limit) {
-    share = share + increment > g_total_cuda_cores ? g_total_cuda_cores
-                                                   : share + increment;
+    share = (share + increment) > g_total_cuda_cores ? g_total_cuda_cores
+                                                   : (share + increment);
   } else {
-    share = share - increment < 0 ? 0 : share - increment;
+    share = (share - increment) < 0 ? 0 : (share - increment);
   }
 
   return share;
@@ -136,7 +136,6 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
         continue;
       userutil[cudadev] = 0;
       nvmlDevice_t device;
-      char uuid[NVML_DEVICE_UUID_BUFFER_SIZE];
       CHECK_NVML_API(nvmlDeviceGetHandleByIndex(cudadev, &device));
 
       //Get Memory for container
@@ -172,6 +171,7 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
       userutil[cudadev] = sum;
       unlock_shrreg();
     }
+    unlock_shrreg();
     return 0;
 }
 
@@ -179,7 +179,7 @@ void* utilization_watcher() {
     nvmlInit();
     int userutil[CUDA_DEVICE_MAX_COUNT];
     int sysprocnum;
-    int share = 0;
+    long share = 0;
     int upper_limit = get_current_device_sm_limit(0);
     ensure_initialized();
     LOG_DEBUG("upper_limit=%d\n",upper_limit);
@@ -202,9 +202,11 @@ void* utilization_watcher() {
           g_total_cuda_cores *= 2;
           share = g_total_cuda_cores;
         }
-        share = delta(upper_limit, userutil[0], share);
-        LOG_DEBUG("userutil=%d currentcores=%d total=%d limit=%d share=%d\n",userutil[0],g_cur_cuda_cores,g_total_cuda_cores,upper_limit,share);
-        change_token(share);
+        if ((userutil[0]<=100) && (userutil[0]>=0)){
+          share = delta(upper_limit, userutil[0], share);
+          change_token(share);
+        }
+        LOG_INFO("userutil1=%d currentcores=%ld total=%ld limit=%d share=%ld\n",userutil[0],g_cur_cuda_cores,g_total_cuda_cores,upper_limit,share);
     }
 }
 

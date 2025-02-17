@@ -172,6 +172,7 @@ void suspend_all();
 void resume_all();
 int wait_status_self(int status);
 int wait_status_all(int status);
+void print_all();
 
 int load_env_from_file(char *filename);
 int comparelwr(const char *s1,char *s2);

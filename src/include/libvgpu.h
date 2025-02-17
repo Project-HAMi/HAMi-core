@@ -34,7 +34,11 @@ extern void* _dl_sym(void*, const char*, void*);
 #if defined(DLSYM_HOOK_DEBUG)
 #define DLSYM_HOOK_FUNC(f)                                       \
     if (0 == strcmp(symbol, #f)) {                               \
-        LOG_DEBUG("Detect dlsym for %s\n", #f);                     \
+        LOG_DEBUG("Detect dlsym for %s\n", #f);                  \
+        return (void*) f; }                                      \
+
+#define DLSYM_HOOK_FUNC_REPLACE(f)                               \
+    if (0 == strcmp(symbol, hacked_#f)) {                        \
         return (void*) f; }                                      \
 
 #else 
@@ -42,6 +46,10 @@ extern void* _dl_sym(void*, const char*, void*);
 #define DLSYM_HOOK_FUNC(f)                                       \
     if (0 == strcmp(symbol, #f)) {                               \
         return (void*) f; }                                      \
+
+#define DLSYM_HOOK_FUNC_REPLACE(f)                               \
+    if (0 == strcmp(symbol, #f)) {                        \
+        return (void*) hacked_##f; }                                      \
 
 #endif     
 
