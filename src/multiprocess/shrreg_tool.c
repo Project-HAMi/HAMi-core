@@ -51,11 +51,6 @@ void send_resume_signal(){
     }
 }
 
-void print_shared_region(){
-    ensure_initialized();
-    print_all();
-}
-
 int main(int argc, char* argv[]) {
 	int k;
     if (argc > 1 && strcmp(argv[1], "--help") == 0) {

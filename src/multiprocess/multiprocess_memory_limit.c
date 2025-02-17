@@ -968,16 +968,6 @@ shrreg_proc_slot_t *find_proc_by_hostpid(int hostpid) {
     return NULL;
 }
 
-void print_all() {
-    int i;
-    LOG_INFO("Total process: %d",region_info.shared_region->proc_num);
-    for (i=0;i<region_info.shared_region->proc_num;i++) {
-        for (int dev=0;dev<CUDA_DEVICE_MAX_COUNT;dev++){
-            LOG_INFO("Process %d hostPid: %d, sm: %d, memory: %d, record: %d",region_info.shared_region->procs[i].pid, region_info.shared_region->procs[i].hostpid, 
-            region_info.shared_region->procs[i].device_util[dev].sm_util, region_info.shared_region->procs[i].monitorused[dev], region_info.shared_region->procs[i].used[dev].total);
-        }
-    }
-}
 
 int comparelwr(const char *s1,char *s2){
     if ((s1==NULL) || (s2==NULL))
