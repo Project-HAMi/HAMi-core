@@ -105,15 +105,6 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
         void *f = real_dlsym(vgpulib,symbol);
         if (f!=NULL)
             return f;
-        /*
-        void* f = __dlsym_hook_section(handle, symbol);
-        if (f != NULL) {
-            void *ff = dlopen("/models/half_plus_two_gpu/libvgpu.so",RTLD_LAZY);
-            f = real_dlsym(ff,symbol);
-            LOG_WARN("f=%p %p",f,cuInit);
-            //cuInit(0);
-            return f;
-        }*/
     }
 #ifdef HOOK_NVML_ENABLE
     if (symbol[0] == 'n' && symbol[1] == 'v' &&
