@@ -122,6 +122,7 @@ size_t get_limit_from_env(const char* env_name) {
 int init_device_info() {
     unsigned int i,nvmlDevicesCount;
     CHECK_NVML_API(nvmlDeviceGetCount_v2(&nvmlDevicesCount));
+    LOG_INFO("put_device_info finished %d",nvmlDevicesCount);
     region_info.shared_region->device_num=nvmlDevicesCount;
     nvmlDevice_t dev;
     for(i=0;i<nvmlDevicesCount;i++){
@@ -633,6 +634,16 @@ void init_proc_slot_withlock() {
     unlock_shrreg();
 }
 
+void print_all() {
+    int i;
+    LOG_INFO("Total process: %d",region_info.shared_region->proc_num);
+    for (i=0;i<region_info.shared_region->proc_num;i++) {
+        for (int dev=0;dev<CUDA_DEVICE_MAX_COUNT;dev++){
+            LOG_INFO("Process %d hostPid: %d, sm: %d, memory: %d, record: %d",region_info.shared_region->procs[i].pid, region_info.shared_region->procs[i].hostpid, 
+            region_info.shared_region->procs[i].device_util[dev].sm_util, region_info.shared_region->procs[i].monitorused[dev], region_info.shared_region->procs[i].used[dev].total);
+        }
+    }
+}
 
 void child_reinit_flag() {
     LOG_DEBUG("Detect child pid: %d -> %d", region_info.pid, getpid());   
@@ -723,6 +734,7 @@ void try_create_shrreg() {
     if (lockf(fd, F_LOCK, SHARED_REGION_SIZE_MAGIC) != 0) {
         LOG_ERROR("Fail to lock shrreg %s: errno=%d", shr_reg_file, errno);
     }
+    //put_device_info();
     if (region->initialized_flag != 
           MULTIPROCESS_SHARED_REGION_MAGIC_FLAG) {
         region->major_version = MAJOR_VERSION;
@@ -956,16 +968,6 @@ shrreg_proc_slot_t *find_proc_by_hostpid(int hostpid) {
     return NULL;
 }
 
-void print_all() {
-    int i;
-    LOG_INFO("Total process: %d",region_info.shared_region->proc_num);
-    for (i=0;i<region_info.shared_region->proc_num;i++) {
-        for (int dev=0;dev<CUDA_DEVICE_MAX_COUNT;dev++){
-            LOG_INFO("Process %d hostPid: %d, sm: %d, memory: %d, record: %d",region_info.shared_region->procs[i].pid, region_info.shared_region->procs[i].hostpid, 
-            region_info.shared_region->procs[i].device_util[dev].sm_util, region_info.shared_region->procs[i].monitorused[dev], region_info.shared_region->procs[i].used[dev].total);
-        }
-    }
-}
 
 int comparelwr(const char *s1,char *s2){
     if ((s1==NULL) || (s2==NULL))

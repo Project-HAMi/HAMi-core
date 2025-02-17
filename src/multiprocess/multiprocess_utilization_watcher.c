@@ -124,7 +124,6 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
 
     unsigned int nvmlCounts;
     CHECK_NVML_API(nvmlDeviceGetCount(&nvmlCounts));
-
     lock_shrreg();
 
     int devi,cudadev;
@@ -139,7 +138,7 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
       nvmlDevice_t device;
       CHECK_NVML_API(nvmlDeviceGetHandleByIndex(cudadev, &device));
 
-      // Get Memory for container
+      //Get Memory for container
       nvmlReturn_t res = nvmlDeviceGetComputeRunningProcesses(device,&infcount,infos);
       if (res == NVML_SUCCESS) {
         for (i=0; i<infcount; i++){
@@ -150,8 +149,8 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
           }
         }
       }
-
       // Get SM util for container
+
       gettimeofday(&cur,NULL);
       microsec = (cur.tv_sec - 1) * 1000UL * 1000UL + cur.tv_usec;
       nvmlProcessUtilizationSample_t processes_sample[SHARED_REGION_MAX_PROCESS_NUM];
@@ -167,10 +166,10 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
           }
         }
       }
-      
       if (sum < 0)
         sum = 0;
       userutil[cudadev] = sum;
+      unlock_shrreg();
     }
     unlock_shrreg();
     return 0;
@@ -182,7 +181,6 @@ void* utilization_watcher() {
     int sysprocnum;
     long share = 0;
     int upper_limit = get_current_device_sm_limit(0);
-
     ensure_initialized();
     LOG_DEBUG("upper_limit=%d\n",upper_limit);
     while (1){

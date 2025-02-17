@@ -68,6 +68,9 @@ int main(int argc, char* argv[]) {
         if (strcmp(arg, "--suspend") == 0){
             send_stop_signal();
         }
+        if (strcmp(arg, "--print") == 0){
+            print_shared_region();
+        }
         if (strcmp(arg, "--resume") == 0){
             send_resume_signal();
         }
