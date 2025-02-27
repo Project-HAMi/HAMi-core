@@ -100,7 +100,9 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
         return h;
     }
     if (symbol[0] == 'c' && symbol[1] == 'u') {
-        pthread_once(&pre_cuinit_flag,(void(*)(void))preInit);
+        //Compatible with cuda 12.8+ fix
+        if (strcmp(symbol,"cuGetExportTable")!=0)
+            pthread_once(&pre_cuinit_flag,(void(*)(void))preInit);
         void *f = real_dlsym(vgpulib,symbol);
         if (f!=NULL)
             return f;
@@ -841,7 +843,7 @@ void preInit(){
     }
     real_realpath = NULL;
     load_cuda_libraries();
-    nvmlInit();
+    //nvmlInit();
     ENSURE_INITIALIZED();
 }
 
