@@ -703,7 +703,7 @@ void try_create_shrreg() {
         shr_reg_file = MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT;
     }
     // Initialize NVML BEFORE!! open it
-    nvmlInit();
+    //nvmlInit();
 
     /* If you need sm modification, do it here */
     /* ... set_sm_scale */
@@ -739,7 +739,7 @@ void try_create_shrreg() {
           MULTIPROCESS_SHARED_REGION_MAGIC_FLAG) {
         region->major_version = MAJOR_VERSION;
         region->minor_version = MINOR_VERSION;
-        init_device_info();
+        //init_device_info();
         do_init_device_memory_limits(
             region->limit, CUDA_DEVICE_MAX_COUNT);
         do_init_device_sm_limits(
