@@ -104,7 +104,7 @@ int add_chunk(CUdeviceptr *address,size_t size){
     CUdevice dev;
     cuCtxGetDevice(&dev);
     if (oom_check(dev,size))
-        return -1;
+        return CUDA_ERROR_OUT_OF_MEMORY;
     
     allocated_list_entry *e;
     INIT_ALLOCATED_LIST_ENTRY(e,addr,size);
