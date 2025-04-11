@@ -2,6 +2,7 @@
 #include <string.h>
 #include <dirent.h>
 #include <ctype.h>
+#include <time.h>
 #include "include/utils.h"
 #include "include/log_utils.h"
 #include "include/nvml_prefix.h"
@@ -11,32 +12,43 @@
 #include "multiprocess/multiprocess_memory_limit.h"
 
 const char* unified_lock="/tmp/vgpulock/lock";
+const int retry_count=20;
 extern int context_size;
 extern int cuda_to_nvml_map[16];
 
-
+// 0 unified_lock lock success
+// -1 unified_lock lock fail
 int try_lock_unified_lock() {
+    // initialize the random number seed
+    srand(time(NULL));
     int fd = open(unified_lock,O_CREAT | O_EXCL,S_IRWXU);
     int cnt = 0;
-    LOG_INFO("try_lock_unified_lock:%d",fd);
-    while (fd == -1) {
-        if (cnt == 20) {
+    while (fd == -1 && cnt <= retry_count) {
+        if (cnt == retry_count) {
             LOG_MSG("unified_lock expired,removing...");
-            remove("/tmp/vgpulock/lock");
+            int res = remove(unified_lock);
+            LOG_MSG("remove unified_lock:%d",res);
         }else{
-            LOG_MSG("unified_lock locked, waiting 1 second...")
+            LOG_MSG("unified_lock locked, waiting 1 second...");
             sleep(rand()%5 + 1);
         }
         cnt++;
         fd = open(unified_lock,O_CREAT | O_EXCL,S_IRWXU); 
     }
-    return 0;
+    LOG_INFO("try_lock_unified_lock:%d",fd);
+    if (fd != -1) {
+        close(fd);
+        return 0;
+    }
+    return -1;
 }
 
+// 0 unified_lock unlock success
+// -1 unified_lock unlock fail
 int try_unlock_unified_lock() {
     int res = remove(unified_lock);
     LOG_INFO("try unlock_unified_lock:%d",res);
-    return 0;
+    return res == 0 ? 0 : -1;
 }
 
 int mergepid(unsigned int *prev, unsigned int *current, nvmlProcessInfo_t1 *sub, nvmlProcessInfo_t1 *merged) {
