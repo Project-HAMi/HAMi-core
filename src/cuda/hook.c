@@ -1,6 +1,8 @@
 #include "include/libcuda_hook.h"
 #include <string.h>
 #include "include/libvgpu.h"
+#include "include/multi_func_hook.h"
+
 
 typedef void* (*fp_dlsym)(void*, const char*);
 extern fp_dlsym real_dlsym;
@@ -273,6 +275,31 @@ void load_cuda_libraries() {
 }
 
 
+// find func by cuda version
+const char* get_real_func_name(const char* base_name,int cuda_version) {
+  int i = 0;
+  for (i = 0; i < sizeof(g_func_map)/sizeof(g_func_map[0]); ++i) {
+    CudaFuncMapEntry *entry = &g_func_map[i];
+    // check fun name
+    if (strcmp(entry->func_name, base_name) != 0) continue;
+    // check cuda version
+    if (cuda_version >= entry->min_ver && cuda_version <= entry->max_ver) {
+      return entry->real_name;
+    }
+  }
+  return NULL; // if not found
+}
+
+void* find_real_symbols_in_table(const char *symbol) {
+  void *pfn;
+  //this symbol always has suffix like _v2,_v3
+  pfn = __dlsym_hook_section(NULL,symbol);
+  if (pfn!=NULL) {
+    return pfn;
+  }
+  return NULL;
+}
+
 void *find_symbols_in_table(const char *symbol) {
     char symbol_v[500];
     void *pfn;
@@ -294,11 +321,25 @@ void *find_symbols_in_table(const char *symbol) {
     return NULL;
 }
 
+void *find_symbols_in_table_by_cudaversion(const char *symbol,int  cudaVersion) {
+  void *pfn;
+  const char *real_symbol;
+  real_symbol = get_real_func_name(symbol,cudaVersion);
+  if (real_symbol == NULL) {
+    // if not find in mulit func version def, use origin logic
+    pfn = find_symbols_in_table(symbol);
+  } else {
+    pfn = find_real_symbols_in_table(real_symbol);
+  }
+  return pfn;
+}
+
+
 CUresult (*cuGetProcAddress_real) ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ); 
 
 CUresult _cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ) {
     LOG_INFO("into _cuGetProcAddress symbol=%s:%d",symbol,cudaVersion);
-    *pfn = find_symbols_in_table(symbol);
+    *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
     if (*pfn==NULL){
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress,symbol,pfn,cudaVersion,flags);
         return res;
@@ -310,7 +351,7 @@ CUresult _cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, c
 
 CUresult cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ) {
     LOG_INFO("into cuGetProcAddress symbol=%s:%d",symbol,cudaVersion);
-    *pfn = find_symbols_in_table(symbol);
+    *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
     if (strcmp(symbol,"cuGetProcAddress")==0) {
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress,symbol,pfn,cudaVersion,flags); 
         if (res==CUDA_SUCCESS) {
@@ -330,7 +371,7 @@ CUresult cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cu
 
 CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags, CUdriverProcAddressQueryResult *symbolStatus){
     LOG_INFO("into _cuGetProcAddress_v2 symbol=%s:%d",symbol,cudaVersion);
-    *pfn = find_symbols_in_table(symbol);
+    *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
     if (*pfn==NULL){
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress_v2,symbol,pfn,cudaVersion,flags,symbolStatus);
         return res;
@@ -342,7 +383,7 @@ CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, c
 
 CUresult cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags, CUdriverProcAddressQueryResult *symbolStatus){
     LOG_INFO("into cuGetProcAddress_v2 symbol=%s:%d",symbol,cudaVersion);
-    *pfn = find_symbols_in_table(symbol);
+    *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
     if (strcmp(symbol,"cuGetProcAddress_v2")==0) {
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress_v2,symbol,pfn,cudaVersion,flags,symbolStatus); 
         if (res==CUDA_SUCCESS) {
