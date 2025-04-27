@@ -25,6 +25,12 @@ CUresult cuGraphAddMemcpyNode(CUgraphNode *phGraphNode, CUgraph hGraph, const CU
 	return CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphAddMemcpyNode,phGraphNode,hGraph,dependencies,numDependencies,copyParams,ctx);
 }
 
+CUresult cuGraphAddMemAllocNode(CUgraphNode *phGraphNode, CUgraph hGraph, const CUgraphNode *dependencies,
+                                size_t numDependencies, CUDA_MEM_ALLOC_NODE_PARAMS *nodeParams) {
+        LOG_INFO("call in cuGraphAddMemAllocNode");
+        return CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphAddMemAllocNode,phGraphNode,hGraph,dependencies,numDependencies,nodeParams);
+}
+
 CUresult cuGraphMemcpyNodeGetParams(CUgraphNode hNode, CUDA_MEMCPY3D *nodeParams) {
 	LOG_DEBUG("cuGraphMemcpyNodeGetParams");
 	return CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphMemcpyNodeGetParams,hNode,nodeParams);

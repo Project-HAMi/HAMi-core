@@ -300,6 +300,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuGraphMemcpyNodeGetParams);
     DLSYM_HOOK_FUNC(cuGraphMemcpyNodeSetParams);
     DLSYM_HOOK_FUNC(cuGraphAddMemsetNode);
+    DLSYM_HOOK_FUNC(cuGraphAddMemAllocNode);
     DLSYM_HOOK_FUNC(cuGraphMemsetNodeGetParams);
     DLSYM_HOOK_FUNC(cuGraphMemsetNodeSetParams);
     DLSYM_HOOK_FUNC(cuGraphAddHostNode);
