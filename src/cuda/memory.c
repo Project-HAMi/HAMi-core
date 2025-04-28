@@ -619,8 +619,9 @@ CUresult cuMemPoolSetAttribute(CUmemoryPool pool, CUmemPool_attribute attr, void
 }
 
 CUresult cuMemPoolGetAttribute(CUmemoryPool pool, CUmemPool_attribute attr, void *value) {
-    LOG_DEBUG("cuMemPoolGetAttribute");
-    return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemPoolGetAttribute,pool,attr,value);
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemPoolGetAttribute,pool,attr,value);
+    LOG_INFO("cuMemPoolGetAttribute %d %ld",attr,*(long *)value);
+    return res;
 }
 
 CUresult cuMemPoolSetAccess(CUmemoryPool pool, const CUmemAccessDesc *map, size_t count) {

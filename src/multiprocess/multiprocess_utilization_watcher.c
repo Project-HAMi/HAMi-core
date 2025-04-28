@@ -29,7 +29,7 @@ static int g_max_thread_per_sm;
 static volatile long g_cur_cuda_cores = 0;
 static volatile long g_total_cuda_cores = 0;
 extern int pidfound;
-int cuda_to_nvml_map[16];
+int cuda_to_nvml_map_array[16];
 
 void rate_limiter(int grids, int blocks) {
   long before_cuda_cores = 0;
@@ -100,10 +100,14 @@ unsigned int nvml_to_cuda_map(unsigned int nvmldev){
     CHECK_NVML_API(nvmlDeviceGetCount_v2(&devcount));
     int i=0;
     for (i=0;i<devcount;i++){
-        if (cuda_to_nvml_map[i]==nvmldev)
+        if (cuda_to_nvml_map(i)==nvmldev)
           return i;
     }
     return -1;
+}
+
+unsigned int cuda_to_nvml_map(unsigned int cudadev){
+    return cuda_to_nvml_map_array[cudadev];
 }
 
 int setspec() {
@@ -144,7 +148,7 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
         for (i=0; i<infcount; i++){
           proc = find_proc_by_hostpid(infos[i].pid);
           if (proc != NULL){
-              LOG_DEBUG("pid=%u monitor=%lld\n", infos[i].pid, infos[i].usedGpuMemory);
+              //LOG_DEBUG("pid=%u monitor=%lld\n", infos[i].pid, infos[i].usedGpuMemory);
               proc->monitorused[cudadev] += infos[i].usedGpuMemory;
           }
         }
@@ -161,7 +165,7 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
           proc = find_proc_by_hostpid(processes_sample[i].pid);
           if (proc != NULL){
               sum += processes_sample[i].smUtil;
-              LOG_DEBUG("pid=%u smUtil=%d\n", processes_sample[i].pid, processes_sample[i].smUtil);
+              //LOG_DEBUG("pid=%u smUtil=%d\n", processes_sample[i].pid, processes_sample[i].smUtil);
               proc->device_util[cudadev].sm_util += processes_sample[i].smUtil;
           }
         }

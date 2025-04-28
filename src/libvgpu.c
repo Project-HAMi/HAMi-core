@@ -30,10 +30,6 @@ pthread_once_t dlsym_init_flag = PTHREAD_ONCE_INIT;
  where to find its core utilization */
 extern int pidfound;
 
-/* cuda_to_nvml_map indicates cuda_visible_devices, we need to map it into nvml_visible_devices, 
-to let device-memory be counted successfully*/
-extern int cuda_to_nvml_map[16];
-
 /* used to switch on/off the core utilization limitation*/
 extern int env_utilization_switch;
 
@@ -848,14 +844,11 @@ void preInit(){
 }
 
 void postInit(){
-    map_cuda_visible_devices();
     allocator_init();
 
     try_lock_unified_lock();
     nvmlReturn_t res = set_task_pid();
     try_unlock_unified_lock();
-
-
     LOG_MSG("Initialized");
     if (res!=NVML_SUCCESS){
         LOG_WARN("SET_TASK_PID FAILED.");
@@ -863,6 +856,8 @@ void postInit(){
     }else{
         pidfound=1;
     }
+
+    map_cuda_visible_devices();
     //add_gpu_device_memory_usage(getpid(),0,context_size,0);
     env_utilization_switch = set_env_utilization_switch();
     init_utilization_watcher();

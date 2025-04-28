@@ -380,8 +380,9 @@ uint64_t nvml_get_device_memory_usage(const int dev) {
     return usage;
 }
 
-int add_gpu_device_memory_usage(int32_t pid,int dev,size_t usage,int type){
-    LOG_INFO("add_gpu_device_memory:%d %d %lu",pid,dev,usage);
+int add_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
+    LOG_INFO("add_gpu_device_memory:%d %d->%d %lu",pid,cudadev,cuda_to_nvml_map(cudadev),usage);
+    int dev = cuda_to_nvml_map(cudadev);
     ensure_initialized();
     lock_shrreg();
     int i;
@@ -408,8 +409,9 @@ int add_gpu_device_memory_usage(int32_t pid,int dev,size_t usage,int type){
     return 0;
 }
 
-int rm_gpu_device_memory_usage(int32_t pid,int dev,size_t usage,int type){
-    LOG_INFO("rm_gpu_device_memory:%d %d %lu",pid,dev,usage);
+int rm_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
+    LOG_INFO("rm_gpu_device_memory:%d %d->%d %lu",pid,cudadev,cuda_to_nvml_map(cudadev),type);
+    int dev = cuda_to_nvml_map(cudadev);
     ensure_initialized();
     lock_shrreg();
     int i;

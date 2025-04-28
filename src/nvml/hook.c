@@ -260,7 +260,7 @@ pthread_once_t init_virtual_map_post_flag = PTHREAD_ONCE_INIT;
 typedef void* (*fp_dlsym)(void*, const char*);
 extern fp_dlsym real_dlsym;
 extern int virtual_nvml_devices;
-extern int cuda_to_nvml_map[16];
+extern int cuda_to_nvml_map_array[16];
 
 nvmlReturn_t nvmlDeviceGetIndex(nvmlDevice_t device, unsigned int *index) {
     return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetIndex, device, index);
@@ -307,7 +307,7 @@ void nvml_preInit() {
     load_nvml_libraries();
     int i;
     for (i=0; i<16; i++) {
-        cuda_to_nvml_map[i] = i;
+        cuda_to_nvml_map_array[i] = i;
     }   
 }
 
