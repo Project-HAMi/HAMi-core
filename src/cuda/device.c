@@ -7,8 +7,6 @@
 #include "allocator/allocator.h"
 #include "include/memory_limit.h"
 
-extern int cuda_to_nvml_map[16];
-
 CUresult cuDeviceGetAttribute ( int* pi, CUdevice_attribute attrib, CUdevice dev ) {
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDeviceGetAttribute,pi,attrib,dev);
     LOG_DEBUG("[%d]cuDeviceGetAttribute dev=%d attrib=%d %d",res,dev,(int)attrib,*pi);

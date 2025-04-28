@@ -178,6 +178,7 @@ int load_env_from_file(char *filename);
 int comparelwr(const char *s1,char *s2);
 int put_device_info();
 unsigned int nvml_to_cuda_map(unsigned int nvmldev);
+unsigned int cuda_to_nvml_map(unsigned int cudadev);
 
 #endif  // __MULTIPROCESS_MEMORY_LIMIT_H__
 

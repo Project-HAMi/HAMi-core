@@ -29,7 +29,7 @@ static int g_max_thread_per_sm;
 static volatile long g_cur_cuda_cores = 0;
 static volatile long g_total_cuda_cores = 0;
 extern int pidfound;
-int cuda_to_nvml_map[16];
+int cuda_to_nvml_map_array[16];
 
 void rate_limiter(int grids, int blocks) {
   long before_cuda_cores = 0;
@@ -100,10 +100,14 @@ unsigned int nvml_to_cuda_map(unsigned int nvmldev){
     CHECK_NVML_API(nvmlDeviceGetCount_v2(&devcount));
     int i=0;
     for (i=0;i<devcount;i++){
-        if (cuda_to_nvml_map[i]==nvmldev)
+        if (cuda_to_nvml_map(i)==nvmldev)
           return i;
     }
     return -1;
+}
+
+unsigned int cuda_to_nvml_map(unsigned int cudadev){
+    return cuda_to_nvml_map_array[cudadev];
 }
 
 int setspec() {
@@ -215,7 +219,7 @@ void init_utilization_watcher() {
     setspec();
     pthread_t tid;
     if ((get_current_device_sm_limit(0)<=100) && (get_current_device_sm_limit(0)>0)){
-        pthread_create(&tid, NULL, utilization_watcher, NULL);
+        //pthread_create(&tid, NULL, utilization_watcher, NULL);
     }
     return;
 }

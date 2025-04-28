@@ -16,7 +16,7 @@ struct allocated_device_memory_struct{
 typedef struct allocated_device_memory_struct allocated_device_memory;
 
 struct allocated_list_entry_struct{
-    allocated_device_memory *entry;;
+    allocated_device_memory *entry;
     struct allocated_list_entry_struct *next,*prev;
 };
 typedef struct allocated_list_entry_struct allocated_list_entry;
@@ -25,6 +25,7 @@ struct allocated_list_struct{
     allocated_list_entry *head;
     allocated_list_entry *tail;
     size_t length;
+    size_t limit;
 };
 typedef struct allocated_list_struct allocated_list;
 
@@ -55,13 +56,14 @@ typedef struct region_list_struct region_list;
 
 extern region_list *r_list;
 extern allocated_list *device_overallocated;
-extern allocated_list *array_list;
+extern allocated_list *device_allocasync;
 extern pthread_mutex_t mutex;
 
 #define LIST_INIT(list) {   \
     list->head=NULL;         \
     list->tail=NULL;         \
     list->length=0;          \
+    list->limit=0;           \
     }
 #define __LIST_INIT(list) LIST_INIT(list)
 

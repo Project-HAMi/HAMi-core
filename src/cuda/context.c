@@ -2,7 +2,6 @@
 #include "multiprocess/multiprocess_memory_limit.h"
 
 extern int context_size;
-extern int cuda_to_nvml_map[16];
 extern int ctx_activate[16];
 
 
