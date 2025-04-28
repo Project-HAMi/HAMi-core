@@ -148,7 +148,7 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
         for (i=0; i<infcount; i++){
           proc = find_proc_by_hostpid(infos[i].pid);
           if (proc != NULL){
-              LOG_DEBUG("pid=%u monitor=%lld\n", infos[i].pid, infos[i].usedGpuMemory);
+              //LOG_DEBUG("pid=%u monitor=%lld\n", infos[i].pid, infos[i].usedGpuMemory);
               proc->monitorused[cudadev] += infos[i].usedGpuMemory;
           }
         }
@@ -165,7 +165,7 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
           proc = find_proc_by_hostpid(processes_sample[i].pid);
           if (proc != NULL){
               sum += processes_sample[i].smUtil;
-              LOG_DEBUG("pid=%u smUtil=%d\n", processes_sample[i].pid, processes_sample[i].smUtil);
+              //LOG_DEBUG("pid=%u smUtil=%d\n", processes_sample[i].pid, processes_sample[i].smUtil);
               proc->device_util[cudadev].sm_util += processes_sample[i].smUtil;
           }
         }
@@ -219,7 +219,7 @@ void init_utilization_watcher() {
     setspec();
     pthread_t tid;
     if ((get_current_device_sm_limit(0)<=100) && (get_current_device_sm_limit(0)>0)){
-        //pthread_create(&tid, NULL, utilization_watcher, NULL);
+        pthread_create(&tid, NULL, utilization_watcher, NULL);
     }
     return;
 }
