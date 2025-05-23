@@ -122,7 +122,6 @@ size_t get_limit_from_env(const char* env_name) {
 int init_device_info() {
     unsigned int i,nvmlDevicesCount;
     CHECK_NVML_API(nvmlDeviceGetCount_v2(&nvmlDevicesCount));
-    LOG_INFO("put_device_info finished %d",nvmlDevicesCount);
     region_info.shared_region->device_num=nvmlDevicesCount;
     nvmlDevice_t dev;
     for(i=0;i<nvmlDevicesCount;i++){
@@ -741,7 +740,6 @@ void try_create_shrreg() {
           MULTIPROCESS_SHARED_REGION_MAGIC_FLAG) {
         region->major_version = MAJOR_VERSION;
         region->minor_version = MINOR_VERSION;
-        //init_device_info();
         do_init_device_memory_limits(
             region->limit, CUDA_DEVICE_MAX_COUNT);
         do_init_device_sm_limits(

@@ -149,11 +149,11 @@ int rm_gpu_device_memory_usage(int32_t pid,int dev,size_t usage,int type);
 
 shrreg_proc_slot_t *find_proc_by_hostpid(int hostpid);
 int active_oom_killer();
-
 void pre_launch_kernel();
 
 int shrreg_major_version();
 int shrreg_minor_version();
+int init_device_info();
 
 //void inc_current_device_memory_usage(const int dev, const uint64_t usage);
 //void decl_current_device_memory_usage(const int dev, const uint64_t usage);

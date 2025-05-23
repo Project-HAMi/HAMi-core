@@ -303,6 +303,7 @@ void load_nvml_libraries() {
 }
 
 void nvml_preInit() {
+    ensure_initialized();
     load_env_from_file(ENV_OVERRIDE_FILE);
     load_nvml_libraries();
     int i;
@@ -312,6 +313,7 @@ void nvml_preInit() {
 }
 
 void nvml_postInit() {
+    init_device_info();
 }
 
 nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,nvmlMemory_t* memory,int version) {
