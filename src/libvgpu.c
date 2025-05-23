@@ -130,6 +130,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     //Context
     DLSYM_HOOK_FUNC(cuCtxGetDevice);
     DLSYM_HOOK_FUNC(cuCtxCreate_v2);
+    DLSYM_HOOK_FUNC(cuCtxCreate_v3);
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxGetState);
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxRetain);
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxSetFlags_v2);
