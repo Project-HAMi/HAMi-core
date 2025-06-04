@@ -356,7 +356,7 @@ nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,nvmlMemory_t* memory,i
             memory->used = usage;
             return NVML_SUCCESS;
         case 2:
-            ((nvmlMemory_v2_t *)memory)->used = usage;
+            ((nvmlMemory_v2_t *)memory)->free = (limit-usage);
             ((nvmlMemory_v2_t *)memory)->total = limit;
             ((nvmlMemory_v2_t *)memory)->used = usage;
             return NVML_SUCCESS;
