@@ -30,6 +30,9 @@ CUresult cuDevicePrimaryCtxSetFlags_v2( CUdevice dev, unsigned int  flags ){
 
 CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRelease_v2,dev);
+    if (ctx_activate[dev] == 1) {
+        rm_gpu_device_memory_usage(getpid(),dev,context_size,0);
+    }
     ctx_activate[dev] = 0;
     return res;
 }
