@@ -499,10 +499,9 @@ CUresult cuMemGetInfo_v2(size_t* free, size_t* total) {
     size_t limit = get_current_device_memory_limit(dev);
     if (limit == 0) {
         CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
-        //LOG_INFO("orig free=%ld total=%ld\n",*free,*total);
-        LOG_INFO("orig free=%ld total=%ld",*free,*total);
-        *free= *total - usage;
-        LOG_INFO("after free=%ld total=%ld",*free,*total);
+        LOG_MSG("orig free=%ld total=%ld",*free,*total);
+        *free = *total - usage;
+        LOG_MSG("after free=%ld total=%ld",*free,*total); 
         return CUDA_SUCCESS;
     } else if (limit < usage) {
         LOG_WARN("limit < usage; usage=%ld, limit=%ld",usage,limit);
@@ -510,8 +509,11 @@ CUresult cuMemGetInfo_v2(size_t* free, size_t* total) {
     } else {
         CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
         LOG_MSG("orig free=%ld total=%ld limit=%ld usage=%ld",*free,*total,limit,usage);
-        *free = limit - usage;
-        *total = limit;
+        // Ensure total memory does not exceed the physical or imposed limit.
+        size_t actual_limit = (limit > *total) ? *total : limit;
+        *free = (actual_limit > usage) ? (actual_limit - usage) : 0;
+        *total = actual_limit;
+        LOG_MSG("after free=%ld total=%ld limit=%ld usage=%ld",*free,*total,limit,usage);
         return CUDA_SUCCESS;
     }
 }
