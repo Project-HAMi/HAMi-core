@@ -7,8 +7,8 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include "fp1_global.h"
 
-FILE *fp1;
 
 #ifdef FILEDEBUG 
 #define LOG_DEBUG(msg, ...) { \
