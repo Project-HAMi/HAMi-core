@@ -7,7 +7,7 @@ build:
 .PHONY: build
 
 build-in-docker:
-	docker run -it --rm \
+	docker run -i --rm \
 		-v $(current_dir):/libvgpu \
 		-w /libvgpu \
 		-e DEBIAN_FRONTEND=noninteractive \
