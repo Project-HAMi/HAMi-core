@@ -126,7 +126,7 @@ int init_device_info() {
     nvmlDevice_t dev;
     for(i=0;i<nvmlDevicesCount;i++){
         CHECK_NVML_API(nvmlDeviceGetHandleByIndex(i, &dev));
-        CHECK_NVML_API(nvmlDeviceGetUUID(dev,region_info.shared_region->uuids[i],96));
+        CHECK_NVML_API(nvmlDeviceGetUUID(dev,region_info.shared_region->uuids[i],NVML_DEVICE_UUID_V2_BUFFER_SIZE);
     }
     LOG_INFO("put_device_info finished %d",nvmlDevicesCount);
     return 0;
