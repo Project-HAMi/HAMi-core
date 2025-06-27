@@ -1136,9 +1136,14 @@ typedef struct nvmlFBCStats_st {
 } nvmlFBCStats_t;
 
 /**
- * Buffer size guaranteed to be large enough for \ref nvmlDeviceGetUUID
+ * Buffer size guaranteed to be large enough for storing GPU identifiers.
  */
 #define NVML_DEVICE_UUID_BUFFER_SIZE 80
+
+/**
+ * Buffer size guaranteed to be large enough for \ref nvmlDeviceGetUUID
+ */
+#define NVML_DEVICE_UUID_V2_BUFFER_SIZE 96
 
 /**
  * Blacklist GPU device information

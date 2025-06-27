@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-FILE *fp1;
+extern FILE *fp1;
 
 #ifdef FILEDEBUG 
 #define LOG_DEBUG(msg, ...) { \
