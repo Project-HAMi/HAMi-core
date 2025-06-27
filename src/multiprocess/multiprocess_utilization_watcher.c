@@ -173,7 +173,6 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
       if (sum < 0)
         sum = 0;
       userutil[cudadev] = sum;
-      unlock_shrreg();
     }
     unlock_shrreg();
     return 0;
