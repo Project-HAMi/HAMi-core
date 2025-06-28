@@ -1,0 +1,26 @@
+---
+name: build-src
+
+on: [push, pull_request, workflow_dispatch]
+
+concurrency: ci-${{ github.ref }}
+
+jobs:
+  BuildHamiCoreLib:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1440
+    strategy:
+      fail-fast: true
+    name: Build libvgpu
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+      - name: Build
+        run: |
+          #git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          #git config --global --add safe.directory $WORKDIR
+          echo "hello world"
+          make build-in-docker
