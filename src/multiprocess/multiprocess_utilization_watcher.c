@@ -132,7 +132,8 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
 
     int devi,cudadev;
     for (devi=0;devi<nvmlCounts;devi++){
-      sum=0;
+      uint64_t sum=0;
+      uint64_t usedGpuMemory=0;
       infcount = SHARED_REGION_MAX_PROCESS_NUM;
       shrreg_proc_slot_t *proc;
       cudadev = nvml_to_cuda_map((unsigned int)(devi));
@@ -148,13 +149,11 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
         for (i=0; i<infcount; i++){
           proc = find_proc_by_hostpid(infos[i].pid);
           if (proc != NULL){
-              //LOG_DEBUG("pid=%u monitor=%lld\n", infos[i].pid, infos[i].usedGpuMemory);
-              proc->monitorused[cudadev] += infos[i].usedGpuMemory;
+              usedGpuMemory += infos[i].usedGpuMemory;
           }
         }
       }
       // Get SM util for container
-
       gettimeofday(&cur,NULL);
       microsec = (cur.tv_sec - 1) * 1000UL * 1000UL + cur.tv_usec;
       nvmlProcessUtilizationSample_t processes_sample[SHARED_REGION_MAX_PROCESS_NUM];
@@ -165,13 +164,15 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
           proc = find_proc_by_hostpid(processes_sample[i].pid);
           if (proc != NULL){
               sum += processes_sample[i].smUtil;
-              //LOG_DEBUG("pid=%u smUtil=%d\n", processes_sample[i].pid, processes_sample[i].smUtil);
-              proc->device_util[cudadev].sm_util += processes_sample[i].smUtil;
           }
         }
       }
       if (sum < 0)
         sum = 0;
+      if (usedGpuMemory < 0)
+        usedGpuMemory = 0;
+      proc->device_util[cudadev].sm_util = sum;
+      proc->monitorused[cudadev] = usedGpuMemory;
       userutil[cudadev] = sum;
       unlock_shrreg();
     }
@@ -223,3 +224,4 @@ void init_utilization_watcher() {
     }
     return;
 }
+
