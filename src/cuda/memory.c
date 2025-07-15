@@ -573,8 +573,12 @@ CUresult cuMemAddressReserve ( CUdeviceptr* ptr, size_t size, size_t alignment, 
 }
 
 CUresult cuMemCreate ( CUmemGenericAllocationHandle* handle, size_t size, const CUmemAllocationProp* prop, unsigned long long flags ) {
-    LOG_INFO("cuMemCreate:");
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemCreate,handle,size,prop,flags);
+    LOG_INFO("into cuMemCreate:");
+    ENSURE_RUNNING();
+    CUresult res = allocate_virtual_memory_management(handle,size,prop,flags);
+    if (res!=CUDA_SUCCESS)
+        return res;
+    LOG_INFO("cuMemCreate success with bytesize=%lu", size);
     return res;
 }
 
@@ -780,4 +784,12 @@ CUresult cuWaitExternalSemaphoresAsync(const CUexternalSemaphore *extSemArray, c
 CUresult cuDestroyExternalSemaphore(CUexternalSemaphore extSem) {
     LOG_DEBUG("cuDestroyExternalSemaphore");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuDestroyExternalSemaphore,extSem);
+}
+
+CUresult cuMemUnmap( CUdeviceptr ptr, size_t size ) {
+    LOG_INFO("into cuMemUnmap:");
+    ENSURE_RUNNING();
+    CUresult res = remove_virtual_memory_management(ptr,size);
+    LOG_DEBUG("cuMemUnmap: dptr=%p size=%ld res=%d",(void *)ptr,size,res);
+    return res;
 }

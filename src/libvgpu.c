@@ -288,6 +288,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuSignalExternalSemaphoresAsync);
     DLSYM_HOOK_FUNC(cuWaitExternalSemaphoresAsync);
     DLSYM_HOOK_FUNC(cuDestroyExternalSemaphore);
+    DLSYM_HOOK_FUNC(cuMemUnmap);
     /* cuda Graph */
     DLSYM_HOOK_FUNC(cuGraphCreate);
     DLSYM_HOOK_FUNC(cuGraphAddKernelNode_v2);

@@ -161,3 +161,7 @@ int free_raw_async(CUdeviceptr dptr, CUstream hStream);
 // Checks memory type
 int check_memory_type(CUdeviceptr address);
 
+//virtual memory management
+int allocate_virtual_memory_management(CUmemGenericAllocationHandle* handle, size_t size, const CUmemAllocationProp* prop, unsigned long long flags);
+int add_chunk_virtual_memory(CUmemGenericAllocationHandle* handle, size_t size, const CUmemAllocationProp* prop, unsigned long long flags);
+int remove_virtual_memory_management(CUdeviceptr ptr, size_t size);
