@@ -171,8 +171,10 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
         sum = 0;
       if (usedGpuMemory < 0)
         usedGpuMemory = 0;
-      proc->device_util[cudadev].sm_util = sum;
-      proc->monitorused[cudadev] = usedGpuMemory;
+      if (proc != NULL) {
+        proc->device_util[cudadev].sm_util = sum;
+        proc->monitorused[cudadev] = usedGpuMemory;
+      }
       userutil[cudadev] = sum;
     }
     unlock_shrreg();
