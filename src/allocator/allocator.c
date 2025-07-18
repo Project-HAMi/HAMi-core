@@ -272,3 +272,39 @@ int allocate_async_raw(CUdeviceptr *dptr, size_t size, CUstream hStream){
     pthread_mutex_unlock(&mutex);
     return tmp;
 }
+
+int allocate_virtual_memory_management(CUmemGenericAllocationHandle* handle, size_t size, const CUmemAllocationProp* prop, unsigned long long flags){
+    int tmp;
+    pthread_mutex_lock(&mutex);
+    tmp = add_chunk_virtual_memory(handle,size,prop,flags);
+    pthread_mutex_unlock(&mutex);
+    return tmp;
+}
+
+int add_chunk_virtual_memory(CUmemGenericAllocationHandle* handle, size_t size, const CUmemAllocationProp* prop, unsigned long long flags){
+    size_t allocsize;
+    CUresult res = CUDA_SUCCESS;
+    CUdevice dev;
+    cuCtxGetDevice(&dev);
+    if (oom_check(dev,size))
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemCreate,handle,size,prop,flags);
+    if (res!=CUDA_SUCCESS){
+        LOG_ERROR("cuMemCreate failed res=%d",res);
+        return res;
+    }
+    allocsize = size;
+    cuCtxGetDevice(&dev);
+    add_gpu_device_memory_usage(getpid(),dev,allocsize,2);
+    return 0;
+}
+
+int remove_virtual_memory_management(CUdeviceptr ptr, size_t size){
+    pthread_mutex_lock(&mutex);
+    CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemUnmap,ptr,size);
+    CUdevice dev;
+    cuCtxGetDevice(&dev);
+    rm_gpu_device_memory_usage(getpid(),dev,size,2);
+    pthread_mutex_unlock(&mutex);
+    return 0;
+}

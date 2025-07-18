@@ -200,6 +200,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuSignalExternalSemaphoresAsync),
     CUDA_OVERRIDE_ENUM(cuWaitExternalSemaphoresAsync),
     CUDA_OVERRIDE_ENUM(cuDestroyExternalSemaphore),
+    CUDA_OVERRIDE_ENUM(cuMemUnmap),
     /* cuda graph part */
     CUDA_OVERRIDE_ENUM(cuGraphCreate),
     CUDA_OVERRIDE_ENUM(cuGraphAddKernelNode_v2),

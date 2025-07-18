@@ -168,6 +168,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuSignalExternalSemaphoresAsync"},
     {.name = "cuWaitExternalSemaphoresAsync"},
     {.name = "cuDestroyExternalSemaphore"},
+    {.name = "cuMemUnmap"},
     /* Graph part */
     {.name = "cuGraphCreate"},
     {.name = "cuGraphAddKernelNode_v2"},
