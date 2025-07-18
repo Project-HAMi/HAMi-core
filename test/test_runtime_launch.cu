@@ -11,6 +11,14 @@ __global__ void add(float* a, float* b, float* c) {
     c[idx] = a[idx] + b[idx];
 }
 
+__global__ void computeKernel(double* data, int N, int iterations) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < N) {
+        double temp = 0.0;
+        temp += sin(data[tid]) * cos(data[tid]);
+        data[tid] = temp;
+    }
+}
 
 int main() {
     float *a, *b, *c;
@@ -19,5 +27,25 @@ int main() {
     CHECK_RUNTIME_API(cudaMalloc(&c, 1024 * sizeof(float)));
 
     add<<<1, 1024>>>(a, b, c);
+
+    int N = 1 << 27; // 数据规模
+    double* d_data;
+
+    cudaMalloc(&d_data, N * sizeof(double));
+
+    int threadsPerBlock = 256;
+    int blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
+
+    int iterations = 1000000; // 每次启动的计算负载
+    int num_launches = 100; // 内核启动次数
+
+    for (int i = 0; i < num_launches; ++i) {
+        computeKernel<<<blocks, threadsPerBlock>>>(d_data, N, iterations);
+        cudaDeviceSynchronize();  // 同步会等待内核完成
+    }
+
+    cudaFree(d_data);
+
+    printf("completed");
     return 0;
 }

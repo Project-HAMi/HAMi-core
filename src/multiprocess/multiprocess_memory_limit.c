@@ -409,7 +409,7 @@ int add_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
 }
 
 int rm_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
-    LOG_INFO("rm_gpu_device_memory:%d %d->%d %lu",pid,cudadev,cuda_to_nvml_map(cudadev),type);
+    LOG_INFO("rm_gpu_device_memory:%d %d->%d %lu:%lu",pid,cudadev,cuda_to_nvml_map(cudadev),type,usage);
     int dev = cuda_to_nvml_map(cudadev);
     ensure_initialized();
     lock_shrreg();
@@ -430,6 +430,7 @@ int rm_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
                     region_info.shared_region->procs[i].used[dev].data_size -= usage;
                 }
             }
+            LOG_INFO("after delete:%lu",region_info.shared_region->procs[i].used[dev].total);
         }
     }
     unlock_shrreg();
