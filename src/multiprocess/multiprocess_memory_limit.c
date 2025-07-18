@@ -205,7 +205,16 @@ int rm_quitted_process(){
     LOG_INFO("rm_quitted_process");
     lock_shrreg();
 
+    // First check for processes marked for cleanup by find_proc_by_hostpid
     for (i = 0; i < region_info.shared_region->proc_num; i++) {
+        if (region_info.shared_region->procs[i].status == 0) {
+            LOG_INFO("Removing process with pid=%d marked for cleanup\n",
+                     region_info.shared_region->procs[i].pid);
+            // Don't copy this process to the new list
+            ret = 1;
+            continue;
+        }
+
         // Check if process is alive using proc_alive instead of ps command
         int32_t pid = region_info.shared_region->procs[i].pid;
         if (pid != 0 && proc_alive(pid) == PROC_STATE_ALIVE) {
@@ -226,8 +235,11 @@ int rm_quitted_process(){
         // Only copy processes that are still active
         if (i != cnt) { // Avoid unnecessary copy if already in place
             region_info.shared_region->procs[cnt].pid = region_info.shared_region->procs[i].pid;
+            region_info.shared_region->procs[cnt].hostpid = region_info.shared_region->procs[i].hostpid;
+            region_info.shared_region->procs[cnt].status = region_info.shared_region->procs[i].status;
             memcpy(region_info.shared_region->procs[cnt].used, region_info.shared_region->procs[i].used, sizeof(device_memory_t) * CUDA_DEVICE_MAX_COUNT);
             memcpy(region_info.shared_region->procs[cnt].device_util, region_info.shared_region->procs[i].device_util, sizeof(device_util_t) * CUDA_DEVICE_MAX_COUNT);
+            memcpy(region_info.shared_region->procs[cnt].monitorused, region_info.shared_region->procs[i].monitorused, sizeof(uint64_t) * CUDA_DEVICE_MAX_COUNT);
         }
         cnt++;
     }
@@ -806,12 +818,39 @@ void ensure_initialized() {
 
 int update_host_pid() {
     int i;
-    for (i=0;i<region_info.shared_region->proc_num;i++){
+    int found = 0;
+
+    // First check if we need to clean up any dead processes
+    rm_quitted_process();
+
+    // Then look for our process
+    for (i=0; i<region_info.shared_region->proc_num; i++){
         if (region_info.shared_region->procs[i].pid == getpid()){
-            if (region_info.shared_region->procs[i].hostpid!=0)
-                pidfound=1; 
+            if (region_info.shared_region->procs[i].hostpid != 0) {
+                pidfound = 1;
+                found = 1;
+            }
         }
     }
+
+    // If we didn't find our process but we have room, try to add it
+    if (!found && region_info.shared_region->proc_num < SHARED_REGION_MAX_PROCESS_NUM) {
+        LOG_INFO("Process not found in tracking table, attempting to add pid=%d", getpid());
+        lock_shrreg();
+        region_info.shared_region->procs[region_info.shared_region->proc_num].pid = getpid();
+        region_info.shared_region->procs[region_info.shared_region->proc_num].hostpid = getpid(); // Use own pid as hostpid initially
+        region_info.shared_region->procs[region_info.shared_region->proc_num].status = 1;
+        memset(region_info.shared_region->procs[region_info.shared_region->proc_num].used, 0,
+               sizeof(device_memory_t) * CUDA_DEVICE_MAX_COUNT);
+        memset(region_info.shared_region->procs[region_info.shared_region->proc_num].device_util, 0,
+               sizeof(device_util_t) * CUDA_DEVICE_MAX_COUNT);
+        memset(region_info.shared_region->procs[region_info.shared_region->proc_num].monitorused, 0,
+               sizeof(uint64_t) * CUDA_DEVICE_MAX_COUNT);
+        region_info.shared_region->proc_num++;
+        unlock_shrreg();
+        pidfound = 1;
+    }
+
     return 0;
 }
 
@@ -961,10 +1000,72 @@ int wait_status_all(int status){
 
 shrreg_proc_slot_t *find_proc_by_hostpid(int hostpid) {
     int i;
-    for (i=0;i<region_info.shared_region->proc_num;i++) {
-        if (region_info.shared_region->procs[i].hostpid == hostpid) 
-            return &region_info.shared_region->procs[i];
+    static int cleanup_counter = 0;
+
+    // Periodically clean up dead processes (every 10 calls)
+    cleanup_counter++;
+    if (cleanup_counter >= 10) {
+        cleanup_counter = 0;
+        rm_quitted_process();
     }
+
+    // Special case for gpu_burn: sometimes it might report PID 0 or invalid PIDs
+    if (hostpid <= 0) {
+        LOG_WARN("Invalid hostpid %d received, using current process instead", hostpid);
+        // Use our own process instead of invalid PID
+        for (i=0; i<region_info.shared_region->proc_num; i++) {
+            if (region_info.shared_region->procs[i].pid == getpid()) {
+                return &region_info.shared_region->procs[i];
+            }
+        }
+        // If we can't find our own process, return NULL
+        return NULL;
+    }
+
+    // First check if the process is still alive
+    if (proc_alive(hostpid) == PROC_STATE_NONALIVE) {
+        LOG_DEBUG("Process with hostpid %d is no longer alive", hostpid);
+        // Process is not alive, we should clean it up
+        for (i=0; i<region_info.shared_region->proc_num; i++) {
+            if (region_info.shared_region->procs[i].hostpid == hostpid) {
+                LOG_INFO("Removing dead process with hostpid %d from tracking", hostpid);
+                // Mark the process slot for cleanup on next rm_quitted_process call
+                region_info.shared_region->procs[i].status = 0;
+                return NULL;
+            }
+        }
+        return NULL;
+    }
+
+    // Process is alive, proceed with normal lookup
+    for (i=0; i<region_info.shared_region->proc_num; i++) {
+        if (region_info.shared_region->procs[i].hostpid == hostpid) {
+            // Double check that the process is still alive
+            if (region_info.shared_region->procs[i].status == 0) {
+                LOG_INFO("Process with hostpid %d is marked for cleanup", hostpid);
+                return NULL;
+            }
+            return &region_info.shared_region->procs[i];
+        }
+    }
+
+    // If we couldn't find the process but it's alive, it might be a new process
+    // Let's try to add it to our tracking
+    if (region_info.shared_region->proc_num < SHARED_REGION_MAX_PROCESS_NUM) {
+        LOG_INFO("Adding new process with hostpid %d to tracking", hostpid);
+        lock_shrreg();
+        i = region_info.shared_region->proc_num;
+        region_info.shared_region->procs[i].pid = hostpid;
+        region_info.shared_region->procs[i].hostpid = hostpid;
+        region_info.shared_region->procs[i].status = 1;
+        memset(region_info.shared_region->procs[i].used, 0, sizeof(device_memory_t) * CUDA_DEVICE_MAX_COUNT);
+        memset(region_info.shared_region->procs[i].device_util, 0, sizeof(device_util_t) * CUDA_DEVICE_MAX_COUNT);
+        memset(region_info.shared_region->procs[i].monitorused, 0, sizeof(uint64_t) * CUDA_DEVICE_MAX_COUNT);
+        region_info.shared_region->proc_num++;
+        unlock_shrreg();
+        return &region_info.shared_region->procs[i];
+    }
+
     return NULL;
 }
 

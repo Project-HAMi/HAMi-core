@@ -12,6 +12,8 @@
 #include <time.h>
 #include <signal.h>
 
+#include <limits.h>
+
 #include <cuda.h>
 #include "include/nvml_prefix.h"
 #include <nvml.h>
@@ -77,17 +79,40 @@ static void change_token(long delta) {
 long delta(int up_limit, int user_current, long share) {
   int utilization_diff =
       abs(up_limit - user_current) < 5 ? 5 : abs(up_limit - user_current);
-  long increment =
-      (long)g_sm_num * (long)g_sm_num * (long)g_max_thread_per_sm * (long)utilization_diff / 2560;
 
-  /* Accelerate cuda cores allocation when utilization vary widely */
-  if (utilization_diff > up_limit / 2) {
-    increment = increment * utilization_diff * 2 / (up_limit + 1);
+  // Prevent overflow by breaking down the calculation and adding bounds checking
+  long increment = 0;
+
+  if (g_sm_num > 0 && g_max_thread_per_sm > 0 && utilization_diff > 0) {
+    // Calculate in steps to avoid overflow
+    increment = (long)g_sm_num * (long)utilization_diff / 256;
+    increment = increment * ((long)g_sm_num * (long)g_max_thread_per_sm / 10);
+
+    // Ensure increment is positive and not too large
+    if (increment < 0) {
+      increment = 0;
+    } else if (increment > g_total_cuda_cores) {
+      increment = g_total_cuda_cores / 2;  // Limit to a reasonable value
+    }
+
+    /* Accelerate cuda cores allocation when utilization vary widely */
+    if (utilization_diff > up_limit / 2 && up_limit > 0) {
+      long accel_factor = (long)utilization_diff * 2 / (up_limit + 1);
+      // Prevent overflow in multiplication
+      if (accel_factor > 0 && increment <= LONG_MAX / accel_factor) {
+        increment = increment * accel_factor;
+      }
+    }
   }
 
+  // Update share with bounds checking
   if (user_current <= up_limit) {
-    share = (share + increment) > g_total_cuda_cores ? g_total_cuda_cores
-                                                   : (share + increment);
+    // Check for overflow before adding
+    if (increment > LONG_MAX - share) {
+      share = g_total_cuda_cores;
+    } else {
+      share = (share + increment) > g_total_cuda_cores ? g_total_cuda_cores : (share + increment);
+    }
   } else {
     share = (share - increment) < 0 ? 0 : (share - increment);
   }
@@ -135,7 +160,8 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
       uint64_t sum=0;
       uint64_t usedGpuMemory=0;
       infcount = SHARED_REGION_MAX_PROCESS_NUM;
-      shrreg_proc_slot_t *proc;
+      shrreg_proc_slot_t *proc = NULL;
+      shrreg_proc_slot_t *self_proc = NULL;
       cudadev = nvml_to_cuda_map((unsigned int)(devi));
       if (cudadev<0)
         continue;
@@ -150,6 +176,10 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
           proc = find_proc_by_hostpid(infos[i].pid);
           if (proc != NULL){
               usedGpuMemory += infos[i].usedGpuMemory;
+              // Store our own process for later use
+              if (proc->pid == getpid()) {
+                  self_proc = proc;
+              }
           }
         }
       }
@@ -164,6 +194,10 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
           proc = find_proc_by_hostpid(processes_sample[i].pid);
           if (proc != NULL){
               sum += processes_sample[i].smUtil;
+              // Store our own process for later use
+              if (proc->pid == getpid()) {
+                  self_proc = proc;
+              }
           }
         }
       }
@@ -171,8 +205,12 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
         sum = 0;
       if (usedGpuMemory < 0)
         usedGpuMemory = 0;
-      proc->device_util[cudadev].sm_util = sum;
-      proc->monitorused[cudadev] = usedGpuMemory;
+
+      // Use self_proc instead of potentially invalid proc pointer
+      if (self_proc != NULL) {
+          self_proc->device_util[cudadev].sm_util = sum;
+          self_proc->monitorused[cudadev] = usedGpuMemory;
+      }
       userutil[cudadev] = sum;
     }
     unlock_shrreg();
@@ -187,13 +225,30 @@ void* utilization_watcher() {
     int upper_limit = get_current_device_sm_limit(0);
     ensure_initialized();
     LOG_DEBUG("upper_limit=%d\n",upper_limit);
+
+    // Track consecutive failures to find processes
+    int consecutive_empty_processes = 0;
+    const int max_empty_retries = 5;
+
     while (1){
         nanosleep(&g_wait, NULL);
         if (pidfound==0) {
           update_host_pid();
-          if (pidfound==0)
+          if (pidfound==0) {
+            // Don't immediately give up if we can't find processes
+            consecutive_empty_processes++;
+            if (consecutive_empty_processes > max_empty_retries) {
+              LOG_WARN("Failed to find processes after %d attempts, continuing anyway", max_empty_retries);
+              // Continue anyway, don't exit the loop
+              pidfound = 1; // Force continue to avoid getting stuck
+            }
             continue;
+          }
         }
+
+        // Reset counter when we find processes
+        consecutive_empty_processes = 0;
+
         init_gpu_device_utilization();
         get_used_gpu_utilization(userutil,&sysprocnum);
         //if (sysprocnum == 1 &&
@@ -202,13 +257,20 @@ void* utilization_watcher() {
         //        delta(upper_limit, userutil, share);
         //    continue;
         //}
+
+        // Check if we need to increase total CUDA cores to avoid negative values
         if ((share==g_total_cuda_cores) && (g_cur_cuda_cores<0)) {
           g_total_cuda_cores *= 2;
           share = g_total_cuda_cores;
         }
+
+        // Only update if utilization values are in valid range
         if ((userutil[0]<=100) && (userutil[0]>=0)){
           share = delta(upper_limit, userutil[0], share);
           change_token(share);
+        } else {
+          // Handle invalid utilization values gracefully
+          LOG_WARN("Invalid utilization value detected: %d, skipping update", userutil[0]);
         }
         LOG_INFO("userutil1=%d currentcores=%ld total=%ld limit=%d share=%ld\n",userutil[0],g_cur_cuda_cores,g_total_cuda_cores,upper_limit,share);
     }
@@ -216,7 +278,21 @@ void* utilization_watcher() {
 
 void init_utilization_watcher() {
     LOG_INFO("set core utilization limit to  %d",get_current_device_sm_limit(0));
+
+    // Initialize CUDA to NVML device mapping
+    memset(cuda_to_nvml_map_array, 0, sizeof(cuda_to_nvml_map_array));
+    unsigned int nvmlCounts;
+    if (nvmlDeviceGetCount(&nvmlCounts) == NVML_SUCCESS) {
+        for (unsigned int i = 0; i < nvmlCounts && i < CUDA_DEVICE_MAX_COUNT; i++) {
+            cuda_to_nvml_map_array[i] = i;  // Default 1:1 mapping
+        }
+    }
+
     setspec();
+
+    // Clean up any dead processes before starting the watcher
+    rm_quitted_process();
+
     pthread_t tid;
     if ((get_current_device_sm_limit(0)<=100) && (get_current_device_sm_limit(0)>0)){
         pthread_create(&tid, NULL, utilization_watcher, NULL);
