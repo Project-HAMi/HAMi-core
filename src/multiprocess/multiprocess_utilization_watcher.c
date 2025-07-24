@@ -122,7 +122,7 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
     struct timeval cur;
     size_t microsec;
 
-    int i,sum=0;
+    int i;
     unsigned int infcount;
     nvmlProcessInfo_v1_t infos[SHARED_REGION_MAX_PROCESS_NUM];
 

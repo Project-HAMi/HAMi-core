@@ -385,13 +385,17 @@ nvmlReturn_t nvmlDeviceGetNvLinkRemotePciInfo ( nvmlDevice_t device, unsigned in
 }
 
 nvmlReturn_t nvmlDeviceGetHandleByIndex ( unsigned int  index, nvmlDevice_t* device ){
+    nvmlReturn_t res;
     LOG_DEBUG("nvmlDeviceGetHandleByIndex index=%u",index); 
-    return NVML_OVERRIDE_CALL_NO_LOG(nvml_library_entry,nvmlDeviceGetHandleByIndex_v2,index,device);
+    res = NVML_OVERRIDE_CALL_NO_LOG(nvml_library_entry,nvmlDeviceGetHandleByIndex,index,device);
+    return res;
 }
 
 nvmlReturn_t nvmlDeviceGetHandleByIndex_v2 ( unsigned int  index, nvmlDevice_t* device ){
+    nvmlReturn_t res;
     LOG_DEBUG("nvmlDeviceGetHandleByIndex_v2 index=%u",index); 
-    return NVML_OVERRIDE_CALL_NO_LOG(nvml_library_entry,nvmlDeviceGetHandleByIndex_v2,index,device);
+    res = NVML_OVERRIDE_CALL_NO_LOG(nvml_library_entry,nvmlDeviceGetHandleByIndex_v2,index,device);
+    return res;
 }
 
 nvmlReturn_t nvmlDeviceGetHandleByPciBusId_v2 ( const char* pciBusId, nvmlDevice_t* device ) {
