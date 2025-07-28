@@ -28,7 +28,7 @@ int main() {
 
     add<<<1, 1024>>>(a, b, c);
 
-    int N = 1 << 27; // 数据规模
+    int N = 1 << 27; 
     double* d_data;
 
     cudaMalloc(&d_data, N * sizeof(double));
@@ -36,12 +36,12 @@ int main() {
     int threadsPerBlock = 256;
     int blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
 
-    int iterations = 1000000; // 每次启动的计算负载
-    int num_launches = 100; // 内核启动次数
+    int iterations = 1000000; 
+    int num_launches = 100; 
 
     for (int i = 0; i < num_launches; ++i) {
         computeKernel<<<blocks, threadsPerBlock>>>(d_data, N, iterations);
-        cudaDeviceSynchronize();  // 同步会等待内核完成
+        cudaDeviceSynchronize();  
     }
 
     cudaFree(d_data);

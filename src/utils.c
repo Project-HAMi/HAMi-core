@@ -146,9 +146,6 @@ nvmlReturn_t set_task_pid() {
                 return res;
             }
         }while(res == NVML_ERROR_INSUFFICIENT_SIZE);
-        for (t=0;t<running_processes;t++) {
-            LOG_INFO("Device memory for process %d on %d==%lld",tmp_pids_on_device[t].pid,i,tmp_pids_on_device[t].usedGpuMemory);
-        }
         mergepid(&running_processes,&merged_num,(nvmlProcessInfo_t1 *)tmp_pids_on_device,pids_on_device);
         break;
     }

@@ -92,7 +92,7 @@ CUresult cuDriverGetVersion(int *driverVersion) {
     LOG_DEBUG("into cuDriverGetVersion__");
     
     //stub dlsym to prelaod cuda functions
-    //dlsym(RTLD_DEFAULT,"cuDriver");
+    dlsym(RTLD_DEFAULT,"cuDriverGetVersion");
 
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDriverGetVersion,driverVersion);
     //*driverVersion=11030;
