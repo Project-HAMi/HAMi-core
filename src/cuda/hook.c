@@ -325,10 +325,20 @@ void *find_symbols_in_table(const char *symbol) {
 void *find_symbols_in_table_by_cudaversion(const char *symbol,int  cudaVersion) {
   void *pfn;
   const char *real_symbol;
+  int i;
   real_symbol = get_real_func_name(symbol,cudaVersion);
   if (real_symbol == NULL) {
     // if not find in mulit func version def, use origin logic
     pfn = find_symbols_in_table(symbol);
+    /*if (pfn!=NULL) {
+        for (i = 0; i < CUDA_ENTRY_END; i++) {
+            LOG_DEBUG("LOADING %s %d",cuda_library_entry[i].name,i);
+            if (strcmp(cuda_library_entry[i].name,symbol)==0) {
+                LOG_WARN("UPDATE func pointer to %s:%p,%p",symbol,cuda_library_entry[i].fn_ptr,pfn);
+                //cuda_library_entry[i].fn_ptr = pfn;
+            }
+        }
+    }*/
   } else {
     pfn = find_real_symbols_in_table(real_symbol);
   }
@@ -398,6 +408,7 @@ CUresult cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, cu
         return res;
     }else{
         LOG_DEBUG("found symbol %s",symbol);
-        return CUDA_SUCCESS;
+        void *optr;
+        return CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress_v2,symbol,&optr,cudaVersion,flags,symbolStatus);
     } 
 }

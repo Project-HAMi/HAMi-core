@@ -46,7 +46,7 @@ static shared_region_info_t region_info = {0, -1, PTHREAD_ONCE_INIT, NULL, 0};
 //size_t initial_offset=117440512;
 int env_utilization_switch;
 int enable_active_oom_killer;
-int context_size;
+size_t context_size;
 size_t initial_offset=0;
 //lock for record kernel time
 pthread_mutex_t _kernel_mutex;

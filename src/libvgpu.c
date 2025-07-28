@@ -34,7 +34,7 @@ extern int pidfound;
 extern int env_utilization_switch;
 
 /* context size for a certain task, we need to add it into device-memory usage*/
-extern int context_size;
+extern size_t context_size;
 
 /* This is the symbol search function */
 fp_dlsym real_dlsym = NULL;
@@ -127,8 +127,11 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
             }
         }
     }
+    DLSYM_HOOK_FUNC(cuInit);
+    DLSYM_HOOK_FUNC(cuGetProcAddress);
+    DLSYM_HOOK_FUNC(cuGetProcAddress_v2);
     //Context
-    DLSYM_HOOK_FUNC(cuCtxGetDevice);
+    //DLSYM_HOOK_FUNC(cuCtxGetDevice);
     DLSYM_HOOK_FUNC(cuCtxCreate_v2);
     DLSYM_HOOK_FUNC(cuCtxCreate_v3);
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxGetState);
@@ -139,12 +142,10 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuDeviceGetTexture1DLinearMaxWidth);
     DLSYM_HOOK_FUNC(cuDeviceSetMemPool);
     DLSYM_HOOK_FUNC(cuFlushGPUDirectRDMAWrites);
-
     DLSYM_HOOK_FUNC(cuCtxDestroy_v2);
     DLSYM_HOOK_FUNC(cuCtxGetApiVersion);
     DLSYM_HOOK_FUNC(cuCtxGetCacheConfig);
     DLSYM_HOOK_FUNC(cuCtxGetCurrent);
-    DLSYM_HOOK_FUNC(cuCtxGetDevice);
     DLSYM_HOOK_FUNC(cuCtxGetFlags);
     DLSYM_HOOK_FUNC(cuCtxGetLimit);
     DLSYM_HOOK_FUNC(cuCtxGetSharedMemConfig);
@@ -158,9 +159,6 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuCtxSynchronize);
     //DLSYM_HOOK_FUNC(cuCtxEnablePeerAccess);
     //DLSYM_HOOK_FUNC(cuGetExportTable);
-
-
-    DLSYM_HOOK_FUNC(cuInit);
     DLSYM_HOOK_FUNC(cuArray3DCreate_v2);
     DLSYM_HOOK_FUNC(cuArrayCreate_v2);
     DLSYM_HOOK_FUNC(cuArrayDestroy);
@@ -178,6 +176,8 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuStreamCreate);
     DLSYM_HOOK_FUNC(cuStreamDestroy_v2);
     DLSYM_HOOK_FUNC(cuStreamSynchronize);
+    DLSYM_HOOK_FUNC(cuDeviceGet);
+    DLSYM_HOOK_FUNC(cuCtxGetDevice);
     DLSYM_HOOK_FUNC(cuDeviceGetAttribute);
     DLSYM_HOOK_FUNC(cuDeviceGetCount);
     DLSYM_HOOK_FUNC(cuDeviceGet);
@@ -191,7 +191,6 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuDeviceGetUuid);
     DLSYM_HOOK_FUNC(cuDeviceGetMemPool);
     DLSYM_HOOK_FUNC(cuDeviceTotalMem_v2);
-
     DLSYM_HOOK_FUNC(cuPointerGetAttributes);
     DLSYM_HOOK_FUNC(cuPointerGetAttribute);
     DLSYM_HOOK_FUNC(cuPointerSetAttribute);
@@ -231,7 +230,6 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemsetD8_v2);
     DLSYM_HOOK_FUNC(cuMemsetD8Async);
     DLSYM_HOOK_FUNC(cuMemAdvise);
-
     DLSYM_HOOK_FUNC(cuEventCreate);
     DLSYM_HOOK_FUNC(cuEventDestroy_v2);
     DLSYM_HOOK_FUNC(cuModuleLoad);
@@ -248,14 +246,11 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuLinkAddFile_v2);
     DLSYM_HOOK_FUNC(cuLinkComplete);
     DLSYM_HOOK_FUNC(cuLinkDestroy);
-
     DLSYM_HOOK_FUNC(cuMemAddressReserve);
     DLSYM_HOOK_FUNC(cuMemCreate);
     DLSYM_HOOK_FUNC(cuMemMap);
     DLSYM_HOOK_FUNC(cuMemAllocAsync);
-    DLSYM_HOOK_FUNC(cuGetProcAddress);
-    DLSYM_HOOK_FUNC(cuGetProcAddress_v2);
-    /* cuda 11.7 new memory ops */
+    // cuda 11.7 new memory ops
     DLSYM_HOOK_FUNC(cuMemHostGetDevicePointer_v2);
     DLSYM_HOOK_FUNC(cuMemHostGetFlags);
     DLSYM_HOOK_FUNC(cuMemPoolTrimTo);
@@ -279,7 +274,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemPrefetchAsync);
     DLSYM_HOOK_FUNC(cuMemRangeGetAttribute);
     DLSYM_HOOK_FUNC(cuMemRangeGetAttributes);
-    /* cuda 11.7 external resource interoperability */
+    // cuda 11.7 external resource interoperability
     DLSYM_HOOK_FUNC(cuImportExternalMemory);
     DLSYM_HOOK_FUNC(cuExternalMemoryGetMappedBuffer);
     DLSYM_HOOK_FUNC(cuExternalMemoryGetMappedMipmappedArray);
@@ -288,7 +283,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuSignalExternalSemaphoresAsync);
     DLSYM_HOOK_FUNC(cuWaitExternalSemaphoresAsync);
     DLSYM_HOOK_FUNC(cuDestroyExternalSemaphore);
-    /* cuda Graph */
+    // cuda Graph 
     DLSYM_HOOK_FUNC(cuGraphCreate);
     DLSYM_HOOK_FUNC(cuGraphAddKernelNode_v2);
     DLSYM_HOOK_FUNC(cuGraphKernelNodeGetParams_v2);

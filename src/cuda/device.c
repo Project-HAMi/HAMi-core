@@ -7,9 +7,9 @@
 #include "allocator/allocator.h"
 #include "include/memory_limit.h"
 
-CUresult cuDeviceGetAttribute ( int* pi, CUdevice_attribute attrib, CUdevice dev ) {
+CUresult CUDAAPI cuDeviceGetAttribute ( int* pi, CUdevice_attribute attrib, CUdevice dev ) {
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDeviceGetAttribute,pi,attrib,dev);
-    LOG_DEBUG("[%d]cuDeviceGetAttribute dev=%d attrib=%d %d",res,dev,(int)attrib,*pi);
+    //LOG_DEBUG("[%d]cuDeviceGetAttribute dev=%d attrib=%d %d",res,dev,(int)attrib,*pi);
     return res;
 }
 
@@ -92,7 +92,7 @@ CUresult cuDriverGetVersion(int *driverVersion) {
     LOG_DEBUG("into cuDriverGetVersion__");
     
     //stub dlsym to prelaod cuda functions
-    dlsym(RTLD_DEFAULT,"cuDriverGetVersion");
+    //dlsym(RTLD_DEFAULT,"cuDriver");
 
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDriverGetVersion,driverVersion);
     //*driverVersion=11030;

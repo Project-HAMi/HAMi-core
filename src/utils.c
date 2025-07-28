@@ -13,7 +13,7 @@
 
 const char* unified_lock="/tmp/vgpulock/lock";
 const int retry_count=20;
-extern int context_size;
+extern size_t context_size;
 extern int cuda_to_nvml_map_array[16];
 
 // 0 unified_lock lock success
@@ -105,7 +105,7 @@ nvmlReturn_t set_task_pid() {
     nvmlDevice_t device;
     nvmlReturn_t res;
     CUcontext pctx;
-    int i;
+    int i,t;
     CHECK_NVML_API(nvmlInit());
     CHECK_NVML_API(nvmlDeviceGetHandleByIndex(0, &device));
     
@@ -127,6 +127,7 @@ nvmlReturn_t set_task_pid() {
             }
         }while(res==NVML_ERROR_INSUFFICIENT_SIZE); 
         mergepid(&previous,&merged_num,(nvmlProcessInfo_t1 *)tmp_pids_on_device,pre_pids_on_device);
+        break;
     }
     previous = merged_num;
     merged_num = 0;
@@ -145,7 +146,11 @@ nvmlReturn_t set_task_pid() {
                 return res;
             }
         }while(res == NVML_ERROR_INSUFFICIENT_SIZE);
+        for (t=0;t<running_processes;t++) {
+            LOG_INFO("Device memory for process %d on %d==%lld",tmp_pids_on_device[t].pid,i,tmp_pids_on_device[t].usedGpuMemory);
+        }
         mergepid(&running_processes,&merged_num,(nvmlProcessInfo_t1 *)tmp_pids_on_device,pids_on_device);
+        break;
     }
     running_processes = merged_num;
     LOG_INFO("current processes num = %u %u",previous,running_processes);

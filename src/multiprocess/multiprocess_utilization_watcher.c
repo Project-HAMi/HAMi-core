@@ -221,7 +221,7 @@ void init_utilization_watcher() {
     setspec();
     pthread_t tid;
     if ((get_current_device_sm_limit(0)<=100) && (get_current_device_sm_limit(0)>0)){
-        pthread_create(&tid, NULL, utilization_watcher, NULL);
+        //pthread_create(&tid, NULL, utilization_watcher, NULL);
     }
     return;
 }

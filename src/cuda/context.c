@@ -1,7 +1,7 @@
 #include "include/libcuda_hook.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
-extern int context_size;
+extern size_t context_size;
 extern int ctx_activate[16];
 
 
@@ -12,7 +12,7 @@ CUresult cuDevicePrimaryCtxGetState( CUdevice dev, unsigned int* flags, int* act
 }
 
 CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
-    LOG_INFO("dev=%d context_size=%d",dev,context_size);
+    LOG_INFO("dev=%d context_size=%ld",dev,context_size);
     //for Initialization only
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRetain,pctx,dev);
     if (ctx_activate[dev] == 0) {
