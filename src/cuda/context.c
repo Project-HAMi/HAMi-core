@@ -121,7 +121,7 @@ CUresult cuCtxSetCacheConfig ( CUfunc_cache config ){
 CUresult cuCtxSetCurrent ( CUcontext ctx ){
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxSetCurrent,ctx);
     if (res!=CUDA_SUCCESS){
-        LOG_ERROR("cuCtxSetCurrent failed res=%d",res);
+        LOG_ERROR("cuCtxSetCurrent111 failed res=%d ctx=%p",res,ctx);
     }
     return res;
 }
