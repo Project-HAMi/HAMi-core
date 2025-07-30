@@ -122,7 +122,7 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
     struct timeval cur;
     size_t microsec;
 
-    int i,sum=0;
+    int i;
     unsigned int infcount;
     nvmlProcessInfo_v1_t infos[SHARED_REGION_MAX_PROCESS_NUM];
 
@@ -133,7 +133,6 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
     int devi,cudadev;
     for (devi=0;devi<nvmlCounts;devi++){
       uint64_t sum=0;
-      uint64_t usedGpuMemory=0;
       infcount = SHARED_REGION_MAX_PROCESS_NUM;
       shrreg_proc_slot_t *proc;
       cudadev = nvml_to_cuda_map((unsigned int)(devi));
@@ -149,7 +148,7 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
         for (i=0; i<infcount; i++){
           proc = find_proc_by_hostpid(infos[i].pid);
           if (proc != NULL){
-              usedGpuMemory += infos[i].usedGpuMemory;
+              proc->monitorused[cudadev] = infos[i].usedGpuMemory;
           }
         }
       }
@@ -164,17 +163,12 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
           proc = find_proc_by_hostpid(processes_sample[i].pid);
           if (proc != NULL){
               sum += processes_sample[i].smUtil;
+              proc->device_util[cudadev].sm_util = processes_sample[i].smUtil;
           }
         }
       }
       if (sum < 0)
         sum = 0;
-      if (usedGpuMemory < 0)
-        usedGpuMemory = 0;
-      if (proc != NULL) {
-        proc->device_util[cudadev].sm_util = sum;
-        proc->monitorused[cudadev] = usedGpuMemory;
-      }
       userutil[cudadev] = sum;
     }
     unlock_shrreg();

@@ -1,7 +1,7 @@
 #include "include/libcuda_hook.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
-extern int context_size;
+extern size_t context_size;
 extern int ctx_activate[16];
 
 
@@ -12,13 +12,15 @@ CUresult cuDevicePrimaryCtxGetState( CUdevice dev, unsigned int* flags, int* act
 }
 
 CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
-    LOG_INFO("dev=%d context_size=%d",dev,context_size);
+    LOG_INFO("dev=%d context_size=%ld",dev,context_size);
     //for Initialization only
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRetain,pctx,dev);
     if (ctx_activate[dev] == 0) {
         add_gpu_device_memory_usage(getpid(),dev,context_size,0); 
     }
-    ctx_activate[dev] = 1;
+    if (context_size>0) {
+        ctx_activate[dev] = 1;
+    }
     return res;
 }
 
@@ -29,11 +31,11 @@ CUresult cuDevicePrimaryCtxSetFlags_v2( CUdevice dev, unsigned int  flags ){
 }
 
 CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRelease_v2,dev);
     if (ctx_activate[dev] == 1) {
         rm_gpu_device_memory_usage(getpid(),dev,context_size,0);
     }
     ctx_activate[dev] = 0;
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRelease_v2,dev);
     return res;
 }
 
@@ -119,7 +121,7 @@ CUresult cuCtxSetCacheConfig ( CUfunc_cache config ){
 CUresult cuCtxSetCurrent ( CUcontext ctx ){
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxSetCurrent,ctx);
     if (res!=CUDA_SUCCESS){
-        LOG_ERROR("cuCtxSetCurrent failed res=%d",res);
+        LOG_ERROR("cuCtxSetCurrent111 failed res=%d ctx=%p",res,ctx);
     }
     return res;
 }
