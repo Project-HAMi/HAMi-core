@@ -197,42 +197,42 @@ void do_init_device_sm_limits(uint64_t *arr, int len) {
 }
 
 int rm_quitted_process(){
-    FILE *wstream;
-    wstream=popen("ps ax","r");
-    char tmp[256];
-    char *atmp;
     int pidmap[SHARED_REGION_MAX_PROCESS_NUM];
-    memset(pidmap,0,sizeof(int)*SHARED_REGION_MAX_PROCESS_NUM);
+    memset(pidmap, 0, sizeof(int) * SHARED_REGION_MAX_PROCESS_NUM);
     ensure_initialized();
 
-    int32_t pid;
-    int i = 0,cnt=0,ret=0;
+    int i = 0, cnt = 0, ret = 0;
     LOG_INFO("rm_quitted_process");
     lock_shrreg();
-    if (wstream!=NULL){
-        while (fgets(tmp,256,wstream)) {
-            atmp = strtok(tmp," ");
-            pid = atoi(atmp);
-            if (pid!=0)
-                for (i=0;i<region_info.shared_region->proc_num;i++)
-                    if (region_info.shared_region->procs[i].pid==pid){
-                        pidmap[i]=1;
-                    }
+
+    for (i = 0; i < region_info.shared_region->proc_num; i++) {
+        // Check if process is alive using proc_alive instead of ps command
+        int32_t pid = region_info.shared_region->procs[i].pid;
+        if (pid != 0 && proc_alive(pid) == PROC_STATE_ALIVE) {
+            pidmap[i] = 1;  // Process is alive
+        } else {
+            pidmap[i] = 0;  // Process is not alive
         }
-        for (i=0;i<region_info.shared_region->proc_num;i++){
-            if (pidmap[i]==0) {
-                LOG_INFO("rm pid=%d\n",region_info.shared_region->procs[i].pid);
-                ret = 1;
-                continue;
-            }
-            region_info.shared_region->procs[cnt].pid=region_info.shared_region->procs[i].pid;
-            memcpy(region_info.shared_region->procs[cnt].used,region_info.shared_region->procs[i].used,sizeof(device_memory_t)*CUDA_DEVICE_MAX_COUNT);
-            memcpy(region_info.shared_region->procs[cnt].device_util,region_info.shared_region->procs[i].device_util,sizeof(device_util_t)*CUDA_DEVICE_MAX_COUNT);
-            cnt++;
-        }
-        region_info.shared_region->proc_num=cnt;
-        pclose(wstream);
     }
+
+    // Rebuild the process list, keeping only active processes
+    for (i = 0; i < region_info.shared_region->proc_num; i++) {
+        if (pidmap[i] == 0) {
+            LOG_INFO("rm pid=%d\n", region_info.shared_region->procs[i].pid);
+            ret = 1;
+            continue;
+        }
+
+        // Only copy processes that are still active
+        if (i != cnt) { // Avoid unnecessary copy if already in place
+            region_info.shared_region->procs[cnt].pid = region_info.shared_region->procs[i].pid;
+            memcpy(region_info.shared_region->procs[cnt].used, region_info.shared_region->procs[i].used, sizeof(device_memory_t) * CUDA_DEVICE_MAX_COUNT);
+            memcpy(region_info.shared_region->procs[cnt].device_util, region_info.shared_region->procs[i].device_util, sizeof(device_util_t) * CUDA_DEVICE_MAX_COUNT);
+        }
+        cnt++;
+    }
+
+    region_info.shared_region->proc_num = cnt;
     unlock_shrreg();
     return ret;
 }
