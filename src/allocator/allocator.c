@@ -165,20 +165,30 @@ int check_memory_type(CUdeviceptr address) {
 int remove_chunk(allocated_list *a_list, CUdeviceptr dptr){
     size_t t_size;
     if (a_list->length==0) {
-        return -1;
+        LOG_ERROR("remove_chunk  a_list length is 0 res=%d",a_list->length);
+        if (dptr != NULL){
+          //maybe some graph func, we can not hook the memory alloc
+          //try to free raw
+          return cuMemoryFree(dptr);
+        }
     }
     allocated_list_entry *val;
     for (val=a_list->head;val!=NULL;val=val->next){
+        LOG_ERROR("remove_chunk  remove list entry ");
         if (val->entry->address==dptr){
             t_size=val->entry->length;
             cuMemoryFree(dptr);
             LIST_REMOVE(a_list,val);
-        
             CUdevice dev;
             cuCtxGetDevice(&dev);
             rm_gpu_device_memory_usage(getpid(),dev,t_size,2);
             return 0;
         }
+    }
+    if (dptr != NULL){
+      //maybe some graph func, we can not hook the memory alloc
+      //try to free raw
+      return cuMemoryFree(dptr);
     }
     return -1;
 }
