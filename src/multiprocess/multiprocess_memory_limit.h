@@ -166,7 +166,6 @@ void unlock_shrreg();
 //Setspec of the corresponding device
 int setspec();
 //Remove quitted process
-int rm_quitted_process();
 
 void suspend_all();
 void resume_all();
