@@ -323,7 +323,7 @@ int set_gpu_device_sm_utilization(int32_t pid,int dev, unsigned int smUtil){  //
     lock_shrreg();
     for (i=0;i<region_info.shared_region->proc_num;i++){
         if (region_info.shared_region->procs[i].hostpid == pid){
-            LOG_INFO("set_gpu_device_sm_utilization:%d %d %lu->%lu",pid,dev,region_info.shared_region->procs[i].device_util[dev].sm_util,smUtil);
+            LOG_INFO("set_gpu_device_sm_utilization:%d %d %lu->%u", pid, dev, region_info.shared_region->procs[i].device_util[dev].sm_util, smUtil);
             region_info.shared_region->procs[i].device_util[dev].sm_util = smUtil;
             break;
         }
@@ -409,7 +409,7 @@ int add_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
 }
 
 int rm_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
-    LOG_INFO("rm_gpu_device_memory:%d %d->%d %lu:%lu",pid,cudadev,cuda_to_nvml_map(cudadev),type,usage);
+    LOG_INFO("rm_gpu_device_memory:%d %d->%d %d:%lu",pid,cudadev,cuda_to_nvml_map(cudadev),type,usage);
     int dev = cuda_to_nvml_map(cudadev);
     ensure_initialized();
     lock_shrreg();
@@ -641,8 +641,12 @@ void print_all() {
     LOG_INFO("Total process: %d",region_info.shared_region->proc_num);
     for (i=0;i<region_info.shared_region->proc_num;i++) {
         for (int dev=0;dev<CUDA_DEVICE_MAX_COUNT;dev++){
-            LOG_INFO("Process %d hostPid: %d, sm: %d, memory: %d, record: %d",region_info.shared_region->procs[i].pid, region_info.shared_region->procs[i].hostpid, 
-            region_info.shared_region->procs[i].device_util[dev].sm_util, region_info.shared_region->procs[i].monitorused[dev], region_info.shared_region->procs[i].used[dev].total);
+            LOG_INFO("Process %d hostPid: %d, sm: %lu, memory: %lu, record: %lu",
+                region_info.shared_region->procs[i].pid,
+                region_info.shared_region->procs[i].hostpid, 
+                region_info.shared_region->procs[i].device_util[dev].sm_util, 
+                region_info.shared_region->procs[i].monitorused[dev], 
+                region_info.shared_region->procs[i].used[dev].total);
         }
     }
 }

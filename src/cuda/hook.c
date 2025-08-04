@@ -325,7 +325,6 @@ void *find_symbols_in_table(const char *symbol) {
 void *find_symbols_in_table_by_cudaversion(const char *symbol,int  cudaVersion) {
   void *pfn;
   const char *real_symbol;
-  int i;
   real_symbol = get_real_func_name(symbol,cudaVersion);
   if (real_symbol == NULL) {
     // if not find in mulit func version def, use origin logic

@@ -105,7 +105,7 @@ nvmlReturn_t set_task_pid() {
     nvmlDevice_t device;
     nvmlReturn_t res;
     CUcontext pctx;
-    int i,t;
+    int i;
     CHECK_NVML_API(nvmlInit());
     CHECK_NVML_API(nvmlDeviceGetHandleByIndex(0, &device));
     
