@@ -53,7 +53,7 @@ pthread_mutex_t _kernel_mutex;
 int _record_kernel_interval = 1;
 
 // forwards
-void clear_proc_slot_nolock(int32_t, int);
+int clear_proc_slot_nolock(int);
 void do_init_device_memory_limits(uint64_t*, int);
 void exit_withlock(int exitcode);
 
@@ -196,47 +196,6 @@ void do_init_device_sm_limits(uint64_t *arr, int len) {
     }
 }
 
-int rm_quitted_process(){
-    FILE *wstream;
-    wstream=popen("ps ax","r");
-    char tmp[256];
-    char *atmp;
-    int pidmap[SHARED_REGION_MAX_PROCESS_NUM];
-    memset(pidmap,0,sizeof(int)*SHARED_REGION_MAX_PROCESS_NUM);
-    ensure_initialized();
-
-    int32_t pid;
-    int i = 0,cnt=0,ret=0;
-    LOG_INFO("rm_quitted_process");
-    lock_shrreg();
-    if (wstream!=NULL){
-        while (fgets(tmp,256,wstream)) {
-            atmp = strtok(tmp," ");
-            pid = atoi(atmp);
-            if (pid!=0)
-                for (i=0;i<region_info.shared_region->proc_num;i++)
-                    if (region_info.shared_region->procs[i].pid==pid){
-                        pidmap[i]=1;
-                    }
-        }
-        for (i=0;i<region_info.shared_region->proc_num;i++){
-            if (pidmap[i]==0) {
-                LOG_INFO("rm pid=%d\n",region_info.shared_region->procs[i].pid);
-                ret = 1;
-                continue;
-            }
-            region_info.shared_region->procs[cnt].pid=region_info.shared_region->procs[i].pid;
-            memcpy(region_info.shared_region->procs[cnt].used,region_info.shared_region->procs[i].used,sizeof(device_memory_t)*CUDA_DEVICE_MAX_COUNT);
-            memcpy(region_info.shared_region->procs[cnt].device_util,region_info.shared_region->procs[i].device_util,sizeof(device_util_t)*CUDA_DEVICE_MAX_COUNT);
-            cnt++;
-        }
-        region_info.shared_region->proc_num=cnt;
-        pclose(wstream);
-    }
-    unlock_shrreg();
-    return ret;
-}
-
 int active_oom_killer() {
     int i;
     for (i=0;i<region_info.shared_region->proc_num;i++) {
@@ -288,7 +247,6 @@ size_t get_gpu_memory_monitor(const int dev) {
 size_t get_gpu_memory_usage(const int dev) {
     LOG_INFO("get_gpu_memory_usage dev=%d",dev);
     ensure_initialized();
-//    rm_quitted_process();
     int i=0;
     size_t total=0;
     lock_shrreg();
@@ -583,8 +541,9 @@ void unlock_shrreg() {
 }
 
 
-void clear_proc_slot_nolock(int32_t current_pid, int do_clear) {
+int clear_proc_slot_nolock(int do_clear) {
     int slot = 0;
+    int res=0;
     shared_region_t* region = region_info.shared_region;
     while (slot < region->proc_num) {
         int32_t pid = region->procs[slot].pid;
@@ -595,12 +554,13 @@ void clear_proc_slot_nolock(int32_t current_pid, int do_clear) {
                 slot++;
                 continue;
             }
-
+            res=1;
             region->proc_num--;
             region->procs[slot] = region->procs[region->proc_num];
             __sync_synchronize();
         }
     }
+    return res;
 }
 
 void init_proc_slot_withlock() {
@@ -632,7 +592,7 @@ void init_proc_slot_withlock() {
         region->proc_num++;
     }
 
-    clear_proc_slot_nolock(current_pid, 1);
+    clear_proc_slot_nolock(1);
     unlock_shrreg();
 }
 

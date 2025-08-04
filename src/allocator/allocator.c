@@ -52,7 +52,7 @@ int oom_check(const int dev,size_t addon) {
     if (new_allocated > limit) {
         LOG_ERROR("Device %d OOM %lu / %lu", d, new_allocated, limit);
 
-        if (rm_quitted_process() > 0)
+        if (clear_proc_slot_nolock(1) > 0)
             return oom_check(dev,addon);
         return 1;
     }
