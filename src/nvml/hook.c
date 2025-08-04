@@ -272,7 +272,6 @@ extern void* _dl_sym(void*, const char*, void*);
 void load_nvml_libraries() {
     void *table = NULL;
     char driver_filename[FILENAME_MAX];
-    int i;
 
     if (real_dlsym == NULL) {
         real_dlsym = dlvsym(RTLD_NEXT,"dlsym","GLIBC_2.2.5");
@@ -289,7 +288,7 @@ void load_nvml_libraries() {
     if (!table) {
         LOG_WARN("can't find library %s", driver_filename);  
     }
-
+    int i;
     for (i = 0; i < NVML_ENTRY_END; i++) {
         LOG_DEBUG("loading %s:%d",nvml_library_entry[i].name,i);
         nvml_library_entry[i].fn_ptr = real_dlsym(table, nvml_library_entry[i].name);
@@ -323,11 +322,12 @@ nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,nvmlMemory_t* memory,i
     switch (version){
         case 1:
             CHECK_NVML_API(NVML_OVERRIDE_CALL(nvml_library_entry,nvmlDeviceGetMemoryInfo, device, memory));
+            LOG_DEBUG("origin_free=%lld total=%lld\n", ((nvmlMemory_t*)memory)->free, ((nvmlMemory_t*)memory)->total);
             break;
         case 2:
             CHECK_NVML_API(NVML_OVERRIDE_CALL(nvml_library_entry,nvmlDeviceGetMemoryInfo_v2, device, (nvmlMemory_v2_t *)memory));
+            LOG_DEBUG("origin_free=%lld total=%lld\n", ((nvmlMemory_v2_t*)memory)->free, ((nvmlMemory_v2_t*)memory)->total);
     }
-    LOG_DEBUG("origin_free=%lld total=%lld\n",memory->free,memory->total);
     CHECK_NVML_API(nvmlDeviceGetIndex(device, &dev_id));
     int cudadev = nvml_to_cuda_map(dev_id);
     if (cudadev < 0)
