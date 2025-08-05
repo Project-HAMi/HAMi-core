@@ -53,7 +53,7 @@ pthread_mutex_t _kernel_mutex;
 int _record_kernel_interval = 1;
 
 // forwards
-int clear_proc_slot_nolock(int);
+
 void do_init_device_memory_limits(uint64_t*, int);
 void exit_withlock(int exitcode);
 

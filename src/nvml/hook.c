@@ -315,7 +315,7 @@ void nvml_postInit() {
     init_device_info();
 }
 
-nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,nvmlMemory_t* memory,int version) {
+nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,void* memory,int version) {
     unsigned int dev_id;
     LOG_DEBUG("into nvmlDeviceGetMemoryInfo");
 
@@ -342,7 +342,7 @@ nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,nvmlMemory_t* memory,i
     if (limit == 0){
         switch (version){
         case 1:
-            memory->used = usage;
+             ((nvmlMemory_t*)memory)->used = usage;
             return NVML_SUCCESS;
         case 2:
             ((nvmlMemory_v2_t *)memory)->used = usage;
@@ -351,9 +351,9 @@ nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,nvmlMemory_t* memory,i
     } else {
         switch (version){
         case 1:
-            memory->free = (limit-usage);
-            memory->total = limit;
-            memory->used = usage;
+             ((nvmlMemory_t*)memory)->free = (limit-usage);
+             ((nvmlMemory_t*)memory)->total = limit;
+             ((nvmlMemory_t*)memory)->used = usage;
             return NVML_SUCCESS;
         case 2:
             ((nvmlMemory_v2_t *)memory)->free = (limit-usage);

@@ -5,7 +5,6 @@
 
 typedef int (*ExportedFunction)();
 
-#endif
 
 typedef struct {
     uint16_t kind;
@@ -38,3 +37,5 @@ typedef struct {
     FatbinHeader *data;
     void *filename_or_fatbins;
 } FatbincWrapper;
+
+#endif
