@@ -183,6 +183,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuMemPoolExportPointer),
     CUDA_OVERRIDE_ENUM(cuMemPoolImportPointer),
     CUDA_OVERRIDE_ENUM(cuMemcpy2DUnaligned_v2),
+    CUDA_OVERRIDE_ENUM(cuMemcpy2D),
     CUDA_OVERRIDE_ENUM(cuMemcpy2DAsync_v2),
     CUDA_OVERRIDE_ENUM(cuMemcpy3D_v2),
     CUDA_OVERRIDE_ENUM(cuMemcpy3DAsync_v2),

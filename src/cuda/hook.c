@@ -150,6 +150,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemPoolImportFromShareableHandle"},
     {.name = "cuMemPoolExportPointer"},
     {.name = "cuMemPoolImportPointer"},
+    {.name = "cuMemcpy2D"},
     {.name = "cuMemcpy2DUnaligned_v2"},
     {.name = "cuMemcpy2DAsync_v2"},
     {.name = "cuMemcpy3D_v2"},
