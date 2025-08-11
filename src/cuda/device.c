@@ -1,5 +1,4 @@
 #include "include/libcuda_hook.h"
-#include "include/cuda_addition_func.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 #include "include/nvml_prefix.h"
 #include "include/libnvml_hook.h"
