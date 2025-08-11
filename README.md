@@ -37,7 +37,7 @@ _CUDA_DEVICE_SM_LIMIT_ indicates the sm utility percentage of each device
 
 ```bash
 # Add 1GiB memory limit and set max SM utility to 50% for all devices
-export LD_PRELOAD=./libvgpu.so
+export LD_PRELOAD=./build/libvgpu.so
 export CUDA_DEVICE_MEMORY_LIMIT=1g
 export CUDA_DEVICE_SM_LIMIT=50
 ```
