@@ -13,12 +13,10 @@
 #define NVML_NO_UNVERSIONED_FUNC_DEFS
 #include <cuda.h>
 #include <pthread.h>
-#include "include/log_utils.h"
 
-typedef struct {
-  void *fn_ptr;
-  char *name;
-} cuda_entry_t;
+#include "include/log_utils.h"
+#include "include/hook.h" 
+
 
 #define FILENAME_MAX 4096
 
@@ -254,7 +252,7 @@ typedef enum {
     CUDA_ENTRY_END
 }cuda_override_enum_t;
 
-extern cuda_entry_t cuda_library_entry[];
+extern entry_t cuda_library_entry[];
 
 #endif
 

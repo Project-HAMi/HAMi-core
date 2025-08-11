@@ -18,11 +18,7 @@
 #define nvmlDeviceGetGraphicsRunningProcesses   nvmlDeviceGetGraphicsRunningProcesses_v2
 #endif
 
-typedef struct {
-  void *fn_ptr;
-  char *name;
-} entry_t;
-
+#include "include/hook.h"
 extern entry_t nvml_library_entry[];
 
 #endif

@@ -2,12 +2,12 @@
 #include <string.h>
 #include "include/libvgpu.h"
 #include "include/multi_func_hook.h"
-
+#include "include/hook.h"
 
 typedef void* (*fp_dlsym)(void*, const char*);
 extern fp_dlsym real_dlsym;
 
-cuda_entry_t cuda_library_entry[] = {
+entry_t cuda_library_entry[] = {
     /* Init Part    */ 
     {.name = "cuInit"},
     /* Deivce Part */
