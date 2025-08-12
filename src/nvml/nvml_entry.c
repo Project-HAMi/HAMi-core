@@ -2,6 +2,7 @@
 #include "include/nvml_prefix.h"
 #include "include/libnvml_hook.h"
 #include "include/utils.h"
+#include "include/hook.h"
 
 extern entry_t cuda_library_entry[];
 extern entry_t nvml_library_entry[];
@@ -13,7 +14,7 @@ nvmlReturn_t nvmlShutdown(void) {
 
 const char *nvmlErrorString(nvmlReturn_t result) {
   const char *(*_entry)(nvmlReturn_t) =
-      NVML_FIND_ENTRY(nvml_library_entry, nvmlErrorString);
+      FIND_ENTRY(nvml_library_entry, nvmlErrorString);
 
   return _entry(result);
 }
