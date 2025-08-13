@@ -4,7 +4,6 @@
 #include "include/nvml_prefix.h"
 #include <nvml.h>
 #include "include/nvml_prefix.h"
-#include "include/cuda_addition_func.h"
 #include "include/log_utils.h"
 #include "include/libcuda_hook.h"
 #include "include/libvgpu.h"
