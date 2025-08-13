@@ -270,6 +270,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemPoolExportPointer);
     DLSYM_HOOK_FUNC(cuMemPoolImportPointer);
     DLSYM_HOOK_FUNC(cuMemcpy2DUnaligned_v2);
+    DLSYM_HOOK_FUNC(cuMemcpy2D);
     DLSYM_HOOK_FUNC(cuMemcpy2DAsync_v2);
     DLSYM_HOOK_FUNC(cuMemcpy3D_v2);
     DLSYM_HOOK_FUNC(cuMemcpy3DAsync_v2);
