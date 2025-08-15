@@ -255,12 +255,16 @@ int add_chunk_async(CUdeviceptr *address,size_t size, CUstream hStream){
         LOG_ERROR("cuMemPoolGetAttribute failed res=%d",res);
         return res;
     }
-    if ((poollimit!=0) && (poollimit> device_allocasync->limit)) {
-        allocsize = (poollimit-device_allocasync->limit < size)? poollimit-device_allocasync->limit : size;
-        cuCtxGetDevice(&dev);
-        add_gpu_device_memory_usage(getpid(),dev,allocsize,2);
-        device_allocasync->limit=device_allocasync->limit+allocsize;
-        e->entry->length=allocsize;
+    if (poollimit!=0) {
+        if (poollimit> device_allocasync->limit) {
+            allocsize = (poollimit-device_allocasync->limit < size)? poollimit-device_allocasync->limit : size;
+            cuCtxGetDevice(&dev);
+            add_gpu_device_memory_usage(getpid(),dev,allocsize,2);
+            device_allocasync->limit=device_allocasync->limit+allocsize;
+            e->entry->length=allocsize;
+        }else{
+            e->entry->length=0;
+        } 
     }
     LIST_ADD(device_allocasync,e);
     return 0;
