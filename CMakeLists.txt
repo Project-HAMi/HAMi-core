@@ -66,9 +66,11 @@ else()
 endif()
 
 if(GIT_FOUND)
+    message(STATUS "Git original branch is ${GIT_BRANCH}")
     #string(REPLACE "." "_" GIT_BRANCH ${GIT_BRANCH})
-    #string(REPLACE "-" "_" GIT_BRANCH ${GIT_BRANCH})
-    #message(STATUS "Git branch is ${GIT_BRANCH}")
+    string(REPLACE "-" "_" GIT_BRANCH ${GIT_BRANCH})
+    string(REPLACE "/" "_" GIT_BRANCH ${GIT_BRANCH})
+    message(STATUS "Git formated branch is ${GIT_BRANCH}")
 endif()
 
 # Generate the static config header file
