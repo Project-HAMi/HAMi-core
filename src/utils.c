@@ -179,7 +179,7 @@ int parse_cuda_visible_env() {
     int count = 0;
     for (int i = 0; i < CUDA_DEVICE_MAX_COUNT; i++) {
         cuda_to_nvml_map_array[i] = i;
-    }   
+    }
 
     if (need_cuda_virtualize()) {
         for (int i = 0; i < strlen(s); i++) {
