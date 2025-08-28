@@ -14,7 +14,7 @@
 const char* unified_lock="/tmp/vgpulock/lock";
 const int retry_count=20;
 extern size_t context_size;
-extern int cuda_to_nvml_map_array[16];
+extern int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 
 // 0 unified_lock lock success
 // -1 unified_lock lock fail
@@ -175,23 +175,22 @@ nvmlReturn_t set_task_pid() {
 }
 
 int parse_cuda_visible_env() {
-    int i,count,tmp;
     char *s = getenv("CUDA_VISIBLE_DEVICES");
-    count = 0;
-    for (i=0; i<16; i++) {
+    int count = 0;
+    for (int i = 0; i < CUDA_DEVICE_MAX_COUNT; i++) {
         cuda_to_nvml_map_array[i] = i;
     }   
 
     if (need_cuda_virtualize()) {
-        for (i=0; i<strlen(s); i++){
-            if ((s[i] == ',') || (i == 0)){
-                tmp = (i==0) ? atoi(s) : atoi(s + i +1);
+        for (int i = 0; i < strlen(s); i++) {
+            if ((s[i] == ',') || (i == 0)) {
+                int tmp = (i==0) ? atoi(s) : atoi(s + i +1);
                 cuda_to_nvml_map_array[count] = tmp; 
                 count++;
             }
         } 
     }
-    for (i=0;i<16;i++){
+    for (int i = 0; i < CUDA_DEVICE_MAX_COUNT; i++) {
         LOG_INFO("device %d -> %d",i,cuda_to_nvml_map(i));
     }
     LOG_DEBUG("get default cuda from %s",getenv("CUDA_VISIBLE_DEVICES"));
