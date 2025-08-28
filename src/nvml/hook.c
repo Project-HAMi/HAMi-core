@@ -316,10 +316,13 @@ void nvml_postInit() {
 }
 
 nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,void* memory,int version) {
-    unsigned int dev_id;
     LOG_DEBUG("into nvmlDeviceGetMemoryInfo");
+    if (memory == NULL) {
+        return NVML_SUCCESS;
+    }
+    unsigned int dev_id;
 
-    switch (version){
+    switch (version) {
         case 1:
             CHECK_NVML_API(NVML_OVERRIDE_CALL(nvml_library_entry,nvmlDeviceGetMemoryInfo, device, memory));
             LOG_DEBUG("origin_free=%lld total=%lld\n", ((nvmlMemory_t*)memory)->free, ((nvmlMemory_t*)memory)->total);
@@ -327,20 +330,21 @@ nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,void* memory,int versi
         case 2:
             CHECK_NVML_API(NVML_OVERRIDE_CALL(nvml_library_entry,nvmlDeviceGetMemoryInfo_v2, device, (nvmlMemory_v2_t *)memory));
             LOG_DEBUG("origin_free=%lld total=%lld\n", ((nvmlMemory_v2_t*)memory)->free, ((nvmlMemory_v2_t*)memory)->total);
+	    break;
+	default:
+	    return NVML_ERROR_INVALID_ARGUMENT;
     }
     CHECK_NVML_API(nvmlDeviceGetIndex(device, &dev_id));
     int cudadev = nvml_to_cuda_map(dev_id);
-    if (cudadev < 0)
+    if (cudadev < 0) {
         return NVML_SUCCESS;
+    }
     size_t usage = get_current_device_memory_usage(cudadev);
     size_t monitor = get_current_device_memory_monitor(cudadev);
     size_t limit = get_current_device_memory_limit(cudadev);
-    LOG_DEBUG("usage=%ld limit=%ld monitor=%ld",usage,limit,monitor);
-    if ( memory == NULL) {
-        return NVML_SUCCESS;
-    }
-    if (limit == 0){
-        switch (version){
+    LOG_DEBUG("usage=%ld limit=%ld monitor=%ld", usage, limit, monitor);
+    if (limit == 0) {
+        switch (version) {
         case 1:
              ((nvmlMemory_t*)memory)->used = usage;
             return NVML_SUCCESS;
@@ -349,7 +353,7 @@ nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,void* memory,int versi
             return NVML_SUCCESS;
         }
     } else {
-        switch (version){
+        switch (version) {
         case 1:
              ((nvmlMemory_t*)memory)->free = (limit-usage);
              ((nvmlMemory_t*)memory)->total = limit;
