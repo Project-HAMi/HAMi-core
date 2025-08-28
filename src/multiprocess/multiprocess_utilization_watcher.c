@@ -29,7 +29,7 @@ static int g_max_thread_per_sm;
 static volatile long g_cur_cuda_cores = 0;
 static volatile long g_total_cuda_cores = 0;
 extern int pidfound;
-int cuda_to_nvml_map_array[16];
+int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 
 void rate_limiter(int grids, int blocks) {
   long before_cuda_cores = 0;

@@ -34,10 +34,6 @@
 #define SEM_WAIT_RETRY_TIMES 30
 #endif
 
-#ifndef CUDA_DEVICE_MAX_COUNT
-#define CUDA_DEVICE_MAX_COUNT 16
-#endif
-
 int pidfound;
 
 int ctx_activate[32];
