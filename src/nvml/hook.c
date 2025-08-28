@@ -330,9 +330,9 @@ nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,void* memory,int versi
         case 2:
             CHECK_NVML_API(NVML_OVERRIDE_CALL(nvml_library_entry,nvmlDeviceGetMemoryInfo_v2, device, (nvmlMemory_v2_t *)memory));
             LOG_DEBUG("origin_free=%lld total=%lld\n", ((nvmlMemory_v2_t*)memory)->free, ((nvmlMemory_v2_t*)memory)->total);
-	    break;
+            break;
         default:
-	    return NVML_ERROR_INVALID_ARGUMENT;
+            return NVML_ERROR_INVALID_ARGUMENT;
     }
     CHECK_NVML_API(nvmlDeviceGetIndex(device, &dev_id));
     int cudadev = nvml_to_cuda_map(dev_id);
