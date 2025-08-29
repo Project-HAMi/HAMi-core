@@ -1,6 +1,6 @@
 # Contributing
 
-Welcome to HAMi!
+Welcome to HAMi-core!
 
 - [Contributing](#contributing)
 - [Before you get started](#before-you-get-started)
@@ -90,7 +90,7 @@ HAMi generally follows the standard [GitHub pull request](https://help.github.co
 To submit a proposed change, please develop the code/fix and add new test cases.
 Before submitting a pull request, run these local verifications to predict whether continuous integration will pass or fail:
 
-* Run and pass `make verify`
+* Run `make build-in-docker`
 
 ## Code Review
 
