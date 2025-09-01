@@ -682,7 +682,7 @@ CUresult cuMemcpy2D(const CUDA_MEMCPY2D *pCopy) {
 
 CUresult cuMemcpy2D_v2(const CUDA_MEMCPY2D *pCopy) {
     LOG_DEBUG("cuMemcpy2D_v2");
-    return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemcpy2D,pCopy);
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemcpy2D, pCopy);
 }
 /*
 CUresult cuMemcpy2DUnaligned(const CUDA_MEMCPY2D *pCopy) {
