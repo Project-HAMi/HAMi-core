@@ -210,6 +210,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuGraphMemcpyNodeGetParams),
     CUDA_OVERRIDE_ENUM(cuGraphMemcpyNodeSetParams),
     CUDA_OVERRIDE_ENUM(cuGraphAddMemsetNode),
+    CUDA_OVERRIDE_ENUM(cuGraphAddMemAllocNode),
     CUDA_OVERRIDE_ENUM(cuGraphMemsetNodeGetParams),
     CUDA_OVERRIDE_ENUM(cuGraphMemsetNodeSetParams),
     CUDA_OVERRIDE_ENUM(cuGraphAddHostNode),

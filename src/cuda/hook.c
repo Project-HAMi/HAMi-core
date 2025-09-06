@@ -178,6 +178,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuGraphMemcpyNodeGetParams"},
     {.name = "cuGraphMemcpyNodeSetParams"},
     {.name = "cuGraphAddMemsetNode"},
+    {.name = "cuGraphAddMemAllocNode"},
     {.name = "cuGraphMemsetNodeGetParams"},
     {.name = "cuGraphMemsetNodeSetParams"},
     {.name = "cuGraphAddHostNode"},
