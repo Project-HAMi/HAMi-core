@@ -126,10 +126,8 @@ CUresult cuArrayDestroy(CUarray arr) {
     return res;
 }
 
-CUresult cuMemoryAllocate(CUdeviceptr* dptr, size_t bytesize, size_t* bytesallocated,void* data){
+CUresult cuMemoryAllocate(CUdeviceptr* dptr, size_t bytesize, void* data) {
     CUresult res;
-    if (bytesallocated!=NULL)
-        *bytesallocated = bytesize;
     res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemAlloc_v2,dptr,bytesize);
     return res;
 }
@@ -322,8 +320,8 @@ CUresult cuIpcCloseMemHandle(CUdeviceptr dptr){
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuIpcCloseMemHandle,dptr);
 }
 
-CUresult cuIpcGetMemHandle ( CUipcMemHandle* pHandle, CUdeviceptr dptr ){
-    LOG_DEBUG("cuIpcGetMemHandle dptr=%llx",dptr);
+CUresult cuIpcGetMemHandle(CUipcMemHandle* pHandle, CUdeviceptr dptr) {
+    LOG_MSG("cuIpcGetMemHandle dptr=%llx", dptr);
     ENSURE_RUNNING();
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuIpcGetMemHandle,pHandle,dptr);
 }
@@ -499,21 +497,23 @@ CUresult cuMemGetInfo_v2(size_t* free, size_t* total) {
     size_t limit = get_current_device_memory_limit(dev);
     if (limit == 0) {
         CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
-        LOG_MSG("orig free=%ld total=%ld",*free,*total);
+        LOG_INFO("orig free=%ld total=%ld", *free, *total);
         *free = *total - usage;
-        LOG_MSG("after free=%ld total=%ld",*free,*total); 
+        LOG_INFO("after free=%ld total=%ld", *free, *total);
         return CUDA_SUCCESS;
     } else if (limit < usage) {
-        LOG_WARN("limit < usage; usage=%ld, limit=%ld",usage,limit);
+        LOG_WARN("limit < usage; usage=%ld, limit=%ld", usage, limit);
         return CUDA_ERROR_INVALID_VALUE;
     } else {
         CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
-        LOG_MSG("orig free=%ld total=%ld limit=%ld usage=%ld",*free,*total,limit,usage);
+        LOG_INFO("orig free=%ld total=%ld limit=%ld usage=%ld",
+            *free, *total, limit, usage);
         // Ensure total memory does not exceed the physical or imposed limit.
         size_t actual_limit = (limit > *total) ? *total : limit;
         *free = (actual_limit > usage) ? (actual_limit - usage) : 0;
         *total = actual_limit;
-        LOG_MSG("after free=%ld total=%ld limit=%ld usage=%ld",*free,*total,limit,usage);
+        LOG_INFO("after free=%ld total=%ld limit=%ld usage=%ld",
+            *free, *total, limit, usage);
         return CUDA_SUCCESS;
     }
 }
@@ -566,21 +566,50 @@ CUresult cuMemoryFree(CUdeviceptr dptr) {
     return res;
 }
 
-CUresult cuMemAddressReserve ( CUdeviceptr* ptr, size_t size, size_t alignment, CUdeviceptr addr, unsigned long long flags ) {
-    LOG_INFO("cuMemAddressReserve:%lx %lld",size,addr);
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemAddressReserve,ptr,size,alignment,addr,flags);
+CUresult cuMemAddressReserve(CUdeviceptr* ptr, size_t size,
+    size_t alignment, CUdeviceptr addr, unsigned long long flags ) {
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,
+        cuMemAddressReserve, ptr, size, alignment, addr, flags);
+    LOG_INFO("cuMemAddressReserve:%lx %llx", size, *ptr);
     return res;
 }
 
 CUresult cuMemCreate ( CUmemGenericAllocationHandle* handle, size_t size, const CUmemAllocationProp* prop, unsigned long long flags ) {
-    LOG_INFO("cuMemCreate:");
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemCreate,handle,size,prop,flags);
+    LOG_INFO("cuMemCreate:%lld:%d", size, prop->location.id);
+    ENSURE_RUNNING();
+    CUdevice dev;
+    CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxGetDevice, &dev);
+    if (oom_check(dev, size)) {
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,
+        cuMemCreate, handle, size, prop, flags);
+    if (res == CUDA_SUCCESS) {
+        add_chunk_only(*handle, size);
+    }
+    return res;
+}
+
+CUresult cuMemRelease(CUmemGenericAllocationHandle handle) {
+    LOG_INFO("cuMemRelease:%llx", handle);
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemRelease, handle);
+    if (res == CUDA_SUCCESS) {
+        remove_chunk_only(handle);
+    }
     return res;
 }
 
 CUresult cuMemMap( CUdeviceptr ptr, size_t size, size_t offset, CUmemGenericAllocationHandle handle, unsigned long long flags ) {
-    LOG_INFO("cuMemMap");
+    LOG_INFO("cuMemMap:%lld(%llx,%llx)", size, ptr, offset);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemMap,ptr,size,offset,handle,flags);
+    return res;
+}
+
+CUresult cuMemImportFromShareableHandle(CUmemGenericAllocationHandle* handle,
+    void* osHandle, CUmemAllocationHandleType shHandleType) {
+    LOG_INFO("cuMemImportFromSharableHandle");
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,
+        cuMemImportFromShareableHandle, handle, osHandle, shHandleType);
     return res;
 }
 

@@ -7,6 +7,9 @@
 #include <pthread.h>
 #include <errno.h>
 
+#define CUMALLOC 0
+#define CUCREATE 1
+
 struct allocated_device_memory_struct{
     CUdeviceptr address;
     size_t length;
@@ -155,6 +158,7 @@ int oom_check(const int dev,size_t addon);
 int allocate_raw(CUdeviceptr *dptr, size_t size);
 int free_raw(CUdeviceptr dptr);
 int add_chunk_only(CUdeviceptr address,size_t size);
+int remove_chunk_only(CUdeviceptr address);
 int allocate_async_raw(CUdeviceptr *dptr, size_t size, CUstream hStream);
 int free_raw_async(CUdeviceptr dptr, CUstream hStream);
 
