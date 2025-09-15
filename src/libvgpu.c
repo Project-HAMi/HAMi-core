@@ -252,7 +252,9 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuLinkDestroy);
     DLSYM_HOOK_FUNC(cuMemAddressReserve);
     DLSYM_HOOK_FUNC(cuMemCreate);
+    DLSYM_HOOK_FUNC(cuMemRelease);
     DLSYM_HOOK_FUNC(cuMemMap);
+    DLSYM_HOOK_FUNC(cuMemImportFromShareableHandle);
     DLSYM_HOOK_FUNC(cuMemAllocAsync);
     // cuda 11.7 new memory ops
     DLSYM_HOOK_FUNC(cuMemHostGetDevicePointer_v2);

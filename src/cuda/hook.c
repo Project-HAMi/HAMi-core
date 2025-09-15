@@ -132,7 +132,9 @@ cuda_entry_t cuda_library_entry[] = {
     /* Virtual Memory Part */
     {.name = "cuMemAddressReserve"},
     {.name = "cuMemCreate"},
+    {.name = "cuMemRelease"},
     {.name = "cuMemMap"},
+    {.name = "cucuMemImportFromShareableHandle"},
     {.name = "cuMemAllocAsync"},
     {.name = "cuMemFreeAsync"},
     /* cuda11.7 new api memory part */
