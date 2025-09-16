@@ -166,7 +166,6 @@ void unlock_shrreg();
 //Setspec of the corresponding device
 int setspec();
 //Remove quitted process
-int rm_quitted_process();
 
 void suspend_all();
 void resume_all();
@@ -180,5 +179,6 @@ int put_device_info();
 unsigned int nvml_to_cuda_map(unsigned int nvmldev);
 unsigned int cuda_to_nvml_map(unsigned int cudadev);
 
+int clear_proc_slot_nolock(int);
 #endif  // __MULTIPROCESS_MEMORY_LIMIT_H__
 

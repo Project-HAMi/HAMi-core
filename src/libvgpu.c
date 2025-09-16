@@ -4,7 +4,6 @@
 #include "include/nvml_prefix.h"
 #include <nvml.h>
 #include "include/nvml_prefix.h"
-#include "include/cuda_addition_func.h"
 #include "include/log_utils.h"
 #include "include/libcuda_hook.h"
 #include "include/libvgpu.h"
@@ -253,7 +252,9 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuLinkDestroy);
     DLSYM_HOOK_FUNC(cuMemAddressReserve);
     DLSYM_HOOK_FUNC(cuMemCreate);
+    DLSYM_HOOK_FUNC(cuMemRelease);
     DLSYM_HOOK_FUNC(cuMemMap);
+    DLSYM_HOOK_FUNC(cuMemImportFromShareableHandle);
     DLSYM_HOOK_FUNC(cuMemAllocAsync);
     // cuda 11.7 new memory ops
     DLSYM_HOOK_FUNC(cuMemHostGetDevicePointer_v2);
@@ -271,6 +272,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemPoolExportPointer);
     DLSYM_HOOK_FUNC(cuMemPoolImportPointer);
     DLSYM_HOOK_FUNC(cuMemcpy2DUnaligned_v2);
+    DLSYM_HOOK_FUNC(cuMemcpy2D_v2);
     DLSYM_HOOK_FUNC(cuMemcpy2DAsync_v2);
     DLSYM_HOOK_FUNC(cuMemcpy3D_v2);
     DLSYM_HOOK_FUNC(cuMemcpy3DAsync_v2);

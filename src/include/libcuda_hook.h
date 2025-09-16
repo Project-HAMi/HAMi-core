@@ -164,7 +164,9 @@ typedef enum {
     /* Virtual Memory Part */
     CUDA_OVERRIDE_ENUM(cuMemAddressReserve),
     CUDA_OVERRIDE_ENUM(cuMemCreate),
+    CUDA_OVERRIDE_ENUM(cuMemRelease),
     CUDA_OVERRIDE_ENUM(cuMemMap),
+    CUDA_OVERRIDE_ENUM(cuMemImportFromShareableHandle),
     CUDA_OVERRIDE_ENUM(cuMemAllocAsync),
     CUDA_OVERRIDE_ENUM(cuMemFreeAsync),
     /* cuda11.7 new api memory part */
@@ -183,6 +185,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuMemPoolExportPointer),
     CUDA_OVERRIDE_ENUM(cuMemPoolImportPointer),
     CUDA_OVERRIDE_ENUM(cuMemcpy2DUnaligned_v2),
+    CUDA_OVERRIDE_ENUM(cuMemcpy2D_v2),
     CUDA_OVERRIDE_ENUM(cuMemcpy2DAsync_v2),
     CUDA_OVERRIDE_ENUM(cuMemcpy3D_v2),
     CUDA_OVERRIDE_ENUM(cuMemcpy3DAsync_v2),

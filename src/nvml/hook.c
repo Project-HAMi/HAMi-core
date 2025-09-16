@@ -260,7 +260,7 @@ pthread_once_t init_virtual_map_post_flag = PTHREAD_ONCE_INIT;
 typedef void* (*fp_dlsym)(void*, const char*);
 extern fp_dlsym real_dlsym;
 extern int virtual_nvml_devices;
-extern int cuda_to_nvml_map_array[16];
+extern int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 
 nvmlReturn_t nvmlDeviceGetIndex(nvmlDevice_t device, unsigned int *index) {
     return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetIndex, device, index);
@@ -272,7 +272,6 @@ extern void* _dl_sym(void*, const char*, void*);
 void load_nvml_libraries() {
     void *table = NULL;
     char driver_filename[FILENAME_MAX];
-    int i;
 
     if (real_dlsym == NULL) {
         real_dlsym = dlvsym(RTLD_NEXT,"dlsym","GLIBC_2.2.5");
@@ -289,7 +288,7 @@ void load_nvml_libraries() {
     if (!table) {
         LOG_WARN("can't find library %s", driver_filename);  
     }
-
+    int i;
     for (i = 0; i < NVML_ENTRY_END; i++) {
         LOG_DEBUG("loading %s:%d",nvml_library_entry[i].name,i);
         nvml_library_entry[i].fn_ptr = real_dlsym(table, nvml_library_entry[i].name);
@@ -306,8 +305,7 @@ void nvml_preInit() {
     ensure_initialized();
     load_env_from_file(ENV_OVERRIDE_FILE);
     load_nvml_libraries();
-    int i;
-    for (i=0; i<16; i++) {
+    for (int i = 0; i < CUDA_DEVICE_MAX_COUNT; i++) {
         cuda_to_nvml_map_array[i] = i;
     }   
 }
@@ -316,44 +314,49 @@ void nvml_postInit() {
     init_device_info();
 }
 
-nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,nvmlMemory_t* memory,int version) {
-    unsigned int dev_id;
+nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,void* memory,int version) {
     LOG_DEBUG("into nvmlDeviceGetMemoryInfo");
+    if (memory == NULL) {
+        return NVML_SUCCESS;
+    }
+    unsigned int dev_id;
 
-    switch (version){
+    switch (version) {
         case 1:
             CHECK_NVML_API(NVML_OVERRIDE_CALL(nvml_library_entry,nvmlDeviceGetMemoryInfo, device, memory));
+            LOG_DEBUG("origin_free=%lld total=%lld\n", ((nvmlMemory_t*)memory)->free, ((nvmlMemory_t*)memory)->total);
             break;
         case 2:
             CHECK_NVML_API(NVML_OVERRIDE_CALL(nvml_library_entry,nvmlDeviceGetMemoryInfo_v2, device, (nvmlMemory_v2_t *)memory));
+            LOG_DEBUG("origin_free=%lld total=%lld\n", ((nvmlMemory_v2_t*)memory)->free, ((nvmlMemory_v2_t*)memory)->total);
+            break;
+        default:
+            return NVML_ERROR_INVALID_ARGUMENT;
     }
-    LOG_DEBUG("origin_free=%lld total=%lld\n",memory->free,memory->total);
     CHECK_NVML_API(nvmlDeviceGetIndex(device, &dev_id));
     int cudadev = nvml_to_cuda_map(dev_id);
-    if (cudadev < 0)
+    if (cudadev < 0) {
         return NVML_SUCCESS;
+    }
     size_t usage = get_current_device_memory_usage(cudadev);
     size_t monitor = get_current_device_memory_monitor(cudadev);
     size_t limit = get_current_device_memory_limit(cudadev);
-    LOG_DEBUG("usage=%ld limit=%ld monitor=%ld",usage,limit,monitor);
-    if ( memory == NULL) {
-        return NVML_SUCCESS;
-    }
-    if (limit == 0){
-        switch (version){
+    LOG_DEBUG("usage=%ld limit=%ld monitor=%ld", usage, limit, monitor);
+    if (limit == 0) {
+        switch (version) {
         case 1:
-            memory->used = usage;
+             ((nvmlMemory_t*)memory)->used = usage;
             return NVML_SUCCESS;
         case 2:
             ((nvmlMemory_v2_t *)memory)->used = usage;
             return NVML_SUCCESS;
         }
     } else {
-        switch (version){
+        switch (version) {
         case 1:
-            memory->free = (limit-usage);
-            memory->total = limit;
-            memory->used = usage;
+             ((nvmlMemory_t*)memory)->free = (limit-usage);
+             ((nvmlMemory_t*)memory)->total = limit;
+             ((nvmlMemory_t*)memory)->used = usage;
             return NVML_SUCCESS;
         case 2:
             ((nvmlMemory_v2_t *)memory)->free = (limit-usage);

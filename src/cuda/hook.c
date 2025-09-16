@@ -132,7 +132,9 @@ cuda_entry_t cuda_library_entry[] = {
     /* Virtual Memory Part */
     {.name = "cuMemAddressReserve"},
     {.name = "cuMemCreate"},
+    {.name = "cuMemRelease"},
     {.name = "cuMemMap"},
+    {.name = "cucuMemImportFromShareableHandle"},
     {.name = "cuMemAllocAsync"},
     {.name = "cuMemFreeAsync"},
     /* cuda11.7 new api memory part */
@@ -150,6 +152,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemPoolImportFromShareableHandle"},
     {.name = "cuMemPoolExportPointer"},
     {.name = "cuMemPoolImportPointer"},
+    {.name = "cuMemcpy2D_v2"},
     {.name = "cuMemcpy2DUnaligned_v2"},
     {.name = "cuMemcpy2DAsync_v2"},
     {.name = "cuMemcpy3D_v2"},
@@ -325,7 +328,6 @@ void *find_symbols_in_table(const char *symbol) {
 void *find_symbols_in_table_by_cudaversion(const char *symbol,int  cudaVersion) {
   void *pfn;
   const char *real_symbol;
-  int i;
   real_symbol = get_real_func_name(symbol,cudaVersion);
   if (real_symbol == NULL) {
     // if not find in mulit func version def, use origin logic
