@@ -95,13 +95,12 @@ long delta(int up_limit, int user_current, long share) {
   return share;
 }
 
-unsigned int nvml_to_cuda_map(unsigned int nvmldev){
+int nvml_to_cuda_map(unsigned int nvmldev){
     unsigned int devcount;
     CHECK_NVML_API(nvmlDeviceGetCount_v2(&devcount));
-    int i=0;
-    for (i=0;i<devcount;i++){
+    for (unsigned int i = 0; i < devcount; i++){
         if (cuda_to_nvml_map(i)==nvmldev)
-          return i;
+          return (int)i;
     }
     return -1;
 }
