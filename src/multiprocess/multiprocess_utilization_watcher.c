@@ -105,7 +105,7 @@ int nvml_to_cuda_map(unsigned int nvmldev){
     return -1;
 }
 
-unsigned int cuda_to_nvml_map(unsigned int cudadev){
+int cuda_to_nvml_map(unsigned int cudadev){
     return cuda_to_nvml_map_array[cudadev];
 }
 
