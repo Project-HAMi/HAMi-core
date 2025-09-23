@@ -99,7 +99,8 @@ int nvml_to_cuda_map(unsigned int nvmldev){
     unsigned int devcount;
     CHECK_NVML_API(nvmlDeviceGetCount_v2(&devcount));
     for (unsigned int i = 0; i < devcount; i++){
-        if (cuda_to_nvml_map(i)==nvmldev)
+        int mapped = cuda_to_nvml_map(i);
+        if ((mapped >= 0) && (mapped == (int)nvmldev))
           return (int)i;
     }
     return -1;
