@@ -1,6 +1,7 @@
 //#include "memory_limit.h"
 #include <fcntl.h>
 #include <dlfcn.h>
+#include <pthread.h>
 #include "include/nvml_prefix.h"
 #include <nvml.h>
 #include "include/nvml_prefix.h"
@@ -40,7 +41,7 @@ fp_dlsym real_dlsym = NULL;
 
 pthread_mutex_t dlsym_lock;
 typedef struct {
-    int tid;
+    pthread_t tid;
     void *pointer;
 }tid_dl_map;
 
@@ -55,11 +56,11 @@ void init_dlsym(){
     memset(dlmap, 0, sizeof(tid_dl_map)*DLMAP_SIZE);
 }
 
-int check_dlmap(int tid,void *pointer){
+int check_dlmap(pthread_t tid, void *pointer){
     int i;
     int cursor = (dlmap_count < DLMAP_SIZE) ? dlmap_count : DLMAP_SIZE;
     for (i=cursor-1; i>=0; i--) {
-        if ((dlmap[i].tid==tid) && (dlmap[i].pointer==pointer))
+        if ((dlmap[i].pointer == pointer) && pthread_equal(dlmap[i].tid, tid))
             return 1;
     }
     cursor = dlmap_count % DLMAP_SIZE;
@@ -89,9 +90,8 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
     }
     if (handle == RTLD_NEXT) {
         void *h = real_dlsym(RTLD_NEXT,symbol);
-        int tid;
         pthread_mutex_lock(&dlsym_lock);
-        tid = pthread_self();
+        pthread_t tid = pthread_self();
         if (check_dlmap(tid,h)){
             LOG_WARN("recursive dlsym : %s\n",symbol);
             h = NULL;
