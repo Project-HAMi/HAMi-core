@@ -10,7 +10,7 @@ extern fp_dlsym real_dlsym;
 cuda_entry_t cuda_library_entry[] = {
     /* Init Part    */ 
     {.name = "cuInit"},
-    /* Deivce Part */
+    /* Device Part */
     {.name = "cuDeviceGetAttribute"},
     {.name = "cuDeviceGet"},
     {.name = "cuDeviceGetCount"},
@@ -328,7 +328,7 @@ void *find_symbols_in_table_by_cudaversion(const char *symbol,int  cudaVersion) 
   const char *real_symbol;
   real_symbol = get_real_func_name(symbol,cudaVersion);
   if (real_symbol == NULL) {
-    // if not find in mulit func version def, use origin logic
+    // if not find in multi func version def, use origin logic
     pfn = find_symbols_in_table(symbol);
   } else {
     pfn = find_real_symbols_in_table(real_symbol);

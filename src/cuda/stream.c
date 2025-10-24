@@ -7,7 +7,7 @@ CUresult cuStreamCreate(CUstream *phstream, unsigned int flags){
 }
 
 CUresult cuStreamDestroy_v2 ( CUstream hStream ){
-    LOG_DEBUG("cuStreamDestory_v2 %p",hStream);
+    LOG_DEBUG("cuStreamDestroy_v2 %p",hStream);
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuStreamDestroy_v2,hStream);
 }
 

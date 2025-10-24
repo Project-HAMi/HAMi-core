@@ -68,7 +68,7 @@ uint64_t compute_3d_array_alloc_bytes(const CUDA_ARRAY3D_DESCRIPTOR* desc) {
     }
     bytes *= cuarray_format_bytes[desc->Format];
 
-    // TODO: take acount of alignment and etc
+    // TODO: take account of alignment and etc
     // bytes ++ ???
     return bytes;
 }
@@ -87,7 +87,7 @@ uint64_t compute_array_alloc_bytes(const CUDA_ARRAY_DESCRIPTOR* desc) {
     }
     bytes *= cuarray_format_bytes[desc->Format];
 
-    // TODO: take acount of alignment and etc
+    // TODO: take account of alignment and etc
     // bytes ++ ???
     return bytes;
 }
@@ -118,7 +118,7 @@ CUresult cuArrayCreate_v2(CUarray* arr, const CUDA_ARRAY_DESCRIPTOR* desc) {
 
 CUresult cuArrayDestroy(CUarray arr) {
     CUDA_ARRAY3D_DESCRIPTOR desc;
-    LOG_DEBUG("cuArrayDestory");
+    LOG_DEBUG("cuArrayDestroy");
     CHECK_DRV_API(cuArray3DGetDescriptor(&desc, arr));
     /*uint64_t bytes*/
     compute_3d_array_alloc_bytes(&desc);
@@ -283,14 +283,14 @@ CUresult cuMemcpy(CUdeviceptr dst, CUdeviceptr src, size_t ByteCount ){
 }
 
 CUresult cuPointerGetAttribute ( void* data, CUpointer_attribute attribute, CUdeviceptr ptr ){
-    LOG_DEBUG("cuPointGetAttribue data=%p attribute=%d ptr=%llx",data,(int)attribute,ptr);
+    LOG_DEBUG("cuPointGetAttribute data=%p attribute=%d ptr=%llx",data,(int)attribute,ptr);
     ENSURE_RUNNING();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuPointerGetAttribute,data,attribute,ptr);
     return res;
 }
 
 CUresult cuPointerGetAttributes ( unsigned int  numAttributes, CUpointer_attribute* attributes, void** data, CUdeviceptr ptr ) {
-    LOG_DEBUG("cuPointGetAttribue data=%p ptr=%llx",data,ptr);
+    LOG_DEBUG("cuPointGetAttribute data=%p ptr=%llx",data,ptr);
     ENSURE_RUNNING();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuPointerGetAttributes,numAttributes,attributes,data,ptr);
     int cur=0;
@@ -309,7 +309,7 @@ CUresult cuPointerGetAttributes ( unsigned int  numAttributes, CUpointer_attribu
 }
 
 CUresult cuPointerSetAttribute ( const void* value, CUpointer_attribute attribute, CUdeviceptr ptr ){
-    LOG_DEBUG("cuPointSetAttribue value=%p attribute=%d ptr=%llx",value,(int)attribute,ptr);
+    LOG_DEBUG("cuPointSetAttribute value=%p attribute=%d ptr=%llx",value,(int)attribute,ptr);
     ENSURE_RUNNING();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuPointerSetAttribute,value,attribute,ptr);
     return res;
@@ -537,7 +537,7 @@ CUresult cuMipmappedArrayCreate(CUmipmappedArray* pHandle,
 
 CUresult cuMipmappedArrayDestroy(CUmipmappedArray hMipmappedArray) {
     // TODO: compute bytesize
-    LOG_DEBUG("cuMipmappedArrayDestory\n");
+    LOG_DEBUG("cuMipmappedArrayDestroy\n");
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMipmappedArrayDestroy, hMipmappedArray);
     return res;
 }
