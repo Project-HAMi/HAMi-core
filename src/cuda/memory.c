@@ -283,14 +283,14 @@ CUresult cuMemcpy(CUdeviceptr dst, CUdeviceptr src, size_t ByteCount ){
 }
 
 CUresult cuPointerGetAttribute ( void* data, CUpointer_attribute attribute, CUdeviceptr ptr ){
-    LOG_DEBUG("cuPointGetAttribute data=%p attribute=%d ptr=%llx",data,(int)attribute,ptr);
+    LOG_DEBUG("cuPointGetAttribute data=%p attribute=%d ptr=%llx", data, (int)attribute,ptr);
     ENSURE_RUNNING();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuPointerGetAttribute,data,attribute,ptr);
     return res;
 }
 
 CUresult cuPointerGetAttributes ( unsigned int  numAttributes, CUpointer_attribute* attributes, void** data, CUdeviceptr ptr ) {
-    LOG_DEBUG("cuPointGetAttribute data=%p ptr=%llx",data,ptr);
+    LOG_DEBUG("cuPointGetAttribute data=%p ptr=%llx", data, ptr);
     ENSURE_RUNNING();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuPointerGetAttributes,numAttributes,attributes,data,ptr);
     int cur=0;
@@ -309,7 +309,7 @@ CUresult cuPointerGetAttributes ( unsigned int  numAttributes, CUpointer_attribu
 }
 
 CUresult cuPointerSetAttribute ( const void* value, CUpointer_attribute attribute, CUdeviceptr ptr ){
-    LOG_DEBUG("cuPointSetAttribute value=%p attribute=%d ptr=%llx",value,(int)attribute,ptr);
+    LOG_DEBUG("cuPointSetAttribute value=%p attribute=%d ptr=%llx", value, (int)attribute, ptr);
     ENSURE_RUNNING();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuPointerSetAttribute,value,attribute,ptr);
     return res;
