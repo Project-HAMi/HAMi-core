@@ -134,7 +134,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemCreate"},
     {.name = "cuMemRelease"},
     {.name = "cuMemMap"},
-    {.name = "cucuMemImportFromShareableHandle"},
+    {.name = "cuMemImportFromShareableHandle"},
     {.name = "cuMemAllocAsync"},
     {.name = "cuMemFreeAsync"},
     /* cuda11.7 new api memory part */
