@@ -493,8 +493,8 @@ CUresult cuMemGetInfo_v2(size_t* free, size_t* total) {
     LOG_DEBUG("cuMemGetInfo_v2");
     ENSURE_INITIALIZED();
     CHECK_DRV_API(cuCtxGetDevice(&dev));
-    size_t usage = get_current_device_memory_usage(dev);
-    size_t limit = get_current_device_memory_limit(dev);
+    size_t usage = get_current_device_memory_usage(cuda_to_nvml_map(dev));
+    size_t limit = get_current_device_memory_limit(cuda_to_nvml_map(dev));
     if (limit == 0) {
         CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
         LOG_INFO("orig free=%ld total=%ld", *free, *total);
