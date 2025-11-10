@@ -48,7 +48,6 @@ CUDAアプリケーションをローカルで実行する場合は、まずロ�
 mkdir /tmp/vgpulock/
 ```
 
-
 `CUDA_DEVICE_MEMORY_LIMIT`または`CUDA_DEVICE_SM_LIMIT`を更新した場合は、ローカルキャッシュファイルを削除してください。
 
 ```
