@@ -1,6 +1,6 @@
 # HAMi-core —— CUDA 环境的 Hook 库
 
-[English](README.md) | 中文
+[English](README.md) | 中文 | [日本語](README_JA.md)
 
 ## 介绍
 

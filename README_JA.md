@@ -1,71 +1,71 @@
-# HAMi-core —— Hook library for CUDA Environments
+# HAMi-core —— CUDA環境向けフックライブラリ
 
-English | [中文](README_CN.md) | [日本語](README_JA.md)
+[English](README.md) | [中文](README_CN.md) | 日本語
 
-## Introduction
+## はじめに
 
-HAMi-core is the in-container gpu resource controller, it has beed adopted by [HAMi](https://github.com/Project-HAMi/HAMi), [volcano](https://github.com/volcano-sh/devices)
+HAMi-coreはコンテナ内GPUリソースコントローラーで、[HAMi](https://github.com/Project-HAMi/HAMi)や[volcano](https://github.com/volcano-sh/devices)で採用されています。
 
-<img src="./docs/images/hami-arch.png" width = "600" /> 
+<img src="./docs/images/hami-arch.png" width = "600" />
 
-## Features
+## 機能
 
-HAMi-core has the following features:
-1. Virtualize device meory
-2. Limit device utilization by self-implemented time shard
-3. Real-time device utilization monitor 
+HAMi-coreには以下の機能があります：
+1. デバイスメモリの仮想化
+2. 自己実装のタイムシェアリングによるデバイス使用率の制限
+3. リアルタイムデバイス使用率モニタリング
 
 ![image](docs/images/sample_nvidia-smi.png)
 
-## Design
+## 設計
 
-HAMi-core operates by Hijacking the API-call between CUDA-Runtime(libcudart.so) and CUDA-Driver(libcuda.so), as the figure below:
+HAMi-coreは、以下の図のようにCUDAランタイム(libcudart.so)とCUDAドライバー(libcuda.so)間のAPI呼び出しをフックすることで動作します：
 
 <img src="./docs/images/hami-core-position.png" width = "400" />
 
-## Build in Docker
+## Dockerでのビルド
 
 ```bash
 make build-in-docker
 ```
 
-## Usage
+## 使用方法
 
-_CUDA_DEVICE_MEMORY_LIMIT_ indicates the upper limit of device memory (eg 1g,1024m,1048576k,1073741824) 
+_CUDA_DEVICE_MEMORY_LIMIT_ はデバイスメモリの上限を指定します（例：1g、1024m、1048576k、1073741824）
 
-_CUDA_DEVICE_SM_LIMIT_ indicates the sm utility percentage of each device
+_CUDA_DEVICE_SM_LIMIT_ は各デバイスのSM使用率のパーセンテージを指定します
 
 ```bash
-# Add 1GiB memory limit and set max SM utility to 50% for all devices
+# すべてのデバイスに対して1GiBのメモリ制限を追加し、最大SM使用率を50%に設定
 export LD_PRELOAD=./libvgpu.so
 export CUDA_DEVICE_MEMORY_LIMIT=1g
 export CUDA_DEVICE_SM_LIMIT=50
 ```
 
-If you run CUDA applications locally, please create the local directory first.
+CUDAアプリケーションをローカルで実行する場合は、まずローカルディレクトリを作成してください。
 
 ```
 mkdir /tmp/vgpulock/
 ```
 
 ```
-If you have updated `CUDA_DEVICE_MEMORY_LIMIT` or `CUDA_DEVICE_SM_LIMIT`, please delete the local cache file.
+`CUDA_DEVICE_MEMORY_LIMIT`または`CUDA_DEVICE_SM_LIMIT`を更新した場合は、ローカルキャッシュファイルを削除してください。
 
 ```
 rm /tmp/cudevshr.cache
 ```
 
-## Docker Images
+## Dockerイメージ
 
 ```bash
-# Build docker image
+# Dockerイメージのビルド
 docker build . -f=dockerfiles/Dockerfile -t cuda_vmem:tf1.8-cu90
 
-# Configure GPU device and library mounts for container
+# コンテナ用のGPUデバイスとライブラリマウントの設定
 export DEVICE_MOUNTS="--device /dev/nvidia0:/dev/nvidia0 --device /dev/nvidia-uvm:/dev/nvidia-uvm --device /dev/nvidiactl:/dev/nvidiactl"
 export LIBRARY_MOUNTS="-v /usr/cuda_files:/usr/cuda_files -v $(which nvidia-smi):/bin/nvidia-smi"
 
-# Run container and check nvidia-smi output
+# コンテナを実行してnvidia-smiの出力を確認
 docker run ${LIBRARY_MOUNTS} ${DEVICE_MOUNTS} -it \
     -e CUDA_DEVICE_MEMORY_LIMIT=2g \
     -e LD_PRELOAD=/libvgpu/build/libvgpu.so \
@@ -73,7 +73,7 @@ docker run ${LIBRARY_MOUNTS} ${DEVICE_MOUNTS} -it \
     nvidia-smi
 ```
 
-After running, you will see nvidia-smi output similar to the following, showing memory limited to 2GiB:
+実行後、以下のようなnvidia-smiの出力が表示され、メモリが2GiBに制限されていることが確認できます：
 
 ```
 ...
@@ -100,18 +100,18 @@ Mon Dec  2 04:38:12 2024
 [HAMI-core Msg(1:140235494377280:multiprocess_memory_limit.c:497)]: Calling exit handler 1
 ```
 
-## Log
+## ログ
 
-Use environment variable LIBCUDA_LOG_LEVEL to set the visibility of logs
+環境変数LIBCUDA_LOG_LEVELを使用してログの表示レベルを設定します
 
-| LIBCUDA_LOG_LEVEL | description |
+| LIBCUDA_LOG_LEVEL | 説明 |
 | ----------------- | ----------- |
-|  0          | errors only |
-|  1(default),2          | errors,warnings,messages |
-|  3                | infos,errors,warnings,messages |
-|  4                | debugs,errors,warnings,messages |
+|  0          | エラーのみ |
+|  1(デフォルト),2          | エラー、警告、メッセージ |
+|  3                | 情報、エラー、警告、メッセージ |
+|  4                | デバッグ、エラー、警告、メッセージ |
 
-## Test Raw APIs
+## Raw APIのテスト
 
 ```bash
 ./test/test_alloc
