@@ -44,7 +44,6 @@ CUDA_DEVICE_SM_LIMIT=50
 EOF
         chmod 644 "$CONFIG_FILE"
         echo export LD_PRELOAD="$SOFTMIG_LIB"
-        echo export SOFTMIG_ENABLE="1"
         # Clear any existing cache
         echo "rm -f \${SLURM_TMPDIR}/cudevshr.cache* 2>/dev/null"
         logger -t slurm_task_prolog "Job $SLURM_JOB_ID: Configured softmig for half GPU (24GB, 50% SM) via $CONFIG_FILE"
@@ -57,7 +56,6 @@ CUDA_DEVICE_SM_LIMIT=25
 EOF
         chmod 644 "$CONFIG_FILE"
         echo export LD_PRELOAD="$SOFTMIG_LIB"
-        echo export SOFTMIG_ENABLE="1"
         # Clear any existing cache
         echo "rm -f \${SLURM_TMPDIR}/cudevshr.cache* 2>/dev/null"
         logger -t slurm_task_prolog "Job $SLURM_JOB_ID: Configured softmig for quarter GPU (12GB, 25% SM) via $CONFIG_FILE"
@@ -70,7 +68,6 @@ CUDA_DEVICE_SM_LIMIT=12
 EOF
         chmod 644 "$CONFIG_FILE"
         echo export LD_PRELOAD="$SOFTMIG_LIB"
-        echo export SOFTMIG_ENABLE="1"
         # Clear any existing cache
         echo "rm -f \${SLURM_TMPDIR}/cudevshr.cache* 2>/dev/null"
         logger -t slurm_task_prolog "Job $SLURM_JOB_ID: Configured softmig for eighth GPU (6GB, 12% SM) via $CONFIG_FILE"
