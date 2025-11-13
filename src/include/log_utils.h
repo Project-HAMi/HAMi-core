@@ -16,7 +16,7 @@ extern FILE *fp1;
 
 // Helper function to get log file path (Compute Canada optimized)
 static inline char* get_log_file_path(void) {
-    static char log_path[512] = {0};
+    static char log_path[1024] = {0};
     static int initialized = 0;
     
     if (initialized) {
@@ -27,6 +27,7 @@ static inline char* get_log_file_path(void) {
     char* custom_log = getenv("SOFTMIG_LOG_FILE");
     if (custom_log != NULL && strlen(custom_log) > 0) {
         strncpy(log_path, custom_log, sizeof(log_path) - 1);
+        log_path[sizeof(log_path) - 1] = '\0';
         initialized = 1;
         return log_path;
     }
@@ -45,8 +46,9 @@ static inline char* get_log_file_path(void) {
     
     // Add job ID and array ID if available
     if (job_id != NULL) {
-        char temp[512];
+        char temp[1024];
         strncpy(temp, log_path, sizeof(temp) - 1);
+        temp[sizeof(temp) - 1] = '\0';
         if (array_id != NULL) {
             snprintf(log_path, sizeof(log_path), "%s_%s_%s", temp, job_id, array_id);
         } else {
@@ -60,9 +62,10 @@ static inline char* get_log_file_path(void) {
     char date_str[32];
     strftime(date_str, sizeof(date_str), "%Y%m%d", tm_info);
     
-    char final_path[512];
+    char final_path[1024];
     snprintf(final_path, sizeof(final_path), "%s_%s.log", log_path, date_str);
     strncpy(log_path, final_path, sizeof(log_path) - 1);
+    log_path[sizeof(log_path) - 1] = '\0';
     
     // Create directory if it doesn't exist (try, but don't fail if no permission)
     char dir_path[512];
@@ -85,6 +88,7 @@ static inline char* get_log_file_path(void) {
             // Can't write to /var/log, use tmpdir
             snprintf(log_path, sizeof(log_path), "%s/softmig_%s.log", tmpdir, 
                      job_id ? job_id : "unknown");
+            log_path[sizeof(log_path) - 1] = '\0';
         } else {
             fclose(test);
         }
