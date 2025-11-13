@@ -49,19 +49,20 @@ static inline char* get_log_file_path(void) {
         char temp[2048];
         strncpy(temp, log_path, sizeof(temp) - 1);
         temp[sizeof(temp) - 1] = '\0';
+        const char* user_str = user ? user : "user";
         if (array_id != NULL) {
             int written = snprintf(log_path, sizeof(log_path), "%s_%s_%s", temp, job_id, array_id);
             if (written >= sizeof(log_path)) {
                 // Truncation occurred, use simpler path
                 snprintf(log_path, sizeof(log_path), "/var/log/vgpulogs/%s_%s_%s.log", 
-                         user ? user : "user", job_id, array_id);
+                         user_str, job_id, array_id);
             }
         } else {
             int written = snprintf(log_path, sizeof(log_path), "%s_%s", temp, job_id);
             if (written >= sizeof(log_path)) {
                 // Truncation occurred, use simpler path
                 snprintf(log_path, sizeof(log_path), "/var/log/vgpulogs/%s_%s.log", 
-                         user ? user : "user", job_id);
+                         user_str, job_id);
             }
         }
     }
