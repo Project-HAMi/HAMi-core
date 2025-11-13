@@ -1,33 +1,27 @@
-# softmig —— GPU Resource Controller for SLURM Environments
+# softmig - Software GPU Slicing for SLURM Clusters
 
-**softmig** (formerly HAMi-core) is a fork optimized for **Digital Research Alliance Canada (DRAC) / Compute Canada** SLURM environments. It provides software-based GPU memory and compute cycle limiting for oversubscribed GPU partitions.
+**softmig** is a fork of [HAMi-core](https://github.com/Project-HAMi/HAMi-core) optimized for **Digital Research Alliance Canada (DRAC) / Compute Canada** SLURM environments. It provides software-based GPU memory and compute cycle limiting for oversubscribed GPU partitions.
 
 **Original Project**: [HAMi-core](https://github.com/Project-HAMi/HAMi-core) - in-container GPU resource controller adopted by [HAMi](https://github.com/Project-HAMi/HAMi) and [volcano](https://github.com/volcano-sh/devices)
 
-## Introduction
+## What is softmig?
 
-softmig enables GPU oversubscription on SLURM clusters by:
-- **Virtualizing GPU memory**: Restrict memory per job (e.g., 12GB, 24GB slices)
-- **Limiting GPU compute cycles**: Restrict SM utilization percentage (e.g., 25%, 50%)
-- **Multi-job coordination**: Track and enforce limits across jobs sharing the same GPU
+**softmig** = **Soft**ware **MIG** (Multi-Instance GPU)
 
-This fork adds:
-- SLURM integration (uses `SLURM_TMPDIR`, `SLURM_JOB_ID` for isolation)
-- Silent operation (no user-visible logs)
-- Structured logging to `/var/log/softmig/`
-- Environment-first limit validation
-- Optimized for Compute Canada/Alliance clusters
-
-**Note**: This is designed for SLURM job environments, not Docker containers.
-
-<img src="./docs/images/hami-arch.png" width = "600" /> 
+Like NVIDIA's hardware MIG (available on A100/H100), softmig provides software-based GPU slicing for any GPU, enabling:
+- **GPU Memory Slicing**: Divide GPU memory among multiple jobs (e.g., 12GB, 24GB slices on 48GB GPUs)
+- **GPU Compute Slicing**: Limit SM utilization per job (e.g., 25%, 50% of GPU cycles)
+- **Oversubscription**: Run 2-8 jobs per GPU safely
 
 ## Features
 
-softmig provides the following features:
 1. **Virtualize device memory**: Limit GPU memory per job
 2. **Limit device utilization**: Control SM utilization percentage via time sharding
 3. **Real-time device utilization monitor**: Track GPU usage across multiple jobs
+4. **SLURM Integration**: Uses `SLURM_TMPDIR`, `SLURM_JOB_ID` for proper isolation
+5. **Silent Operation**: No user-visible logs (file-only logging)
+6. **Secure Configuration**: Reads limits from secure config files (users cannot modify)
+7. **Multi-CUDA Support**: Works with CUDA 11, 12, 13 (build with CUDA 11 headers)
 
 ## Design
 
@@ -43,21 +37,35 @@ export CUDA_HOME=/path/to/cuda-11.8
 ./build.sh
 
 # The library will be built as: build/libsoftmig.so
+
+# Install to system location (as admin)
+sudo mkdir -p /var/lib/shared
+sudo cp build/libsoftmig.so /var/lib/shared/
+sudo chmod 755 /var/lib/shared/libsoftmig.so
+
+# Or alternative location:
+# sudo mkdir -p /opt/softmig/lib
+# sudo cp build/libsoftmig.so /opt/softmig/lib/
 ```
 
-## Usage in SLURM Jobs
+## Usage
 
-softmig is designed to run in SLURM job environments. It automatically uses `SLURM_TMPDIR` for cache and lock files, and logs to `/var/log/softmig/`.
+### Configuration Method
 
-### Environment Variables
+**In SLURM jobs**: softmig reads limits from secure config files in `/var/run/softmig/{jobid}_{arrayid}.conf` (created by `task_prolog.sh`). Users cannot modify these files, ensuring limits are enforced.
+
+**Outside SLURM (testing)**: softmig falls back to environment variables if no config file exists.
+
+### Environment Variables (Fallback for Non-SLURM)
 
 - `CUDA_DEVICE_MEMORY_LIMIT`: Upper limit of device memory (e.g., `1g`, `24G`, `1024m`, `1048576k`, `1073741824`)
 - `CUDA_DEVICE_SM_LIMIT`: SM utilization percentage (0-100)
 - `LD_PRELOAD`: Path to `libsoftmig.so` library
+- `LIBCUDA_LOG_LEVEL`: Log verbosity (0=errors only, 4=debug, default 0)
+- `SOFTMIG_LOG_FILE`: Custom log file path (optional)
+- `SOFTMIG_LOCK_FILE`: Custom lock file path (optional)
 
 ### Basic Test Example
-
-Here's a simple test to verify softmig is working in a SLURM job:
 
 ```bash
 # In your SLURM job script or interactive session:
@@ -65,7 +73,7 @@ Here's a simple test to verify softmig is working in a SLURM job:
 # 1. DELETE the cache file FIRST (important when changing limits!)
 rm -f ${SLURM_TMPDIR}/cudevshr.cache*
 
-# 2. Set your memory limit
+# 2. Set your memory limit (for testing - in production, limits come from config file)
 export CUDA_DEVICE_MEMORY_LIMIT=16g
 
 # 3. Load the library (adjust path to your installation)
@@ -98,20 +106,6 @@ nvidia-smi
 # Should show: 0MiB / 16384MiB (16GB limit)
 ```
 
-Expected output showing memory limited to 16GB:
-```
-Wed Nov 12 18:41:53 2025
-+-----------------------------------------------------------------------------------------+
-| NVIDIA-SMI 570.195.03             Driver Version: 570.195.03     CUDA Version: 12.8     |
-|-----------------------------------------+------------------------+----------------------+
-| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
-| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
-|                                         |                        |               MIG M. |
-|=========================================+========================+======================|
-|   0  NVIDIA L40S                    On  |   00000000:4A:00.0 Off |                    0 |
-| N/A   27C    P8             31W /  350W |       0MiB /  16384MiB |      0%      Default |
-```
-
 ### Python/PyTorch Example
 
 ```bash
@@ -127,12 +121,41 @@ rm -f ${SLURM_TMPDIR}/cudevshr.cache*
 python your_script.py
 ```
 
-### Important Notes
+### For SLURM Users
 
-- **Cache files**: Located in `$SLURM_TMPDIR/cudevshr.cache.*` (auto-cleaned when job ends)
-- **Lock files**: Located in `$SLURM_TMPDIR/vgpulock/lock.*` (per-job isolation)
-- **Logs**: Written to `/var/log/softmig/{user}_{jobid}_{date}.log` (silent to users)
-- **Changing limits**: Always delete cache files before setting new limits
+Once deployed, simply request GPU slices:
+
+```bash
+# Request half GPU slice (24GB, 50% SM)
+sbatch --gres=gpu:l40s.2:1 --time=2:00:00 job.sh
+
+# Request quarter GPU slice (12GB, 25% SM)
+sbatch --gres=gpu:l40s.4:1 --time=5:00:00 job.sh
+
+# Request eighth GPU slice (6GB, 12% SM)
+sbatch --gres=gpu:l40s.8:1 --time=1:00:00 job.sh
+
+# Full GPU (no limits)
+sbatch --gres=gpu:l40s:1 --time=2:00:00 job.sh
+```
+
+The `task_prolog.sh` automatically configures limits based on the requested GPU slice type.
+
+## Memory Limits by GPU Slice
+
+| Slice Type | Memory | SM Limit | Oversubscription | Use Case |
+|------------|--------|----------|------------------|----------|
+| l40s.1 (full) | 48GB | 100% | 1x | Large models |
+| l40s.2 (half) | 24GB | 50% | 2x | Medium models |
+| l40s.4 (quarter) | 12GB | 25% | 4x | Small models |
+| l40s.8 (eighth) | 6GB | 12% | 8x | Tiny models |
+
+## File Locations
+
+- **Cache files**: `$SLURM_TMPDIR/cudevshr.cache.*` (auto-cleaned when job ends)
+- **Lock files**: `$SLURM_TMPDIR/vgpulock/lock.*` (per-job isolation)
+- **Config files**: `/var/run/softmig/{jobid}_{arrayid}.conf` (created by task_prolog, deleted on exit)
+- **Logs**: `/var/log/softmig/{user}_{jobid}_{arrayid}_{date}.log` (silent to users)
 
 ## Logging
 
@@ -152,9 +175,45 @@ To view logs (as admin):
 tail -f /var/log/softmig/*.log
 ```
 
-## Deployment
+## Deployment for Cluster Administrators
 
-For cluster administrators, see [DEPLOYMENT_DRAC.md](docs/DEPLOYMENT_DRAC.md) for complete SLURM integration guide.
+For complete deployment instructions, see **[docs/DEPLOYMENT_DRAC.md](docs/DEPLOYMENT_DRAC.md)**.
+
+### Quick Setup Checklist
+
+1. **Build and Install**:
+   ```bash
+   ./build.sh
+   sudo mkdir -p /var/lib/shared /var/log/softmig /var/run/softmig
+   sudo cp build/libsoftmig.so /var/lib/shared/
+   sudo chmod 755 /var/lib/shared/libsoftmig.so /var/log/softmig /var/run/softmig
+   ```
+
+2. **SLURM Configuration**:
+   - Update `gres.conf` with GPU slice definitions
+   - Update `slurm.conf` with new partitions
+   - Create/update `task_prolog.sh` (creates secure config files)
+   - Create/update `task_epilog.sh` (cleanup)
+   - Create/update `job_submit.lua` (job routing and validation)
+
+3. **Example Configs**: See `docs/examples/` for:
+   - `slurm_job_submit.lua`: Job routing and validation
+   - `slurm_task_prolog.sh`: Automatic configuration
+   - `slurm_task_epilog.sh`: Cleanup
+   - `slurm_gres.conf`: GRES definitions
+   - `slurm_partitions.conf`: Partition configurations
+
+## Differences from Original HAMi-core
+
+| Feature | HAMi-core | softmig |
+|---------|-----------|---------|
+| Target Environment | Docker/Kubernetes | SLURM clusters |
+| Logging | `/tmp/vgpulog` | `/var/log/softmig/{user}_{jobid}_{date}.log` |
+| Cache Location | `/tmp/cudevshr.cache` | `$SLURM_TMPDIR/cudevshr.cache.*` |
+| User Visibility | Logs to stderr | Completely silent |
+| Limit Validation | Cache-first | Config file → Environment-first |
+| Isolation | Process-based | Job-based (SLURM_JOB_ID) |
+| Configuration | Environment variables | Secure config files (SLURM) |
 
 ## Test Programs
 
@@ -163,5 +222,21 @@ For cluster administrators, see [DEPLOYMENT_DRAC.md](docs/DEPLOYMENT_DRAC.md) fo
 cd build
 export LD_PRELOAD=./libsoftmig.so
 export CUDA_DEVICE_MEMORY_LIMIT=1g
+rm -f ${SLURM_TMPDIR}/cudevshr.cache* 2>/dev/null
 ./test/test_alloc
 ```
+
+## Important Notes
+
+- **Changing limits**: Always delete cache files before setting new limits
+- **Config files**: In SLURM jobs, limits come from secure config files (users cannot modify)
+- **Cache files**: Auto-cleaned when job ends (SLURM_TMPDIR is job-specific)
+- **Multi-CUDA**: Build with CUDA 11 headers for compatibility with CUDA 11, 12, 13
+
+## License
+
+Same as original HAMi-core project.
+
+## Acknowledgments
+
+Based on [HAMi-core](https://github.com/Project-HAMi/HAMi-core) by Project-HAMi, optimized for Digital Research Alliance Canada / Compute Canada infrastructure.

@@ -71,48 +71,13 @@ void sig_swap_stub(int signo){
 }
 
 
-// get device memory from env
+// External function from config_file.c - reads from config file or env
+extern size_t get_limit_from_config_or_env(const char* env_name);
+
+// get device memory from config file (priority) or env (fallback)
+// This is now a wrapper that calls the config file reader
 size_t get_limit_from_env(const char* env_name) {
-    char* env_limit = getenv(env_name);
-    if (env_limit == NULL) {
-        // fprintf(stderr, "No %s set in environment\n", env_name);
-        return 0;
-    }
-    size_t len = strlen(env_limit);
-    if (len == 0) {
-        // fprintf(stderr, "Empty %s set in environment\n", env_name);
-        return 0;
-    }
-    size_t scalar = 1;
-    char* digit_end = env_limit + len;
-    if (env_limit[len - 1] == 'G' || env_limit[len - 1] == 'g') {
-        digit_end -= 1;
-        scalar = 1024 * 1024 * 1024;
-    } else if (env_limit[len - 1] == 'M' || env_limit[len - 1] == 'm') {
-        digit_end -= 1;
-        scalar = 1024 * 1024;
-    } else if (env_limit[len - 1] == 'K' || env_limit[len - 1] == 'k') {
-        digit_end -= 1;
-        scalar = 1024;
-    }
-    size_t res = strtoul(env_limit, &digit_end, 0);
-    size_t scaled_res = res * scalar;
-    if (scaled_res == 0) {
-        if (env_name[12]=='S'){
-            LOG_INFO("device core util limit set to 0, which means no limit: %s=%s",
-                env_name, env_limit);
-        }else if (env_name[12]=='M'){
-            LOG_WARN("invalid device memory limit %s=%s",env_name,env_limit);
-        }else{
-            LOG_WARN("invalid env name:%s",env_name);
-        }
-        return 0;
-    }
-    if (scaled_res != 0 && scaled_res / scalar != res) {
-        LOG_ERROR("Limit overflow: %s=%s\n", env_name, env_limit);
-        return 0;
-    }
-    return scaled_res;
+    return get_limit_from_config_or_env(env_name);
 }
 
 int init_device_info() {
@@ -446,6 +411,9 @@ void exit_withlock(int exitcode) {
 }
 
 
+// External function from config_file.c - cleanup config file
+extern void cleanup_config_file(void);
+
 void exit_handler() {
     if (region_info.init_status == PTHREAD_ONCE_INIT) {
         return;
@@ -453,6 +421,10 @@ void exit_handler() {
     shared_region_t* region = region_info.shared_region;
     int slot = 0;
     LOG_MSG("Calling exit handler %d",getpid());
+    
+    // Clean up config file (delete it)
+    cleanup_config_file();
+    
     struct timespec sem_ts;
     get_timespec(SEM_WAIT_TIME_ON_EXIT, &sem_ts);
     int status = sem_timedwait(&region->sem, &sem_ts);

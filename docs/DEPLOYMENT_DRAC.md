@@ -31,12 +31,16 @@ sudo chmod 755 /var/lib/shared/libsoftmig.so
 # sudo chmod 755 /opt/softmig/lib/libsoftmig.so
 ```
 
-### 2. Create Log Directory
+### 2. Create Log and Config Directories
 
 ```bash
 # Create log directory (requires root/admin)
 sudo mkdir -p /var/log/softmig
 sudo chmod 755 /var/log/softmig
+
+# Create config directory for secure job config files (requires root/admin)
+sudo mkdir -p /var/run/softmig
+sudo chmod 755 /var/run/softmig
 # Optional: Set up log rotation
 ```
 
@@ -98,7 +102,11 @@ PriorityWeightTRES=CPU=15000,Mem=15000,GRES/gpu=15000,GRES/gpu:l40s=15000,GRES/g
 
 ## Task Prolog Configuration
 
+### Task Prolog (Creates Secure Config Files)
+
 Create `/etc/slurm/task_prolog.sh` (or update existing):
+
+**Important**: softmig uses secure config files in `/var/run/softmig/{jobid}_{arrayid}.conf` instead of environment variables. This prevents users from modifying limits. The library reads from these files first, then falls back to environment variables if the file doesn't exist (for non-SLURM testing).
 
 ```bash
 #!/bin/bash
@@ -134,6 +142,31 @@ if [[ ! -z "$SLURM_JOB_GRES" ]]; then
     fi
 fi
 ```
+
+**See `docs/examples/slurm_task_prolog.sh` for the complete example with config file creation.**
+
+### Task Epilog (Cleanup)
+
+Create `/etc/slurm/task_epilog.sh` (or update existing) to clean up config files:
+
+```bash
+# Add to your existing task_epilog.sh
+# Delete config file for this job (backup cleanup - exit_handler also does this)
+if [[ ! -z "$SLURM_JOB_ID" ]]; then
+    CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}"
+    if [[ ! -z "$SLURM_ARRAY_TASK_ID" ]]; then
+        CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}.conf"
+    else
+        CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}.conf"
+    fi
+    
+    if [[ -f "$CONFIG_FILE" ]]; then
+        rm -f "$CONFIG_FILE"
+    fi
+fi
+```
+
+**See `docs/examples/slurm_task_epilog.sh` for the complete example.**
 
 ## Job Submit Lua Script
 

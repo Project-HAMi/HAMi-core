@@ -2,6 +2,8 @@
 
 This document summarizes all changes made to HAMi-core to create softmig for DRAC/Compute Canada SLURM environments.
 
+> **Note**: For general usage and deployment, see [README.md](README.md). This document is for developers and administrators who need to understand the technical changes.
+
 ## Summary
 
 **softmig** is a fork of HAMi-core optimized for Digital Research Alliance Canada SLURM clusters. It enables GPU oversubscription through software-based memory and compute cycle limiting.
@@ -76,15 +78,32 @@ This document summarizes all changes made to HAMi-core to create softmig for DRA
 
 **Usage**: Set `CUDA_DEVICE_SM_LIMIT=50` for 50% SM utilization.
 
-### 6. Documentation and Examples
+### 6. Secure Config File System
+
+**Files**: 
+- `src/multiprocess/config_file.c` (new)
+- `src/multiprocess/multiprocess_memory_limit.c`
+- `docs/examples/slurm_task_prolog.sh`
+- `docs/examples/slurm_task_epilog.sh` (new)
+
+**Changes**:
+- ✅ Reads limits from secure config files in `/var/run/softmig/{jobid}_{arrayid}.conf`
+- ✅ Users cannot modify config files (admin-only directory)
+- ✅ Falls back to environment variables if config file doesn't exist (for non-SLURM testing)
+- ✅ Config files automatically deleted on job exit
+- ✅ Task prolog creates config files, task epilog cleans them up
+
+**Impact**: Prevents users from modifying limits by changing environment variables. Limits are enforced via secure config files.
+
+### 7. Documentation and Examples
 
 **New Files**:
 - ✅ `docs/DEPLOYMENT_DRAC.md`: Complete deployment guide
 - ✅ `docs/examples/slurm_job_submit.lua`: Job routing example
-- ✅ `docs/examples/slurm_task_prolog.sh`: Automatic configuration
+- ✅ `docs/examples/slurm_task_prolog.sh`: Automatic configuration with config files
+- ✅ `docs/examples/slurm_task_epilog.sh`: Config file cleanup
 - ✅ `docs/examples/slurm_gres.conf`: GRES definitions
 - ✅ `docs/examples/slurm_partitions.conf`: Partition configurations
-- ✅ `README_SOFTMIG.md`: Quick reference for softmig
 
 ## Configuration Summary
 
@@ -95,6 +114,7 @@ This document summarizes all changes made to HAMi-core to create softmig for DRA
 | l40s.1 (full) | 48GB | 100% | 1x | Large models |
 | l40s.2 (half) | 24GB | 50% | 2x | Medium models |
 | l40s.4 (quarter) | 12GB | 25% | 4x | Small models |
+| l40s.8 (eighth) | 6GB | 12% | 8x | Tiny models |
 
 ### Environment Variables
 
@@ -109,9 +129,11 @@ This document summarizes all changes made to HAMi-core to create softmig for DRA
 - [ ] Build library with CUDA 11 headers
 - [ ] Install to `/var/lib/shared/libsoftmig.so` (or `/opt/softmig/lib/libsoftmig.so`)
 - [ ] Create `/var/log/softmig/` directory
+- [ ] Create `/var/run/softmig/` directory (for secure config files)
 - [ ] Update `slurm.conf` with new partitions
 - [ ] Update `gres.conf` with GPU slices
-- [ ] Create/update `task_prolog.sh`
+- [ ] Create/update `task_prolog.sh` (creates secure config files)
+- [ ] Create/update `task_epilog.sh` (cleans up config files)
 - [ ] Create/update `job_submit.lua`
 - [ ] Test with sample jobs
 - [ ] Document for users
