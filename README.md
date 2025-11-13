@@ -71,9 +71,31 @@ export CUDA_DEVICE_MEMORY_LIMIT=16g
 # 3. Load the library (adjust path to your installation)
 export LD_PRELOAD=/var/lib/shared/libsoftmig.so
 # Or: export LD_PRELOAD=/opt/softmig/lib/libsoftmig.so
+# Or if testing from build directory: export LD_PRELOAD=/path/to/HAMi-core/build/libsoftmig.so
 
 # 4. Test with nvidia-smi (should show limited memory)
 nvidia-smi
+```
+
+**Working Example** (from Compute Canada cluster):
+```bash
+# Build the library
+module load cuda/12.2
+rm -rf build && ./build.sh
+
+# In your job or interactive session:
+# 1. Delete cache
+rm -f ${SLURM_TMPDIR}/cudevshr.cache*
+
+# 2. Set limit
+export CUDA_DEVICE_MEMORY_LIMIT=16g
+
+# 3. Load library (from build directory for testing)
+export LD_PRELOAD=/project/def-rahimk/rahimk/hami-2/HAMi-core/build/libsoftmig.so
+
+# 4. Test
+nvidia-smi
+# Should show: 0MiB / 16384MiB (16GB limit)
 ```
 
 Expected output showing memory limited to 16GB:
