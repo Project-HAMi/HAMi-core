@@ -74,18 +74,37 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
     LOG_DEBUG("into dlsym %s",symbol);
     pthread_once(&dlsym_init_flag,init_dlsym);
     if (real_dlsym == NULL) {
+        // Try multiple methods to get the real dlsym, more robust for CVMFS/Compute Canada
+        // Method 1: Try dlvsym with GLIBC version (original method)
         real_dlsym = dlvsym(RTLD_NEXT,"dlsym","GLIBC_2.2.5");
+        
+        // Method 2: Try dlvsym without version string (more compatible)
+        if (real_dlsym == NULL) {
+            real_dlsym = dlvsym(RTLD_NEXT,"dlsym",NULL);
+        }
+        
+        // Method 3: Try using dlvsym with alternative GLIBC versions (for different systems)
+        if (real_dlsym == NULL) {
+            const char *glibc_versions[] = {"GLIBC_2.34", "GLIBC_2.17", "GLIBC_2.4", NULL};
+            for (int i = 0; glibc_versions[i] != NULL && real_dlsym == NULL; i++) {
+                real_dlsym = dlvsym(RTLD_NEXT, "dlsym", glibc_versions[i]);
+            }
+        }
+        
+        // Method 4: Try _dl_sym as fallback (internal glibc function)
+        if (real_dlsym == NULL) {
+            real_dlsym = _dl_sym(RTLD_NEXT, "dlsym", dlsym);
+        }
+        
+        if (real_dlsym == NULL) {
+            LOG_ERROR("real dlsym not found - all methods failed");
+        }
+        
         char *path_search=getenv("CUDA_REDIRECT");
         if ((path_search!=NULL) && (strlen(path_search)>0)){
             vgpulib = dlopen(path_search,RTLD_LAZY);
         }else{
             vgpulib = dlopen("/usr/local/vgpu/libvgpu.so",RTLD_LAZY);
-        }
-        if (real_dlsym == NULL) {
-            LOG_ERROR("real dlsym not found");
-            real_dlsym = _dl_sym(RTLD_NEXT, "dlsym", dlsym);
-            if (real_dlsym == NULL)
-                LOG_ERROR("real dlsym not found");
         }
     }
     if (handle == RTLD_NEXT) {

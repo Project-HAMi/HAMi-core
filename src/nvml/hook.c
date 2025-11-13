@@ -274,11 +274,21 @@ void load_nvml_libraries() {
     char driver_filename[FILENAME_MAX];
 
     if (real_dlsym == NULL) {
+        // Try multiple methods to get the real dlsym, more robust for CVMFS/Compute Canada
         real_dlsym = dlvsym(RTLD_NEXT,"dlsym","GLIBC_2.2.5");
+        if (real_dlsym == NULL) {
+            real_dlsym = dlvsym(RTLD_NEXT,"dlsym",NULL);
+        }
+        if (real_dlsym == NULL) {
+            const char *glibc_versions[] = {"GLIBC_2.34", "GLIBC_2.17", "GLIBC_2.4", NULL};
+            for (int i = 0; glibc_versions[i] != NULL && real_dlsym == NULL; i++) {
+                real_dlsym = dlvsym(RTLD_NEXT, "dlsym", glibc_versions[i]);
+            }
+        }
         if (real_dlsym == NULL) {
             real_dlsym = _dl_sym(RTLD_NEXT, "dlsym", dlsym);
             if (real_dlsym == NULL)
-                LOG_ERROR("real dlsym not found");
+                LOG_ERROR("real dlsym not found - all methods failed");
         }
     }
     snprintf(driver_filename, FILENAME_MAX - 1, "%s", "libnvidia-ml.so.1");
