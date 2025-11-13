@@ -16,7 +16,7 @@ extern FILE *fp1;
 
 // Helper function to get log file path (Compute Canada optimized)
 static inline char* get_log_file_path(void) {
-    static char log_path[1024] = {0};
+    static char log_path[2048] = {0};
     static int initialized = 0;
     
     if (initialized) {
@@ -46,13 +46,23 @@ static inline char* get_log_file_path(void) {
     
     // Add job ID and array ID if available
     if (job_id != NULL) {
-        char temp[1024];
+        char temp[2048];
         strncpy(temp, log_path, sizeof(temp) - 1);
         temp[sizeof(temp) - 1] = '\0';
         if (array_id != NULL) {
-            snprintf(log_path, sizeof(log_path), "%s_%s_%s", temp, job_id, array_id);
+            int written = snprintf(log_path, sizeof(log_path), "%s_%s_%s", temp, job_id, array_id);
+            if (written >= sizeof(log_path)) {
+                // Truncation occurred, use simpler path
+                snprintf(log_path, sizeof(log_path), "/var/log/vgpulogs/%s_%s_%s.log", 
+                         user ? user : "user", job_id, array_id);
+            }
         } else {
-            snprintf(log_path, sizeof(log_path), "%s_%s", temp, job_id);
+            int written = snprintf(log_path, sizeof(log_path), "%s_%s", temp, job_id);
+            if (written >= sizeof(log_path)) {
+                // Truncation occurred, use simpler path
+                snprintf(log_path, sizeof(log_path), "/var/log/vgpulogs/%s_%s.log", 
+                         user ? user : "user", job_id);
+            }
         }
     }
     

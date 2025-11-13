@@ -11,9 +11,7 @@
 #include "include/libcuda_hook.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
-// Define fp1 for logging (declared extern in log_utils.h)
-// This is defined here so all executables (libsoftmig.so, shrreg-tool, etc.) can use it
-FILE *fp1 = NULL;
+// Note: fp1 is now defined in log_file.c to avoid linking issues with standalone tools
 
 // Helper to get lock file path (Compute Canada optimized - uses SLURM_TMPDIR)
 static char* get_unified_lock_path(void) {

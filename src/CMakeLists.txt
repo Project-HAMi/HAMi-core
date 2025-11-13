@@ -14,7 +14,7 @@ add_subdirectory(cuda)
 add_subdirectory(nvml)
 
 set(LIBSOFTMIG softmig)
-add_library(${LIBSOFTMIG} SHARED libsoftmig.c utils.c $<TARGET_OBJECTS:nvml_mod> $<TARGET_OBJECTS:cuda_mod> $<TARGET_OBJECTS:allocator_mod> $<TARGET_OBJECTS:multiprocess_mod>)
+add_library(${LIBSOFTMIG} SHARED libsoftmig.c utils.c log_file.c $<TARGET_OBJECTS:nvml_mod> $<TARGET_OBJECTS:cuda_mod> $<TARGET_OBJECTS:allocator_mod> $<TARGET_OBJECTS:multiprocess_mod>)
 target_compile_options(${LIBSOFTMIG} PUBLIC ${LIBRARY_COMPILE_FLAGS})
 target_link_libraries(${LIBSOFTMIG} PUBLIC -lcuda -lnvidia-ml)
 
