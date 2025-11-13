@@ -55,7 +55,7 @@ This document summarizes all changes made to HAMi-core to create softmig for DRA
 
 ### 4. Improved dlsym Resolution
 
-**File**: `src/libvgpu.c`, `src/nvml/hook.c`
+**File**: `src/libsoftmig.c`, `src/nvml/hook.c`
 
 **Changes**:
 - ✅ Multiple fallback methods for getting real `dlsym`

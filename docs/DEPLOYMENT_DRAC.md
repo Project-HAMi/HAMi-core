@@ -14,8 +14,11 @@ softmig enables GPU oversubscription by:
 ### 1. Build the Library
 
 ```bash
-# Build with CUDA 11 headers for maximum compatibility
-export CUDA_HOME=/cvmfs/soft.computecanada.ca/config/gpu/cuda/11.8
+# On Digital Research Alliance Canada / Compute Canada (CVMFS)
+# Load CUDA module - use CUDA 11 for maximum compatibility (works with CUDA 11, 12, 13)
+module load cuda/11.8
+# Or: module load cuda/12.2
+
 cd /path/to/softmig
 ./build.sh
 
@@ -60,6 +63,7 @@ NodeName=rack[01-14]-[01-16] Name=gpu Type=l40s File=/dev/nvidia[0-3]
 NodeName=rack[01-14]-[01-16] Name=gpu Type=l40s.1 Count=4   # Full GPU (1x)
 NodeName=rack[01-14]-[01-16] Name=gpu Type=l40s.2 Count=8   # Half GPU (2x sharing)
 NodeName=rack[01-14]-[01-16] Name=gpu Type=l40s.4 Count=16  # Quarter GPU (4x sharing)
+NodeName=rack[01-14]-[01-16] Name=gpu Type=l40s.8 Count=32  # Eighth GPU (8x sharing)
 ```
 
 ### Partition Configuration
@@ -96,8 +100,8 @@ PartitionName=gpuquarter_interac Nodes=compute MaxTime=8:00:00 DefaultTime=0:10:
 Update `/etc/slurm/slurm.conf`:
 
 ```bash
-AccountingStorageTRES=gres/gpu,gres/gpu:l40s,gres/gpu:l40s.1,gres/gpu:l40s.2,gres/gpu:l40s.4,cpu,mem
-PriorityWeightTRES=CPU=15000,Mem=15000,GRES/gpu=15000,GRES/gpu:l40s=15000,GRES/gpu:l40s.1=15000,GRES/gpu:l40s.2=7500,GRES/gpu:l40s.4=3750
+AccountingStorageTRES=gres/gpu,gres/gpu:l40s,gres/gpu:l40s.1,gres/gpu:l40s.2,gres/gpu:l40s.4,gres/gpu:l40s.8,cpu,mem
+PriorityWeightTRES=CPU=15000,Mem=15000,GRES/gpu=15000,GRES/gpu:l40s=15000,GRES/gpu:l40s.1=15000,GRES/gpu:l40s.2=7500,GRES/gpu:l40s.4=3750,GRES/gpu:l40s.8=1875
 ```
 
 ## Task Prolog Configuration
@@ -106,10 +110,20 @@ PriorityWeightTRES=CPU=15000,Mem=15000,GRES/gpu=15000,GRES/gpu:l40s=15000,GRES/g
 
 Create `/etc/slurm/task_prolog.sh` (or update existing):
 
-**Important**: softmig uses secure config files in `/var/run/softmig/{jobid}_{arrayid}.conf` instead of environment variables. This prevents users from modifying limits. The library reads from these files first, then falls back to environment variables if the file doesn't exist (for non-SLURM testing).
+**Critical**: softmig uses secure config files in `/var/run/softmig/{jobid}_{arrayid}.conf` **instead of environment variables**. 
+
+**Priority**: Config file → Environment variables (if config file doesn't exist)
+
+**Important**: 
+- Config files are created **BEFORE** the job starts (in `task_prolog.sh`)
+- If a config file exists, environment variables are **ignored** (config file takes priority)
+- Users cannot modify config files (admin-only directory `/var/run/softmig/`)
+- Config files are deleted **AFTER** the job ends (in `task_epilog.sh`)
 
 ```bash
 #!/bin/bash
+# SLURM task_prolog.sh for softmig (Digital Research Alliance Canada)
+# This script runs BEFORE each job task and creates secure config files
 
 # Existing prolog content (proxy, SSH, cache, etc.)
 echo export SLURM_TMPDIR=/tmp
@@ -119,38 +133,92 @@ echo export no_proxy="localhost,127.0.0.1"
 
 # ... your existing SSH and cache setup ...
 
-# ===== softmig-core GPU SLICING CONFIGURATION =====
+# ===== softmig GPU SLICING CONFIGURATION =====
 # Configure softmig based on requested GPU slice type
+# This creates secure config files that users cannot modify
+
+# Determine library path (check common locations)
+SOFTMIG_LIB=""
+if [[ -f "/var/lib/shared/libsoftmig.so" ]]; then
+    SOFTMIG_LIB="/var/lib/shared/libsoftmig.so"
+elif [[ -f "/opt/softmig/lib/libsoftmig.so" ]]; then
+    SOFTMIG_LIB="/opt/softmig/lib/libsoftmig.so"
+else
+    SOFTMIG_LIB="/opt/softmig/lib/libsoftmig.so"
+fi
+
+# Create config directory if it doesn't exist
+mkdir -p /var/run/softmig
+chmod 755 /var/run/softmig
+
 if [[ ! -z "$SLURM_JOB_GRES" ]]; then
-    if [[ "$SLURM_JOB_GRES" == *"l40s.2"* ]]; then
-        # Half GPU - 24GB memory limit, 50% SM utilization (48GB / 2)
-        echo export LD_PRELOAD="/opt/softmig-core/lib/libvgpu.so"
-        echo export CUDA_DEVICE_MEMORY_LIMIT="24G"
-        echo export CUDA_DEVICE_SM_LIMIT="50"
-        echo export SOFTMIG_CORE_ENABLE="1"
-        logger -t slurm_task_prolog "Job $SLURM_JOB_ID: Configured softmig-core for half GPU (24GB, 50% SM)"
-    elif [[ "$SLURM_JOB_GRES" == *"l40s.4"* ]]; then
-        # Quarter GPU - 12GB memory limit, 25% SM utilization (48GB / 4)
-        echo export LD_PRELOAD="/opt/softmig-core/lib/libvgpu.so"
-        echo export CUDA_DEVICE_MEMORY_LIMIT="12G"
-        echo export CUDA_DEVICE_SM_LIMIT="25"
-        echo export SOFTMIG_CORE_ENABLE="1"
-        logger -t slurm_task_prolog "Job $SLURM_JOB_ID: Configured softmig-core for quarter GPU (12GB, 25% SM)"
+    # Build config file path: /var/run/softmig/{jobid}_{arrayid}.conf or /var/run/softmig/{jobid}.conf
+    CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}"
+    if [[ ! -z "$SLURM_ARRAY_TASK_ID" ]]; then
+        CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}.conf"
     else
-        # Full GPU or legacy request - no softmig (full access)
-        logger -t slurm_task_prolog "Job $SLURM_JOB_ID: Full GPU, no softmig-core"
+        CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}.conf"
+    fi
+    
+    if [[ "$SLURM_JOB_GRES" == *"l40s.2"* ]]; then
+        # Half GPU - 24GB memory limit, 50% SM utilization (48GB L40S / 2)
+        # Create secure config file (users cannot modify this)
+        cat > "$CONFIG_FILE" <<EOF
+CUDA_DEVICE_MEMORY_LIMIT=24G
+CUDA_DEVICE_SM_LIMIT=50
+EOF
+        chmod 644 "$CONFIG_FILE"
+        echo export LD_PRELOAD="$SOFTMIG_LIB"
+        echo export SOFTMIG_ENABLE="1"
+        # Clear any existing cache
+        echo "rm -f \${SLURM_TMPDIR}/cudevshr.cache* 2>/dev/null"
+        logger -t slurm_task_prolog "Job $SLURM_JOB_ID: Configured softmig for half GPU (24GB, 50% SM) via $CONFIG_FILE"
+
+    elif [[ "$SLURM_JOB_GRES" == *"l40s.4"* ]]; then
+        # Quarter GPU - 12GB memory limit, 25% SM utilization (48GB L40S / 4)
+        cat > "$CONFIG_FILE" <<EOF
+CUDA_DEVICE_MEMORY_LIMIT=12G
+CUDA_DEVICE_SM_LIMIT=25
+EOF
+        chmod 644 "$CONFIG_FILE"
+        echo export LD_PRELOAD="$SOFTMIG_LIB"
+        echo export SOFTMIG_ENABLE="1"
+        # Clear any existing cache
+        echo "rm -f \${SLURM_TMPDIR}/cudevshr.cache* 2>/dev/null"
+        logger -t slurm_task_prolog "Job $SLURM_JOB_ID: Configured softmig for quarter GPU (12GB, 25% SM) via $CONFIG_FILE"
+
+    elif [[ "$SLURM_JOB_GRES" == *"l40s.8"* ]]; then
+        # Eighth GPU - 6GB memory limit, 12.5% SM utilization (48GB L40S / 8)
+        cat > "$CONFIG_FILE" <<EOF
+CUDA_DEVICE_MEMORY_LIMIT=6G
+CUDA_DEVICE_SM_LIMIT=12
+EOF
+        chmod 644 "$CONFIG_FILE"
+        echo export LD_PRELOAD="$SOFTMIG_LIB"
+        echo export SOFTMIG_ENABLE="1"
+        # Clear any existing cache
+        echo "rm -f \${SLURM_TMPDIR}/cudevshr.cache* 2>/dev/null"
+        logger -t slurm_task_prolog "Job $SLURM_JOB_ID: Configured softmig for eighth GPU (6GB, 12% SM) via $CONFIG_FILE"
+
+    else
+        # Full GPU or legacy request - no softmig (full access to GPU)
+        logger -t slurm_task_prolog "Job $SLURM_JOB_ID: Full GPU, no softmig"
     fi
 fi
 ```
 
-**See `docs/examples/slurm_task_prolog.sh` for the complete example with config file creation.**
+**See `docs/examples/slurm_task_prolog.sh` for the complete example.**
 
 ### Task Epilog (Cleanup)
 
-Create `/etc/slurm/task_epilog.sh` (or update existing) to clean up config files:
+Create `/etc/slurm/task_epilog.sh` (or update existing) to clean up config files **AFTER** the job ends:
 
 ```bash
-# Add to your existing task_epilog.sh
+#!/bin/bash
+# SLURM task_epilog.sh for softmig (Digital Research Alliance Canada)
+# This script runs AFTER each job task and cleans up softmig config files
+
+# ===== softmig CLEANUP =====
 # Delete config file for this job (backup cleanup - exit_handler also does this)
 if [[ ! -z "$SLURM_JOB_ID" ]]; then
     CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}"
@@ -162,6 +230,7 @@ if [[ ! -z "$SLURM_JOB_ID" ]]; then
     
     if [[ -f "$CONFIG_FILE" ]]; then
         rm -f "$CONFIG_FILE"
+        logger -t slurm_task_epilog "Job $SLURM_JOB_ID: Cleaned up softmig config file $CONFIG_FILE"
     fi
 fi
 ```
@@ -188,7 +257,18 @@ Key features:
 | l40s.4 (quarter) | 12GB | 25% | Small models, 4x oversubscription |
 | l40s.8 (eighth) | 6GB | 12.5% | Very small models, 8x oversubscription |
 
-### Environment Variables
+### Configuration Priority
+
+**In SLURM jobs**: Config files take priority over environment variables.
+
+1. **Config file** (`/var/run/softmig/{jobid}_{arrayid}.conf`) - **Created by task_prolog, takes priority**
+2. **Environment variables** - Only used if config file doesn't exist (for testing outside SLURM)
+
+**Important**: If a config file exists, environment variables are **ignored**. This ensures users cannot bypass limits by modifying environment variables.
+
+### Environment Variables (Fallback Only)
+
+These are only used if no config file exists (for testing outside SLURM):
 
 - `CUDA_DEVICE_MEMORY_LIMIT`: Memory limit (e.g., "24G", "12G")
 - `CUDA_DEVICE_SM_LIMIT`: SM utilization percentage (0-100)

@@ -1,5 +1,5 @@
-#ifndef __LIBVGPU_H__
-#define __LIBVGPU_H__
+#ifndef __LIBSOFTMIG_H__
+#define __LIBSOFTMIG_H__
 
 #include <dlfcn.h>
 #include <cuda.h>
@@ -73,4 +73,4 @@ typedef void* (*fp_dlsym)(void*, const char*);
 nvmlReturn_t set_task_pid();
 int map_cuda_visible_devices();
 
-#endif  // __LIBVGPU_GLIBC_H__
+#endif  // __LIBSOFTMIG_H__
