@@ -43,6 +43,7 @@ sudo chmod 755 /var/log/softmig
 
 # Create config directory for secure job config files (requires root/admin)
 sudo mkdir -p /var/run/softmig
+sudo chown root:root /var/run/softmig
 sudo chmod 755 /var/run/softmig
 # Optional: Set up log rotation
 ```
@@ -147,8 +148,9 @@ else
     SOFTMIG_LIB="/opt/softmig/lib/libsoftmig.so"
 fi
 
-# Create config directory if it doesn't exist
+# Create config directory if it doesn't exist (with proper ownership and permissions)
 mkdir -p /var/run/softmig
+chown root:root /var/run/softmig
 chmod 755 /var/run/softmig
 
 if [[ ! -z "$SLURM_JOB_GRES" ]]; then
@@ -167,6 +169,7 @@ if [[ ! -z "$SLURM_JOB_GRES" ]]; then
 CUDA_DEVICE_MEMORY_LIMIT=24G
 CUDA_DEVICE_SM_LIMIT=50
 EOF
+        chown root:root "$CONFIG_FILE"
         chmod 644 "$CONFIG_FILE"
         echo export LD_PRELOAD="$SOFTMIG_LIB"
         # Clear any existing cache
@@ -179,6 +182,7 @@ EOF
 CUDA_DEVICE_MEMORY_LIMIT=12G
 CUDA_DEVICE_SM_LIMIT=25
 EOF
+        chown root:root "$CONFIG_FILE"
         chmod 644 "$CONFIG_FILE"
         echo export LD_PRELOAD="$SOFTMIG_LIB"
         # Clear any existing cache
@@ -191,6 +195,7 @@ EOF
 CUDA_DEVICE_MEMORY_LIMIT=6G
 CUDA_DEVICE_SM_LIMIT=12
 EOF
+        chown root:root "$CONFIG_FILE"
         chmod 644 "$CONFIG_FILE"
         echo export LD_PRELOAD="$SOFTMIG_LIB"
         # Clear any existing cache

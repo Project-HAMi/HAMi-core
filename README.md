@@ -22,7 +22,9 @@ module load cuda/11.8  # Recommended for compatibility (works with CUDA 11, 12, 
 # Install (as admin)
 sudo mkdir -p /var/lib/shared /var/log/softmig /var/run/softmig
 sudo cp build/libsoftmig.so /var/lib/shared/
-sudo chmod 755 /var/lib/shared/libsoftmig.so /var/log/softmig /var/run/softmig
+sudo chmod 755 /var/lib/shared/libsoftmig.so
+sudo chown root:root /var/log/softmig /var/run/softmig
+sudo chmod 755 /var/log/softmig /var/run/softmig
 ```
 
 ### For Other Systems
