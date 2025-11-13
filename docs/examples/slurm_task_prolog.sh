@@ -10,6 +10,13 @@
 # Configure softmig based on requested GPU slice type
 # This automatically sets memory and SM utilization limits via secure config file
 # Library location: /var/lib/shared/libsoftmig.so (or /opt/softmig/lib/libsoftmig.so)
+#
+# AUTOMATIC ENFORCEMENT:
+# - Sets LD_PRELOAD to include libsoftmig.so (users can add libraries but cannot remove softmig)
+# - Exports ensure_softmig_loaded() function that re-checks and re-adds softmig if needed
+# - For interactive shells: Uses PROMPT_COMMAND to automatically ensure softmig is loaded before each command
+# - For batch scripts: LD_PRELOAD is set initially and persists (users would need to explicitly unset it)
+# - No user action required - this is all automatic via the prolog
 
 # Determine library path (check common locations)
 SOFTMIG_LIB=""
@@ -45,7 +52,73 @@ CUDA_DEVICE_SM_LIMIT=50
 EOF
         chown root:root "$CONFIG_FILE"
         chmod 644 "$CONFIG_FILE"
-        echo export LD_PRELOAD="$SOFTMIG_LIB"
+        
+        # Append softmig to LD_PRELOAD (ensures it's always loaded, users can add but not remove)
+        if [[ -z "$LD_PRELOAD" ]]; then
+            echo export LD_PRELOAD="$SOFTMIG_LIB"
+        else
+            # Ensure softmig is in LD_PRELOAD (prepend if not already present)
+            if [[ "$LD_PRELOAD" != *"libsoftmig.so"* ]]; then
+                echo export LD_PRELOAD="$SOFTMIG_LIB:$LD_PRELOAD"
+            else
+                # Already present, but ensure it's first (remove and re-add at front)
+                LD_PRELOAD_CLEANED=$(echo "$LD_PRELOAD" | sed "s|$SOFTMIG_LIB:||g" | sed "s|:$SOFTMIG_LIB||g" | sed "s|$SOFTMIG_LIB||g")
+                echo export LD_PRELOAD="$SOFTMIG_LIB:$LD_PRELOAD_CLEANED"
+            fi
+        fi
+        
+        # Export wrapper function that ensures softmig is always in LD_PRELOAD
+        # This function runs automatically and can be called by users if needed
+        cat << 'ENSURE_SOFTMIG_FUNC'
+ensure_softmig_loaded() {
+    local SOFTMIG_LIB=""
+    if [[ -f "/var/lib/shared/libsoftmig.so" ]]; then
+        SOFTMIG_LIB="/var/lib/shared/libsoftmig.so"
+    elif [[ -f "/opt/softmig/lib/libsoftmig.so" ]]; then
+        SOFTMIG_LIB="/opt/softmig/lib/libsoftmig.so"
+    fi
+    
+    if [[ -z "$SOFTMIG_LIB" ]]; then
+        return 1
+    fi
+    
+    # Check if config file exists (GPU slice job)
+    local CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}"
+    if [[ ! -z "$SLURM_ARRAY_TASK_ID" ]]; then
+        CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}.conf"
+    else
+        CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}.conf"
+    fi
+    
+    # If config file exists, ensure softmig is in LD_PRELOAD
+    if [[ -f "$CONFIG_FILE" ]]; then
+        if [[ -z "$LD_PRELOAD" ]] || [[ "$LD_PRELOAD" != *"libsoftmig.so"* ]]; then
+            if [[ -z "$LD_PRELOAD" ]]; then
+                export LD_PRELOAD="$SOFTMIG_LIB"
+            else
+                # Remove softmig if present, then prepend it
+                local LD_PRELOAD_CLEANED=$(echo "$LD_PRELOAD" | sed "s|$SOFTMIG_LIB:||g" | sed "s|:$SOFTMIG_LIB||g" | sed "s|$SOFTMIG_LIB||g")
+                export LD_PRELOAD="$SOFTMIG_LIB:$LD_PRELOAD_CLEANED"
+            fi
+        fi
+    fi
+}
+export -f ensure_softmig_loaded
+
+# Auto-ensure on command execution for interactive shells
+# For batch scripts, LD_PRELOAD is already set by prolog and persists
+# If users unset it in batch scripts, they can, but it's set initially
+if [[ -n "$PS1" ]]; then
+    # Interactive shell - use PROMPT_COMMAND to re-check before each command
+    if [[ -z "$PROMPT_COMMAND" ]]; then
+        PROMPT_COMMAND="ensure_softmig_loaded"
+    else
+        PROMPT_COMMAND="ensure_softmig_loaded; $PROMPT_COMMAND"
+    fi
+    export PROMPT_COMMAND
+fi
+ENSURE_SOFTMIG_FUNC
+        
         # Clear any existing cache
         echo "rm -f \${SLURM_TMPDIR}/cudevshr.cache* 2>/dev/null"
         logger -t slurm_task_prolog "Job $SLURM_JOB_ID: Configured softmig for half GPU (24GB, 50% SM) via $CONFIG_FILE"
@@ -58,7 +131,73 @@ CUDA_DEVICE_SM_LIMIT=25
 EOF
         chown root:root "$CONFIG_FILE"
         chmod 644 "$CONFIG_FILE"
-        echo export LD_PRELOAD="$SOFTMIG_LIB"
+        
+        # Append softmig to LD_PRELOAD (ensures it's always loaded, users can add but not remove)
+        if [[ -z "$LD_PRELOAD" ]]; then
+            echo export LD_PRELOAD="$SOFTMIG_LIB"
+        else
+            # Ensure softmig is in LD_PRELOAD (prepend if not already present)
+            if [[ "$LD_PRELOAD" != *"libsoftmig.so"* ]]; then
+                echo export LD_PRELOAD="$SOFTMIG_LIB:$LD_PRELOAD"
+            else
+                # Already present, but ensure it's first (remove and re-add at front)
+                LD_PRELOAD_CLEANED=$(echo "$LD_PRELOAD" | sed "s|$SOFTMIG_LIB:||g" | sed "s|:$SOFTMIG_LIB||g" | sed "s|$SOFTMIG_LIB||g")
+                echo export LD_PRELOAD="$SOFTMIG_LIB:$LD_PRELOAD_CLEANED"
+            fi
+        fi
+        
+        # Export wrapper function that ensures softmig is always in LD_PRELOAD
+        # This function runs automatically and can be called by users if needed
+        cat << 'ENSURE_SOFTMIG_FUNC'
+ensure_softmig_loaded() {
+    local SOFTMIG_LIB=""
+    if [[ -f "/var/lib/shared/libsoftmig.so" ]]; then
+        SOFTMIG_LIB="/var/lib/shared/libsoftmig.so"
+    elif [[ -f "/opt/softmig/lib/libsoftmig.so" ]]; then
+        SOFTMIG_LIB="/opt/softmig/lib/libsoftmig.so"
+    fi
+    
+    if [[ -z "$SOFTMIG_LIB" ]]; then
+        return 1
+    fi
+    
+    # Check if config file exists (GPU slice job)
+    local CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}"
+    if [[ ! -z "$SLURM_ARRAY_TASK_ID" ]]; then
+        CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}.conf"
+    else
+        CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}.conf"
+    fi
+    
+    # If config file exists, ensure softmig is in LD_PRELOAD
+    if [[ -f "$CONFIG_FILE" ]]; then
+        if [[ -z "$LD_PRELOAD" ]] || [[ "$LD_PRELOAD" != *"libsoftmig.so"* ]]; then
+            if [[ -z "$LD_PRELOAD" ]]; then
+                export LD_PRELOAD="$SOFTMIG_LIB"
+            else
+                # Remove softmig if present, then prepend it
+                local LD_PRELOAD_CLEANED=$(echo "$LD_PRELOAD" | sed "s|$SOFTMIG_LIB:||g" | sed "s|:$SOFTMIG_LIB||g" | sed "s|$SOFTMIG_LIB||g")
+                export LD_PRELOAD="$SOFTMIG_LIB:$LD_PRELOAD_CLEANED"
+            fi
+        fi
+    fi
+}
+export -f ensure_softmig_loaded
+
+# Auto-ensure on command execution for interactive shells
+# For batch scripts, LD_PRELOAD is already set by prolog and persists
+# If users unset it in batch scripts, they can, but it's set initially
+if [[ -n "$PS1" ]]; then
+    # Interactive shell - use PROMPT_COMMAND to re-check before each command
+    if [[ -z "$PROMPT_COMMAND" ]]; then
+        PROMPT_COMMAND="ensure_softmig_loaded"
+    else
+        PROMPT_COMMAND="ensure_softmig_loaded; $PROMPT_COMMAND"
+    fi
+    export PROMPT_COMMAND
+fi
+ENSURE_SOFTMIG_FUNC
+        
         # Clear any existing cache
         echo "rm -f \${SLURM_TMPDIR}/cudevshr.cache* 2>/dev/null"
         logger -t slurm_task_prolog "Job $SLURM_JOB_ID: Configured softmig for quarter GPU (12GB, 25% SM) via $CONFIG_FILE"
@@ -71,7 +210,73 @@ CUDA_DEVICE_SM_LIMIT=12
 EOF
         chown root:root "$CONFIG_FILE"
         chmod 644 "$CONFIG_FILE"
-        echo export LD_PRELOAD="$SOFTMIG_LIB"
+        
+        # Append softmig to LD_PRELOAD (ensures it's always loaded, users can add but not remove)
+        if [[ -z "$LD_PRELOAD" ]]; then
+            echo export LD_PRELOAD="$SOFTMIG_LIB"
+        else
+            # Ensure softmig is in LD_PRELOAD (prepend if not already present)
+            if [[ "$LD_PRELOAD" != *"libsoftmig.so"* ]]; then
+                echo export LD_PRELOAD="$SOFTMIG_LIB:$LD_PRELOAD"
+            else
+                # Already present, but ensure it's first (remove and re-add at front)
+                LD_PRELOAD_CLEANED=$(echo "$LD_PRELOAD" | sed "s|$SOFTMIG_LIB:||g" | sed "s|:$SOFTMIG_LIB||g" | sed "s|$SOFTMIG_LIB||g")
+                echo export LD_PRELOAD="$SOFTMIG_LIB:$LD_PRELOAD_CLEANED"
+            fi
+        fi
+        
+        # Export wrapper function that ensures softmig is always in LD_PRELOAD
+        # This function runs automatically and can be called by users if needed
+        cat << 'ENSURE_SOFTMIG_FUNC'
+ensure_softmig_loaded() {
+    local SOFTMIG_LIB=""
+    if [[ -f "/var/lib/shared/libsoftmig.so" ]]; then
+        SOFTMIG_LIB="/var/lib/shared/libsoftmig.so"
+    elif [[ -f "/opt/softmig/lib/libsoftmig.so" ]]; then
+        SOFTMIG_LIB="/opt/softmig/lib/libsoftmig.so"
+    fi
+    
+    if [[ -z "$SOFTMIG_LIB" ]]; then
+        return 1
+    fi
+    
+    # Check if config file exists (GPU slice job)
+    local CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}"
+    if [[ ! -z "$SLURM_ARRAY_TASK_ID" ]]; then
+        CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}.conf"
+    else
+        CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}.conf"
+    fi
+    
+    # If config file exists, ensure softmig is in LD_PRELOAD
+    if [[ -f "$CONFIG_FILE" ]]; then
+        if [[ -z "$LD_PRELOAD" ]] || [[ "$LD_PRELOAD" != *"libsoftmig.so"* ]]; then
+            if [[ -z "$LD_PRELOAD" ]]; then
+                export LD_PRELOAD="$SOFTMIG_LIB"
+            else
+                # Remove softmig if present, then prepend it
+                local LD_PRELOAD_CLEANED=$(echo "$LD_PRELOAD" | sed "s|$SOFTMIG_LIB:||g" | sed "s|:$SOFTMIG_LIB||g" | sed "s|$SOFTMIG_LIB||g")
+                export LD_PRELOAD="$SOFTMIG_LIB:$LD_PRELOAD_CLEANED"
+            fi
+        fi
+    fi
+}
+export -f ensure_softmig_loaded
+
+# Auto-ensure on command execution for interactive shells
+# For batch scripts, LD_PRELOAD is already set by prolog and persists
+# If users unset it in batch scripts, they can, but it's set initially
+if [[ -n "$PS1" ]]; then
+    # Interactive shell - use PROMPT_COMMAND to re-check before each command
+    if [[ -z "$PROMPT_COMMAND" ]]; then
+        PROMPT_COMMAND="ensure_softmig_loaded"
+    else
+        PROMPT_COMMAND="ensure_softmig_loaded; $PROMPT_COMMAND"
+    fi
+    export PROMPT_COMMAND
+fi
+ENSURE_SOFTMIG_FUNC
+        
         # Clear any existing cache
         echo "rm -f \${SLURM_TMPDIR}/cudevshr.cache* 2>/dev/null"
         logger -t slurm_task_prolog "Job $SLURM_JOB_ID: Configured softmig for eighth GPU (6GB, 12% SM) via $CONFIG_FILE"
