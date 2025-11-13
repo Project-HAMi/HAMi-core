@@ -70,34 +70,76 @@ int check_dlmap(pthread_t tid, void *pointer){
     return 0;
 }
 
+// Helper to get real dlsym without recursion
+static fp_dlsym get_real_dlsym_safe(void) {
+    fp_dlsym result = NULL;
+    
+    // Method 1: Try dlvsym with RTLD_NEXT (most reliable, avoids our hook)
+    result = dlvsym(RTLD_NEXT, "dlsym", "GLIBC_2.2.5");
+    if (result == NULL) {
+        result = dlvsym(RTLD_NEXT, "dlsym", NULL);
+    }
+    if (result == NULL) {
+        const char *glibc_versions[] = {"GLIBC_2.34", "GLIBC_2.17", "GLIBC_2.4", NULL};
+        for (int i = 0; glibc_versions[i] != NULL && result == NULL; i++) {
+            result = dlvsym(RTLD_NEXT, "dlsym", glibc_versions[i]);
+        }
+    }
+    
+    // Method 2: Try dlvsym with RTLD_DEFAULT (system default namespace)
+    if (result == NULL) {
+        result = dlvsym(RTLD_DEFAULT, "dlsym", NULL);
+        if (result == NULL) {
+            result = dlvsym(RTLD_DEFAULT, "dlsym", "GLIBC_2.2.5");
+        }
+    }
+    
+    // Method 3: Try getting dlsym from libdl.so.2 directly via dlvsym
+    if (result == NULL) {
+        void *libdl = dlopen("libdl.so.2", RTLD_LAZY | RTLD_LOCAL);
+        if (libdl != NULL) {
+            // Get dlsym symbol directly from libdl using dlvsym
+            result = (fp_dlsym)dlvsym(libdl, "dlsym", NULL);
+            if (result == NULL) {
+                result = (fp_dlsym)dlvsym(libdl, "dlsym", "GLIBC_2.2.5");
+            }
+            // Note: We keep libdl open, closing it might cause issues
+        }
+    }
+    
+    // Last resort: try _dl_sym if available (weak symbol, may not exist)
+    if (result == NULL) {
+        #ifdef __GLIBC__
+        extern void* _dl_sym(void*, const char*, void*) __attribute__((weak));
+        if (_dl_sym != NULL) {
+            result = (fp_dlsym)_dl_sym(RTLD_NEXT, "dlsym", (void*)dlsym);
+        }
+        #endif
+    }
+    
+    return result;
+}
+
 FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
     LOG_DEBUG("into dlsym %s",symbol);
     pthread_once(&dlsym_init_flag,init_dlsym);
     if (real_dlsym == NULL) {
-        // Try multiple methods to get the real dlsym, more robust for CVMFS/Compute Canada
-        // Method 1: Try dlvsym with GLIBC version (original method)
-        real_dlsym = dlvsym(RTLD_NEXT,"dlsym","GLIBC_2.2.5");
+        real_dlsym = get_real_dlsym_safe();
         
-        // Method 2: Try dlvsym without version string (more compatible)
         if (real_dlsym == NULL) {
-            real_dlsym = dlvsym(RTLD_NEXT,"dlsym",NULL);
-        }
-        
-        // Method 3: Try using dlvsym with alternative GLIBC versions (for different systems)
-        if (real_dlsym == NULL) {
-            const char *glibc_versions[] = {"GLIBC_2.34", "GLIBC_2.17", "GLIBC_2.4", NULL};
-            for (int i = 0; glibc_versions[i] != NULL && real_dlsym == NULL; i++) {
-                real_dlsym = dlvsym(RTLD_NEXT, "dlsym", glibc_versions[i]);
+            LOG_ERROR("real dlsym not found - all methods failed. HAMi-core will not work.");
+            // Don't return NULL - that breaks everything. Instead, disable the hook
+            // by setting a flag and just pass through (though this means no memory limiting)
+            // For now, we'll try one more time on next call
+            static int retry_count = 0;
+            if (retry_count < 3) {
+                retry_count++;
+                // Try again next time
+            } else {
+                // After 3 retries, give up and just pass through to avoid breaking system
+                LOG_ERROR("Giving up on dlsym hook - memory limiting will not work");
             }
-        }
-        
-        // Method 4: Try _dl_sym as fallback (internal glibc function)
-        if (real_dlsym == NULL) {
-            real_dlsym = _dl_sym(RTLD_NEXT, "dlsym", dlsym);
-        }
-        
-        if (real_dlsym == NULL) {
-            LOG_ERROR("real dlsym not found - all methods failed");
+            // Fall through to try to use system dlsym directly (won't work but won't crash)
         }
         
         char *path_search=getenv("CUDA_REDIRECT");
@@ -107,6 +149,21 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
             vgpulib = dlopen("/usr/local/vgpu/libvgpu.so",RTLD_LAZY);
         }
     }
+    // If we don't have real_dlsym, we can't hook properly - just fail gracefully
+    if (real_dlsym == NULL) {
+        // Try to get it one more time
+        real_dlsym = get_real_dlsym_safe();
+        if (real_dlsym == NULL) {
+            // Last resort: try to call system dlsym via dlvsym (may not work but won't crash)
+            fp_dlsym sys_dlsym = (fp_dlsym)dlvsym(RTLD_DEFAULT, "dlsym", NULL);
+            if (sys_dlsym != NULL && sys_dlsym != dlsym) {
+                return sys_dlsym(handle, symbol);
+            }
+            // If all else fails, return NULL (will cause errors but won't crash system)
+            return NULL;
+        }
+    }
+    
     if (handle == RTLD_NEXT) {
         void *h = real_dlsym(RTLD_NEXT,symbol);
         pthread_mutex_lock(&dlsym_lock);
@@ -857,7 +914,7 @@ void* __dlsym_hook_section_nvml(void* handle, const char* symbol) {
 void preInit(){
     LOG_MSG("Initializing.....");
     if (real_dlsym == NULL) {
-        real_dlsym = _dl_sym(RTLD_NEXT, "dlsym", dlsym);
+        real_dlsym = get_real_dlsym_safe();
     }
     real_realpath = NULL;
     load_cuda_libraries();

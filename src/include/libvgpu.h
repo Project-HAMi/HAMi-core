@@ -29,7 +29,10 @@ extern void load_cuda_libraries();
 
 #define FUNC_OVERRIDE_NAME(fname) overrided_##fname
 
-extern void* _dl_sym(void*, const char*, void*);
+// _dl_sym is an internal glibc function, use weak linking if available
+#ifdef __GLIBC__
+extern void* _dl_sym(void*, const char*, void*) __attribute__((weak));
+#endif
 
 #if defined(DLSYM_HOOK_DEBUG)
 #define DLSYM_HOOK_FUNC(f)                                       \

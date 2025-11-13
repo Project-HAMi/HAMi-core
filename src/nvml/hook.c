@@ -267,7 +267,10 @@ nvmlReturn_t nvmlDeviceGetIndex(nvmlDevice_t device, unsigned int *index) {
 }
 
 
-extern void* _dl_sym(void*, const char*, void*);
+// _dl_sym is an internal glibc function, use weak linking if available
+#ifdef __GLIBC__
+extern void* _dl_sym(void*, const char*, void*) __attribute__((weak));
+#endif
 
 void load_nvml_libraries() {
     void *table = NULL;
@@ -286,7 +289,26 @@ void load_nvml_libraries() {
             }
         }
         if (real_dlsym == NULL) {
-            real_dlsym = _dl_sym(RTLD_NEXT, "dlsym", dlsym);
+            // Try getting dlsym from libdl.so.2 directly
+            void *libdl = dlopen("libdl.so.2", RTLD_LAZY | RTLD_LOCAL);
+            if (libdl != NULL) {
+                typedef void* (*dlsym_fn)(void*, const char*);
+                dlsym_fn libdl_dlsym = (dlsym_fn)dlvsym(libdl, "dlsym", NULL);
+                if (libdl_dlsym == NULL) {
+                    libdl_dlsym = (dlsym_fn)dlvsym(libdl, "dlsym", "GLIBC_2.2.5");
+                }
+                if (libdl_dlsym != NULL) {
+                    real_dlsym = (fp_dlsym)libdl_dlsym(RTLD_DEFAULT, "dlsym");
+                }
+            }
+        }
+        if (real_dlsym == NULL) {
+            #ifdef __GLIBC__
+            extern void* _dl_sym(void*, const char*, void*) __attribute__((weak));
+            if (_dl_sym != NULL) {
+                real_dlsym = (fp_dlsym)_dl_sym(RTLD_NEXT, "dlsym", (void*)dlsym);
+            }
+            #endif
             if (real_dlsym == NULL)
                 LOG_ERROR("real dlsym not found - all methods failed");
         }
