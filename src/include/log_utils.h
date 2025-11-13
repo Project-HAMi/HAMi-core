@@ -32,16 +32,16 @@ static inline char* get_log_file_path(void) {
         return log_path;
     }
     
-    // Use /var/log/vgpulogs/ with job info (Digital Research Alliance Canada format)
+    // Use /var/log/softmig/ with job info (Digital Research Alliance Canada format)
     char* job_id = getenv("SLURM_JOB_ID");
     char* array_id = getenv("SLURM_ARRAY_TASK_ID");
     char* user = getenv("USER");
     if (user == NULL) user = getenv("LOGNAME");
     if (user == NULL) {
         uid_t uid = getuid();
-        snprintf(log_path, sizeof(log_path), "/var/log/vgpulogs/uid%d", uid);
+        snprintf(log_path, sizeof(log_path), "/var/log/softmig/uid%d", uid);
     } else {
-        snprintf(log_path, sizeof(log_path), "/var/log/vgpulogs/%s", user);
+        snprintf(log_path, sizeof(log_path), "/var/log/softmig/%s", user);
     }
     
     // Add job ID and array ID if available
@@ -54,14 +54,14 @@ static inline char* get_log_file_path(void) {
             int written = snprintf(log_path, sizeof(log_path), "%s_%s_%s", temp, job_id, array_id);
             if (written >= sizeof(log_path)) {
                 // Truncation occurred, use simpler path
-                snprintf(log_path, sizeof(log_path), "/var/log/vgpulogs/%s_%s_%s.log", 
+                snprintf(log_path, sizeof(log_path), "/var/log/softmig/%s_%s_%s.log", 
                          user_str, job_id, array_id);
             }
         } else {
             int written = snprintf(log_path, sizeof(log_path), "%s_%s", temp, job_id);
             if (written >= sizeof(log_path)) {
                 // Truncation occurred, use simpler path
-                snprintf(log_path, sizeof(log_path), "/var/log/vgpulogs/%s_%s.log", 
+                snprintf(log_path, sizeof(log_path), "/var/log/softmig/%s_%s.log", 
                          user_str, job_id);
             }
         }
@@ -76,10 +76,16 @@ static inline char* get_log_file_path(void) {
     char final_path[2048];
     int written = snprintf(final_path, sizeof(final_path), "%s_%s.log", log_path, date_str);
     if (written >= sizeof(final_path)) {
-        // Truncation occurred, use fallback
-        snprintf(log_path, sizeof(log_path), "%s/softmig_%s.log", 
-                 getenv("SLURM_TMPDIR") ? getenv("SLURM_TMPDIR") : "/tmp",
-                 job_id ? job_id : "unknown");
+        // Truncation occurred, use fallback to SLURM_TMPDIR only
+        char* tmpdir = getenv("SLURM_TMPDIR");
+        if (tmpdir != NULL) {
+            snprintf(log_path, sizeof(log_path), "%s/softmig_%s.log", tmpdir,
+                     job_id ? job_id : "unknown");
+        } else {
+            // No SLURM_TMPDIR, use minimal path
+            snprintf(log_path, sizeof(log_path), "/var/log/softmig/job_%s.log",
+                     job_id ? job_id : "unknown");
+        }
         log_path[sizeof(log_path) - 1] = '\0';
     } else {
         strncpy(log_path, final_path, sizeof(log_path) - 1);
@@ -95,16 +101,13 @@ static inline char* get_log_file_path(void) {
         mkdir(dir_path, 0755);  // Ignore errors - may not have permission
     }
     
-    // Fallback to SLURM_TMPDIR or TMPDIR if /var/log not writable
+    // Fallback to SLURM_TMPDIR only (not regular /tmp) if /var/log not writable
     char* tmpdir = getenv("SLURM_TMPDIR");
-    if (tmpdir == NULL) {
-        tmpdir = getenv("TMPDIR");
-    }
     if (tmpdir != NULL) {
-        // Test if we can write to /var/log, if not use tmpdir
+        // Test if we can write to /var/log, if not use SLURM_TMPDIR
         FILE* test = fopen(log_path, "a");
         if (test == NULL) {
-            // Can't write to /var/log, use tmpdir
+            // Can't write to /var/log, use SLURM_TMPDIR
             snprintf(log_path, sizeof(log_path), "%s/softmig_%s.log", tmpdir, 
                      job_id ? job_id : "unknown");
             log_path[sizeof(log_path) - 1] = '\0';

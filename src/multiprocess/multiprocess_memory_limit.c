@@ -663,13 +663,20 @@ void try_create_shrreg() {
     char* shr_reg_file = getenv(MULTIPROCESS_SHARED_REGION_CACHE_ENV);
     if (shr_reg_file == NULL) {
         // Compute Canada optimized: Use SLURM_TMPDIR with job ID for isolation
+        // Only use SLURM_TMPDIR (not regular /tmp) for proper job isolation
         static char cache_path[512] = {0};
         char* tmpdir = getenv("SLURM_TMPDIR");
         if (tmpdir == NULL) {
-            tmpdir = getenv("TMPDIR");
-        }
-        if (tmpdir == NULL) {
-            tmpdir = "/tmp";
+            // No SLURM_TMPDIR - this should only happen outside SLURM jobs
+            // For local testing, use /tmp with job ID if available
+            char* job_id = getenv("SLURM_JOB_ID");
+            if (job_id != NULL) {
+                // We're in a SLURM job but SLURM_TMPDIR not set - use /tmp with job ID
+                tmpdir = "/tmp";
+            } else {
+                // Not in SLURM job - use /tmp (for local testing only)
+                tmpdir = "/tmp";
+            }
         }
         
         // Include job ID for proper isolation (per-job cache)

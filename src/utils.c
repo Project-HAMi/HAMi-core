@@ -30,13 +30,19 @@ static char* get_unified_lock_path(void) {
         return lock_path;
     }
     
-    // Use SLURM_TMPDIR if available (per-job, auto-cleaned)
+    // Use SLURM_TMPDIR only (per-job, auto-cleaned) - not regular /tmp
     char* tmpdir = getenv("SLURM_TMPDIR");
     if (tmpdir == NULL) {
-        tmpdir = getenv("TMPDIR");
-    }
-    if (tmpdir == NULL) {
-        tmpdir = "/tmp";
+        // No SLURM_TMPDIR - this should only happen outside SLURM jobs
+        // Use a job-specific path if we have job ID
+        char* job_id = getenv("SLURM_JOB_ID");
+        if (job_id != NULL) {
+            // We're in a SLURM job but SLURM_TMPDIR not set - use /tmp with job ID
+            tmpdir = "/tmp";
+        } else {
+            // Not in SLURM job - use /tmp (for local testing only)
+            tmpdir = "/tmp";
+        }
     }
     
     // Include job ID for isolation

@@ -35,8 +35,8 @@ sudo chmod 755 /var/lib/shared/libsoftmig.so
 
 ```bash
 # Create log directory (requires root/admin)
-sudo mkdir -p /var/log/vgpulogs
-sudo chmod 755 /var/log/vgpulogs
+sudo mkdir -p /var/log/softmig
+sudo chmod 755 /var/log/softmig
 # Optional: Set up log rotation
 ```
 
@@ -199,20 +199,20 @@ nvidia-smi
 
 ### Log Files
 
-Logs are written to `/var/log/vgpulogs/` with format:
+Logs are written to `/var/log/softmig/` with format:
 ```
-/var/log/vgpulogs/{username}_{jobid}_{arrayid}_{date}.log
+/var/log/softmig/{username}_{jobid}_{arrayid}_{date}.log
 ```
 
-Example: `/var/log/vgpulogs/rahimk_12345_0_20241112.log`
+Example: `/var/log/softmig/rahimk_12345_0_20241112.log`
 
-If `/var/log/vgpulogs/` is not writable, logs fall back to `$SLURM_TMPDIR/softmig_*.log`
+If `/var/log/softmig/` is not writable, logs fall back to `$SLURM_TMPDIR/softmig_*.log`
 
 ### Viewing Logs
 
 ```bash
 # As admin
-tail -f /var/log/vgpulogs/*.log
+tail -f /var/log/softmig/*.log
 
 # In job (if log level enabled)
 export LIBCUDA_LOG_LEVEL=2
@@ -224,19 +224,25 @@ cat $SLURM_TMPDIR/softmig_*.log
 
 Cache files are stored in `$SLURM_TMPDIR` with format:
 ```
-$SLURM_TMPDIR/cudevshr.cache.{jobid}.gpu{gpu_index}
+$SLURM_TMPDIR/cudevshr.cache.{jobid}
 ```
 
-These are automatically cleaned when the job ends.
+**Important**: Cache files are stored in `SLURM_TMPDIR` only (not regular `/tmp`) for proper job isolation. They are automatically cleaned when the job ends.
+
+**When changing limits**: Always delete cache files before setting new limits:
+```bash
+rm -f ${SLURM_TMPDIR}/cudevshr.cache*
+```
 
 ## Differences from Original HAMi-core
 
-1. **SLURM Integration**: Uses `SLURM_TMPDIR`, `SLURM_JOB_ID` for isolation
+1. **SLURM Integration**: Uses `SLURM_TMPDIR`, `SLURM_JOB_ID` for isolation (not regular `/tmp`)
 2. **Silent Operation**: No user-visible logs (file-only logging)
-3. **Structured Logging**: Logs to `/var/log/vgpulogs/` with job info
+3. **Structured Logging**: Logs to `/var/log/softmig/` with job info
 4. **Environment-First**: Always validates limits from environment, updates cache if mismatch
 5. **Renamed**: "softmig" (software MIG) to reflect DRAC optimization
 6. **Library Name**: `libsoftmig.so` (instead of `libvgpu.so`)
+7. **SLURM-Only**: Designed for SLURM job environments, not Docker containers
 
 ## Support
 

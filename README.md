@@ -14,117 +14,132 @@ softmig enables GPU oversubscription on SLURM clusters by:
 This fork adds:
 - SLURM integration (uses `SLURM_TMPDIR`, `SLURM_JOB_ID` for isolation)
 - Silent operation (no user-visible logs)
-- Structured logging to `/var/log/vgpulogs/`
+- Structured logging to `/var/log/softmig/`
 - Environment-first limit validation
 - Optimized for Compute Canada/Alliance clusters
+
+**Note**: This is designed for SLURM job environments, not Docker containers.
 
 <img src="./docs/images/hami-arch.png" width = "600" /> 
 
 ## Features
 
-HAMi-core has the following features:
-1. Virtualize device meory
-2. Limit device utilization by self-implemented time shard
-3. Real-time device utilization monitor 
-
-![image](docs/images/sample_nvidia-smi.png)
+softmig provides the following features:
+1. **Virtualize device memory**: Limit GPU memory per job
+2. **Limit device utilization**: Control SM utilization percentage via time sharding
+3. **Real-time device utilization monitor**: Track GPU usage across multiple jobs
 
 ## Design
 
-HAMi-core operates by Hijacking the API-call between CUDA-Runtime(libcudart.so) and CUDA-Driver(libcuda.so), as the figure below:
+softmig operates by hijacking API calls between CUDA-Runtime(libcudart.so) and CUDA-Driver(libcuda.so), as shown below:
 
 <img src="./docs/images/hami-core-position.png" width = "400" />
 
-## Build in Docker
+## Building
 
 ```bash
-make build-in-docker
+# Build with CUDA 11 headers for maximum compatibility (works with CUDA 11, 12, 13)
+export CUDA_HOME=/path/to/cuda-11.8
+./build.sh
+
+# The library will be built as: build/libsoftmig.so
 ```
 
-## Usage
+## Usage in SLURM Jobs
 
-_CUDA_DEVICE_MEMORY_LIMIT_ indicates the upper limit of device memory (eg 1g,1024m,1048576k,1073741824) 
+softmig is designed to run in SLURM job environments. It automatically uses `SLURM_TMPDIR` for cache and lock files, and logs to `/var/log/softmig/`.
 
-_CUDA_DEVICE_SM_LIMIT_ indicates the sm utility percentage of each device
+### Environment Variables
+
+- `CUDA_DEVICE_MEMORY_LIMIT`: Upper limit of device memory (e.g., `1g`, `24G`, `1024m`, `1048576k`, `1073741824`)
+- `CUDA_DEVICE_SM_LIMIT`: SM utilization percentage (0-100)
+- `LD_PRELOAD`: Path to `libsoftmig.so` library
+
+### Basic Test Example
+
+Here's a simple test to verify softmig is working in a SLURM job:
 
 ```bash
-# Add 1GiB memory limit and set max SM utility to 50% for all devices
-export LD_PRELOAD=./libvgpu.so
-export CUDA_DEVICE_MEMORY_LIMIT=1g
-export CUDA_DEVICE_SM_LIMIT=50
+# In your SLURM job script or interactive session:
+
+# 1. DELETE the cache file FIRST (important when changing limits!)
+rm -f ${SLURM_TMPDIR}/cudevshr.cache*
+
+# 2. Set your memory limit
+export CUDA_DEVICE_MEMORY_LIMIT=16g
+
+# 3. Load the library (adjust path to your installation)
+export LD_PRELOAD=/var/lib/shared/libsoftmig.so
+# Or: export LD_PRELOAD=/opt/softmig/lib/libsoftmig.so
+
+# 4. Test with nvidia-smi (should show limited memory)
+nvidia-smi
 ```
 
-If you run CUDA applications locally, please create the local directory first.
-
+Expected output showing memory limited to 16GB:
 ```
-mkdir /tmp/vgpulock/
-```
-
-```
-If you have updated `CUDA_DEVICE_MEMORY_LIMIT` or `CUDA_DEVICE_SM_LIMIT`, please delete the local cache file.
-
-```
-rm /tmp/cudevshr.cache
-```
-
-## Docker Images
-
-```bash
-# Build docker image
-docker build . -f=dockerfiles/Dockerfile -t cuda_vmem:tf1.8-cu90
-
-# Configure GPU device and library mounts for container
-export DEVICE_MOUNTS="--device /dev/nvidia0:/dev/nvidia0 --device /dev/nvidia-uvm:/dev/nvidia-uvm --device /dev/nvidiactl:/dev/nvidiactl"
-export LIBRARY_MOUNTS="-v /usr/cuda_files:/usr/cuda_files -v $(which nvidia-smi):/bin/nvidia-smi"
-
-# Run container and check nvidia-smi output
-docker run ${LIBRARY_MOUNTS} ${DEVICE_MOUNTS} -it \
-    -e CUDA_DEVICE_MEMORY_LIMIT=2g \
-    -e LD_PRELOAD=/libvgpu/build/libvgpu.so \
-    cuda_vmem:tf1.8-cu90 \
-    nvidia-smi
-```
-
-After running, you will see nvidia-smi output similar to the following, showing memory limited to 2GiB:
-
-```
-...
-[HAMI-core Msg(1:140235494377280:libvgpu.c:836)]: Initializing.....
-Mon Dec  2 04:38:12 2024
+Wed Nov 12 18:41:53 2025
 +-----------------------------------------------------------------------------------------+
-| NVIDIA-SMI 550.107.02             Driver Version: 550.107.02     CUDA Version: 12.4     |
+| NVIDIA-SMI 570.195.03             Driver Version: 570.195.03     CUDA Version: 12.8     |
 |-----------------------------------------+------------------------+----------------------+
 | GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
 | Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
 |                                         |                        |               MIG M. |
 |=========================================+========================+======================|
-|   0  NVIDIA GeForce RTX 3060        Off |   00000000:03:00.0 Off |                  N/A |
-| 30%   36C    P8              7W /  170W |       0MiB /   2048MiB |      0%      Default |
-|                                         |                        |                  N/A |
-+-----------------------------------------+------------------------+----------------------+
-
-+-----------------------------------------------------------------------------------------+
-| Processes:                                                                              |
-|  GPU   GI   CI        PID   Type   Process name                              GPU Memory |
-|        ID   ID                                                               Usage      |
-|=========================================================================================|
-+-----------------------------------------------------------------------------------------+
-[HAMI-core Msg(1:140235494377280:multiprocess_memory_limit.c:497)]: Calling exit handler 1
+|   0  NVIDIA L40S                    On  |   00000000:4A:00.0 Off |                    0 |
+| N/A   27C    P8             31W /  350W |       0MiB /  16384MiB |      0%      Default |
 ```
 
-## Log
+### Python/PyTorch Example
 
-Use environment variable LIBCUDA_LOG_LEVEL to set the visibility of logs
+```bash
+# In your SLURM job:
+export LD_PRELOAD=/var/lib/shared/libsoftmig.so
+export CUDA_DEVICE_MEMORY_LIMIT=12g
+export CUDA_DEVICE_SM_LIMIT=50  # Optional: limit to 50% SM utilization
+
+# Clear cache
+rm -f ${SLURM_TMPDIR}/cudevshr.cache*
+
+# Run your Python script
+python your_script.py
+```
+
+### Important Notes
+
+- **Cache files**: Located in `$SLURM_TMPDIR/cudevshr.cache.*` (auto-cleaned when job ends)
+- **Lock files**: Located in `$SLURM_TMPDIR/vgpulock/lock.*` (per-job isolation)
+- **Logs**: Written to `/var/log/softmig/{user}_{jobid}_{date}.log` (silent to users)
+- **Changing limits**: Always delete cache files before setting new limits
+
+## Logging
+
+Logs are written to `/var/log/softmig/{user}_{jobid}_{arrayid}_{date}.log` and are completely silent to users by default.
+
+Use environment variable `LIBCUDA_LOG_LEVEL` to control log verbosity:
 
 | LIBCUDA_LOG_LEVEL | description |
 | ----------------- | ----------- |
-|  0          | errors only |
-|  1(default),2          | errors,warnings,messages |
-|  3                | infos,errors,warnings,messages |
-|  4                | debugs,errors,warnings,messages |
+|  0 (default)      | errors only (silent operation) |
+|  2                | errors, warnings, messages |
+|  3                | info, errors, warnings, messages |
+|  4                | debug, info, errors, warnings, messages |
 
-## Test Raw APIs
+To view logs (as admin):
+```bash
+tail -f /var/log/softmig/*.log
+```
+
+## Deployment
+
+For cluster administrators, see [DEPLOYMENT_DRAC.md](docs/DEPLOYMENT_DRAC.md) for complete SLURM integration guide.
+
+## Test Programs
 
 ```bash
+# After building, test basic functionality
+cd build
+export LD_PRELOAD=./libsoftmig.so
+export CUDA_DEVICE_MEMORY_LIMIT=1g
 ./test/test_alloc
 ```

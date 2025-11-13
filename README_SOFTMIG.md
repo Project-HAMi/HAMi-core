@@ -15,7 +15,7 @@ Like NVIDIA's hardware MIG (available on A100/H100), softmig provides software-b
 
 ✅ **SLURM Integration**: Uses `SLURM_TMPDIR`, `SLURM_JOB_ID` for proper isolation  
 ✅ **Silent Operation**: No user-visible logs (file-only logging)  
-✅ **Structured Logging**: Logs to `/var/log/vgpulogs/{user}_{jobid}_{date}.log`  
+✅ **Structured Logging**: Logs to `/var/log/softmig/{user}_{jobid}_{date}.log`  
 ✅ **Environment-First**: Always validates limits from environment variables  
 ✅ **Multi-CUDA Support**: Works with CUDA 11, 12, 13 (build with CUDA 11 headers)  
 ✅ **SM Utilization Limiting**: Controls GPU compute cycles, not just memory  
@@ -44,8 +44,8 @@ sbatch --gres=gpu:l40s:1 --time=2:00:00 job.sh
 | Feature | HAMi-core | softmig |
 |---------|-----------|--------------|
 | Target Environment | Docker/Kubernetes | SLURM clusters |
-| Logging | `/tmp/vgpulog` | `/var/log/vgpulogs/{user}_{jobid}_{date}.log` |
-| Cache Location | `/tmp/cudevshr.cache` | `$SLURM_TMPDIR/cudevshr.cache.{jobid}` |
+| Logging | `/tmp/vgpulog` | `/var/log/softmig/{user}_{jobid}_{date}.log` |
+| Cache Location | `/tmp/cudevshr.cache` | `$SLURM_TMPDIR/cudevshr.cache.{jobid}` (SLURM_TMPDIR only) |
 | User Visibility | Logs to stderr | Completely silent |
 | Limit Validation | Cache-first | Environment-first |
 | Isolation | Process-based | Job-based (SLURM_JOB_ID) |

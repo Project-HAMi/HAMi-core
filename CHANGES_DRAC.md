@@ -14,8 +14,8 @@ This document summarizes all changes made to HAMi-core to create softmig for DRA
 
 **Changes**:
 - ✅ All logs now go to file only (no stderr output)
-- ✅ Logs written to `/var/log/vgpulogs/{user}_{jobid}_{arrayid}_{date}.log`
-- ✅ Falls back to `$SLURM_TMPDIR/softmig_{jobid}.log` if `/var/log` not writable
+- ✅ Logs written to `/var/log/softmig/{user}_{jobid}_{arrayid}_{date}.log`
+- ✅ Falls back to `$SLURM_TMPDIR/softmig_{jobid}.log` if `/var/log` not writable (SLURM_TMPDIR only, not regular /tmp)
 - ✅ Completely silent to users (no visible messages)
 - ✅ Renamed from "HAMI-core" to "softmig" in log messages
 - ✅ Library renamed from `libvgpu.so` to `libsoftmig.so`
@@ -30,11 +30,11 @@ This document summarizes all changes made to HAMi-core to create softmig for DRA
 - `src/utils.c`
 
 **Changes**:
-- ✅ Cache files use `$SLURM_TMPDIR/cudevshr.cache.{jobid}.gpu{gpu_index}`
+- ✅ Cache files use `$SLURM_TMPDIR/cudevshr.cache.{jobid}`
 - ✅ Lock files use `$SLURM_TMPDIR/vgpulock/lock.{jobid}`
 - ✅ Per-job isolation prevents cross-job interference
 - ✅ Auto-cleaned when job ends (SLURM_TMPDIR is job-specific)
-- ✅ Falls back to `$TMPDIR` or `/tmp` if SLURM_TMPDIR not available
+- ✅ Only uses `SLURM_TMPDIR` (not regular `/tmp`) for proper job isolation
 
 **Impact**: Proper isolation between jobs, no cache conflicts.
 
@@ -108,7 +108,7 @@ This document summarizes all changes made to HAMi-core to create softmig for DRA
 
 - [ ] Build library with CUDA 11 headers
 - [ ] Install to `/var/lib/shared/libsoftmig.so` (or `/opt/softmig/lib/libsoftmig.so`)
-- [ ] Create `/var/log/vgpulogs/` directory
+- [ ] Create `/var/log/softmig/` directory
 - [ ] Update `slurm.conf` with new partitions
 - [ ] Update `gres.conf` with GPU slices
 - [ ] Create/update `task_prolog.sh`
@@ -130,7 +130,7 @@ sbatch --gres=gpu:l40s.4:1 --time=1:00:00 test_job.sh
 Verify:
 - nvidia-smi shows limited memory
 - No user-visible log messages
-- Logs appear in `/var/log/vgpulogs/`
+- Logs appear in `/var/log/softmig/`
 - Cache files in `$SLURM_TMPDIR`
 
 ## Notes
