@@ -22,9 +22,6 @@ void preInit();
 char *(*real_realpath)(const char *path, char *resolved_path);
 void *vgpulib;
 
-// Define fp1 for logging (declared extern in log_utils.h)
-FILE *fp1 = NULL;
-
 pthread_once_t pre_cuinit_flag = PTHREAD_ONCE_INIT;
 pthread_once_t post_cuinit_flag = PTHREAD_ONCE_INIT;
 pthread_once_t dlsym_init_flag = PTHREAD_ONCE_INIT;
