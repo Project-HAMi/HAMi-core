@@ -415,7 +415,7 @@ int fix_lock_shrreg() {
     if (current_owner != 0) {
         int flag = 0;
         if (current_owner == region_info.pid) {
-            LOG_INFO("Detect onwer pid = self pid (%d), "
+            LOG_INFO("Detect owner pid = self pid (%d), "
                 "indicates pid loopback or race condition", current_owner);
             flag = 1;
         } else {
@@ -568,7 +568,7 @@ void init_proc_slot_withlock() {
     }
     signal(SIGUSR2,sig_swap_stub);
     signal(SIGUSR1,sig_restore_stub);
-    // If, by any means a pid of itself is found in region->proces, then it is probably caused by crashloop
+    // If, by any means a pid of itself is found in region->process, then it is probably caused by crashloop
     // we need to reset it.
     int i,found=0;
     for (i=0; i<region->proc_num; i++) {

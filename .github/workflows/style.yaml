@@ -13,3 +13,4 @@ jobs:
     - uses: reviewdog/action-cpplint@master
       with:
         github_token: ${{ secrets.github_token }}
+        args: --linelength=120

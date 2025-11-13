@@ -655,7 +655,7 @@ typedef enum nvmlGpuP2PCapsIndex_enum {
 /* P2P Capability Index Status*/
 typedef enum nvmlGpuP2PStatus_enum {
   NVML_P2P_STATUS_OK = 0,
-  NVML_P2P_STATUS_CHIPSET_NOT_SUPPORED,
+  NVML_P2P_STATUS_CHIPSET_NOT_SUPPORTED,
   NVML_P2P_STATUS_GPU_NOT_SUPPORTED,
   NVML_P2P_STATUS_IOH_TOPOLOGY_NOT_SUPPORTED,
   NVML_P2P_STATUS_DISABLED_BY_REGKEY,
@@ -808,7 +808,7 @@ typedef struct nvmlVgpuPgpuMetadata_st {
   char hostDriverVersion
   [NVML_SYSTEM_DRIVER_VERSION_BUFFER_SIZE];  //!< Host driver version
   unsigned int
-      pgpuVirtualizationCaps;   //!< Pgpu virtualizaion capabilities bitfileld
+      pgpuVirtualizationCaps;   //!< Pgpu virtualization capabilities bitfield
   unsigned int reserved[7];     //!< Reserved for internal use
   unsigned int opaqueDataSize;  //!< Size of opaque data field in bytes
   char opaqueData[4];           //!< Opaque data
@@ -966,7 +966,7 @@ typedef enum nvmlVgpuVmCompatibility_enum {
   NVML_VGPU_VM_COMPATIBILITY_HIBERNATE =
   0x2,  //!< vGPU is runnable from a hibernated state (ACPI S4)
   NVML_VGPU_VM_COMPATIBILITY_SLEEP =
-  0x4,  //!< vGPU is runnable from a sleeped state (ACPI S3)
+  0x4,  //!< vGPU is runnable from a slept state (ACPI S3)
   NVML_VGPU_VM_COMPATIBILITY_LIVE =
   0x8,  //!< vGPU is runnable from a live/paused (ACPI S0)
 } nvmlVgpuVmCompatibility_t;
@@ -1093,7 +1093,7 @@ typedef enum nvmlVgpuVmIdType {
  * Represents frame buffer capture session type
  */
 typedef enum nvmlFBCSessionType_enum {
-  NVML_FBC_SESSION_TYPE_UNKNOWN = 0,  //!< Unknwon
+  NVML_FBC_SESSION_TYPE_UNKNOWN = 0,  //!< Unknown
   NVML_FBC_SESSION_TYPE_TOSYS,        //!< ToSys
   NVML_FBC_SESSION_TYPE_CUDA,         //!< Cuda
   NVML_FBC_SESSION_TYPE_VID,          //!< Vid

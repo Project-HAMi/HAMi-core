@@ -4,14 +4,14 @@ English | [中文](README_CN.md)
 
 ## Introduction
 
-HAMi-core is the in-container gpu resource controller, it has beed adopted by [HAMi](https://github.com/Project-HAMi/HAMi), [volcano](https://github.com/volcano-sh/devices)
+HAMi-core is the in-container gpu resource controller, it has been adopted by [HAMi](https://github.com/Project-HAMi/HAMi), [volcano](https://github.com/volcano-sh/devices)
 
 <img src="./docs/images/hami-arch.png" width = "600" /> 
 
 ## Features
 
 HAMi-core has the following features:
-1. Virtualize device meory
+1. Virtualize device memory
 2. Limit device utilization by self-implemented time shard
 3. Real-time device utilization monitor 
 
