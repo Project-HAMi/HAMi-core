@@ -1,10 +1,22 @@
-# HAMi-core —— Hook library for CUDA Environments
+# softmig —— GPU Resource Controller for SLURM Environments
 
-English | [中文](README_CN.md)
+**softmig** (formerly HAMi-core) is a fork optimized for **Digital Research Alliance Canada (DRAC) / Compute Canada** SLURM environments. It provides software-based GPU memory and compute cycle limiting for oversubscribed GPU partitions.
+
+**Original Project**: [HAMi-core](https://github.com/Project-HAMi/HAMi-core) - in-container GPU resource controller adopted by [HAMi](https://github.com/Project-HAMi/HAMi) and [volcano](https://github.com/volcano-sh/devices)
 
 ## Introduction
 
-HAMi-core is the in-container gpu resource controller, it has beed adopted by [HAMi](https://github.com/Project-HAMi/HAMi), [volcano](https://github.com/volcano-sh/devices)
+softmig enables GPU oversubscription on SLURM clusters by:
+- **Virtualizing GPU memory**: Restrict memory per job (e.g., 12GB, 24GB slices)
+- **Limiting GPU compute cycles**: Restrict SM utilization percentage (e.g., 25%, 50%)
+- **Multi-job coordination**: Track and enforce limits across jobs sharing the same GPU
+
+This fork adds:
+- SLURM integration (uses `SLURM_TMPDIR`, `SLURM_JOB_ID` for isolation)
+- Silent operation (no user-visible logs)
+- Structured logging to `/var/log/vgpulogs/`
+- Environment-first limit validation
+- Optimized for Compute Canada/Alliance clusters
 
 <img src="./docs/images/hami-arch.png" width = "600" /> 
 

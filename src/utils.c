@@ -11,7 +11,56 @@
 #include "include/libcuda_hook.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
-const char* unified_lock="/tmp/vgpulock/lock";
+// Helper to get lock file path (Compute Canada optimized - uses SLURM_TMPDIR)
+static char* get_unified_lock_path(void) {
+    static char lock_path[512] = {0};
+    static int initialized = 0;
+    
+    if (initialized) {
+        return lock_path;
+    }
+    
+    // Check for custom lock path
+    char* custom_lock = getenv("SOFTMIG_LOCK_FILE");
+    if (custom_lock != NULL && strlen(custom_lock) > 0) {
+        strncpy(lock_path, custom_lock, sizeof(lock_path) - 1);
+        initialized = 1;
+        return lock_path;
+    }
+    
+    // Use SLURM_TMPDIR if available (per-job, auto-cleaned)
+    char* tmpdir = getenv("SLURM_TMPDIR");
+    if (tmpdir == NULL) {
+        tmpdir = getenv("TMPDIR");
+    }
+    if (tmpdir == NULL) {
+        tmpdir = "/tmp";
+    }
+    
+    // Include job ID for isolation
+    char* job_id = getenv("SLURM_JOB_ID");
+    if (job_id != NULL) {
+        snprintf(lock_path, sizeof(lock_path), "%s/vgpulock/lock.%s", tmpdir, job_id);
+    } else {
+        // Fallback: use user ID
+        uid_t uid = getuid();
+        snprintf(lock_path, sizeof(lock_path), "%s/vgpulock/lock.uid%d", tmpdir, uid);
+    }
+    
+    // Create directory if needed
+    char dir_path[512];
+    strncpy(dir_path, lock_path, sizeof(dir_path) - 1);
+    char* last_slash = strrchr(dir_path, '/');
+    if (last_slash != NULL) {
+        *last_slash = '\0';
+        mkdir(dir_path, 0755);  // Ignore errors
+    }
+    
+    initialized = 1;
+    return lock_path;
+}
+
+const char* unified_lock = NULL;  // Will be set dynamically
 const int retry_count=20;
 extern size_t context_size;
 extern int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
@@ -19,6 +68,11 @@ extern int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 // 0 unified_lock lock success
 // -1 unified_lock lock fail
 int try_lock_unified_lock() {
+    // Get lock path (SLURM-aware)
+    if (unified_lock == NULL) {
+        unified_lock = get_unified_lock_path();
+    }
+    
     // initialize the random number seed
     srand(time(NULL));
     int fd = open(unified_lock,O_CREAT | O_EXCL,S_IRWXU);

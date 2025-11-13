@@ -662,7 +662,34 @@ void try_create_shrreg() {
 
     char* shr_reg_file = getenv(MULTIPROCESS_SHARED_REGION_CACHE_ENV);
     if (shr_reg_file == NULL) {
-        shr_reg_file = MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT;
+        // Compute Canada optimized: Use SLURM_TMPDIR with job ID for isolation
+        static char cache_path[512] = {0};
+        char* tmpdir = getenv("SLURM_TMPDIR");
+        if (tmpdir == NULL) {
+            tmpdir = getenv("TMPDIR");
+        }
+        if (tmpdir == NULL) {
+            tmpdir = "/tmp";
+        }
+        
+        // Include job ID for proper isolation (per-job cache)
+        // For oversubscription, each job gets its own cache but they coordinate via shared memory
+        char* job_id = getenv("SLURM_JOB_ID");
+        char* array_id = getenv("SLURM_ARRAY_TASK_ID");
+        
+        if (job_id != NULL) {
+            if (array_id != NULL) {
+                snprintf(cache_path, sizeof(cache_path), "%s/cudevshr.cache.%s.%s", tmpdir, job_id, array_id);
+            } else {
+                snprintf(cache_path, sizeof(cache_path), "%s/cudevshr.cache.%s", tmpdir, job_id);
+            }
+        } else {
+            // Fallback: use user ID and PID
+            uid_t uid = getuid();
+            pid_t pid = getpid();
+            snprintf(cache_path, sizeof(cache_path), "%s/cudevshr.cache.uid%d.pid%d", tmpdir, uid, pid);
+        }
+        shr_reg_file = cache_path;
     }
     // Initialize NVML BEFORE!! open it
     //nvmlInit();
@@ -729,18 +756,21 @@ void try_create_shrreg() {
         int i;
         for (i = 0; i < CUDA_DEVICE_MAX_COUNT; ++i) {
             if (local_limits[i] != region->limit[i]) {
-                LOG_ERROR("Limit inconsistency detected for %dth device"
-                    ", %lu expected, get %lu", 
+                // Downgrade to DEBUG - this is expected when cache is from different job/limit
+                // Recreate cache with correct limits from environment
+                LOG_DEBUG("Limit inconsistency detected for %dth device, %lu expected, get %lu - updating cache", 
                     i, local_limits[i], region->limit[i]);
+                // Update cache with environment limits (environment is source of truth)
+                region->limit[i] = local_limits[i];
             }
         }
         do_init_device_sm_limits(local_limits,CUDA_DEVICE_MAX_COUNT);
         for (i = 0; i < CUDA_DEVICE_MAX_COUNT; ++i) {
             if (local_limits[i] != region->sm_limit[i]) {
-                LOG_INFO("SM limit inconsistency detected for %dth device"
-                    ", %lu expected, get %lu", 
+                // Update cache with environment limits (environment is source of truth)
+                LOG_DEBUG("SM limit inconsistency detected for %dth device, %lu expected, get %lu - updating cache",
                     i, local_limits[i], region->sm_limit[i]);
-            //    exit(1); 
+                region->sm_limit[i] = local_limits[i];
             }
         }
     }

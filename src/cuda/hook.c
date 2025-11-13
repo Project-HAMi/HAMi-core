@@ -1,6 +1,6 @@
 #include "include/libcuda_hook.h"
 #include <string.h>
-#include "include/libvgpu.h"
+#include "include/libsoftmig.h"
 #include "include/multi_func_hook.h"
 
 

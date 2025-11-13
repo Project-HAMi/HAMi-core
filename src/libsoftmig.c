@@ -7,7 +7,7 @@
 #include "include/nvml_prefix.h"
 #include "include/log_utils.h"
 #include "include/libcuda_hook.h"
-#include "include/libvgpu.h"
+#include "include/libsoftmig.h"
 #include "include/utils.h"
 #include "include/nvml_override.h"
 #include "allocator/allocator.h"
@@ -146,7 +146,7 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
         if ((path_search!=NULL) && (strlen(path_search)>0)){
             vgpulib = dlopen(path_search,RTLD_LAZY);
         }else{
-            vgpulib = dlopen("/usr/local/vgpu/libvgpu.so",RTLD_LAZY);
+            vgpulib = dlopen("/usr/local/softmig/libsoftmig.so",RTLD_LAZY);
         }
     }
     // If we don't have real_dlsym, we can't hook properly - just fail gracefully

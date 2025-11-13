@@ -1,5 +1,5 @@
 cmake_minimum_required (VERSION 2.8.11)
-project (libvgpu)
+project (libsoftmig)
 
 
 # set(CMAKE_VERBOSE_MAKEFILE ON)
@@ -13,13 +13,13 @@ add_subdirectory(allocator)
 add_subdirectory(cuda)
 add_subdirectory(nvml)
 
-set(LIBVGPU vgpu)
-add_library(${LIBVGPU} SHARED libvgpu.c utils.c $<TARGET_OBJECTS:nvml_mod> $<TARGET_OBJECTS:cuda_mod> $<TARGET_OBJECTS:allocator_mod> $<TARGET_OBJECTS:multiprocess_mod>)
-target_compile_options(${LIBVGPU} PUBLIC ${LIBRARY_COMPILE_FLAGS})
-target_link_libraries(${LIBVGPU} PUBLIC -lcuda -lnvidia-ml)
+set(LIBSOFTMIG softmig)
+add_library(${LIBSOFTMIG} SHARED libsoftmig.c utils.c $<TARGET_OBJECTS:nvml_mod> $<TARGET_OBJECTS:cuda_mod> $<TARGET_OBJECTS:allocator_mod> $<TARGET_OBJECTS:multiprocess_mod>)
+target_compile_options(${LIBSOFTMIG} PUBLIC ${LIBRARY_COMPILE_FLAGS})
+target_link_libraries(${LIBSOFTMIG} PUBLIC -lcuda -lnvidia-ml)
 
 if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
 add_custom_target(strip_symbol ALL
-    COMMAND strip -x ${CMAKE_BINARY_DIR}/lib${LIBVGPU}.so
-    DEPENDS ${LIBVGPU})
+    COMMAND strip -x ${CMAKE_BINARY_DIR}/lib${LIBSOFTMIG}.so
+    DEPENDS ${LIBSOFTMIG})
 endif()

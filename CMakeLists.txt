@@ -1,6 +1,6 @@
 cmake_minimum_required (VERSION 2.8.11)
 
-project(libvgpu)
+project(libsoftmig)
 
 # Set CUDA_HOME if not defined
 if (NOT DEFINED ENV{CUDA_HOME})
