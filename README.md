@@ -1,10 +1,10 @@
-# softmig - Software GPU Slicing for SLURM Clusters
+# SoftMig - Software GPU Slicing for SLURM Clusters
 
-**softmig** is a fork of [HAMi-core](https://github.com/Project-HAMi/HAMi-core) optimized for **Digital Research Alliance Canada (DRAC) / Compute Canada** SLURM environments. It provides software-based GPU memory and compute cycle limiting for oversubscribed GPU partitions.
+**SoftMig** is a fork of [HAMi-core](https://github.com/Project-HAMi/HAMi-core) optimized for **Digital Research Alliance Canada (DRAC) / Compute Canada** SLURM environments. It provides software-based GPU memory and compute cycle limiting for oversubscribed GPU partitions.
 
 **Original Project**: [HAMi-core](https://github.com/Project-HAMi/HAMi-core) - in-container GPU resource controller adopted by [HAMi](https://github.com/Project-HAMi/HAMi) and [volcano](https://github.com/volcano-sh/devices)
 
-## What is softmig?
+## What is SoftMig?
 
 **softmig** = **Soft**ware **MIG** (Multi-Instance GPU)
 
