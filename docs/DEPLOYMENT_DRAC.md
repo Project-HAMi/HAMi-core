@@ -34,7 +34,35 @@ sudo chmod 755 /var/lib/shared/libsoftmig.so
 # sudo chmod 755 /opt/softmig/lib/libsoftmig.so
 ```
 
-### 2. Create Log and Config Directories
+### 2. Configure System-Wide Preload (REQUIRED)
+
+**This is the most secure approach - users cannot disable it.**
+
+```bash
+# Add library to /etc/ld.so.preload (one-time setup, requires root)
+# This loads the library for ALL processes, but it's passive until limits are configured
+echo "/var/lib/shared/libsoftmig.so" | sudo tee -a /etc/ld.so.preload
+
+# OR if using alternative location:
+# echo "/opt/softmig/lib/libsoftmig.so" | sudo tee -a /etc/ld.so.preload
+
+# Verify it was added:
+cat /etc/ld.so.preload
+```
+
+**Why this is safe:**
+- The library only activates when limits are configured (config file or env vars)
+- If no limits are set, it passes through to real CUDA functions (no overhead)
+- Users cannot modify `/etc/ld.so.preload` (requires root)
+- More secure than `LD_PRELOAD` because users can't disable it
+
+**To temporarily disable (if needed):**
+```bash
+# Comment out the line in /etc/ld.so.preload (requires root)
+sudo sed -i 's|^/var/lib/shared/libsoftmig.so|#/var/lib/shared/libsoftmig.so|' /etc/ld.so.preload
+```
+
+### 3. Create Log and Config Directories
 
 ```bash
 # Create log directory (requires root/admin)
@@ -109,6 +137,8 @@ PriorityWeightTRES=CPU=15000,Mem=15000,GRES/gpu=15000,GRES/gpu:l40s=15000,GRES/g
 
 ### Task Prolog (Creates Secure Config Files)
 
+**Note:** With `/etc/ld.so.preload`, the library is already loaded system-wide. The prolog only needs to create the config file to activate limits for the job. No `LD_PRELOAD` or wrapper functions are needed.
+
 Create `/etc/slurm/task_prolog.sh` (or update existing):
 
 **Critical**: softmig uses secure config files in `/var/run/softmig/{jobid}_{arrayid}.conf` **instead of environment variables**. 
@@ -121,7 +151,7 @@ Create `/etc/slurm/task_prolog.sh` (or update existing):
 - Users cannot modify config files (admin-only directory `/var/run/softmig/`)
 - Config files are deleted **AFTER** the job ends (in `task_epilog.sh`)
 
-**Security Note**: The task_prolog now appends to `LD_PRELOAD` instead of replacing it, ensuring softmig is always included. Users can add their own libraries but cannot remove softmig. However, users could still unset `LD_PRELOAD` entirely in their job script. For additional enforcement, see the "Security Considerations" section below.
+**Security Note**: With `/etc/ld.so.preload`, the library is loaded system-wide and users **cannot disable it**. The library is passive (does nothing) until a config file is created, which activates limits for that job. This is the most secure approach.
 
 ```bash
 #!/bin/bash
@@ -139,16 +169,15 @@ echo export no_proxy="localhost,127.0.0.1"
 # ===== softmig GPU SLICING CONFIGURATION =====
 # Configure softmig based on requested GPU slice type
 # This creates secure config files that users cannot modify
-
-# Determine library path (check common locations)
-SOFTMIG_LIB=""
-if [[ -f "/var/lib/shared/libsoftmig.so" ]]; then
-    SOFTMIG_LIB="/var/lib/shared/libsoftmig.so"
-elif [[ -f "/opt/softmig/lib/libsoftmig.so" ]]; then
-    SOFTMIG_LIB="/opt/softmig/lib/libsoftmig.so"
-else
-    SOFTMIG_LIB="/opt/softmig/lib/libsoftmig.so"
-fi
+#
+# REQUIREMENT: Library must be added to /etc/ld.so.preload (one-time setup, requires root)
+#   echo "/var/lib/shared/libsoftmig.so" | sudo tee -a /etc/ld.so.preload
+#
+# HOW IT WORKS:
+# - Library is loaded system-wide via /etc/ld.so.preload (users cannot disable it)
+# - Library is passive (does nothing) until a config file is created
+# - This prolog creates the config file, which activates the library for this job
+# - No LD_PRELOAD or wrapper functions needed - it's automatic and secure
 
 # Create config directory if it doesn't exist (with proper ownership and permissions)
 mkdir -p /var/run/softmig
@@ -173,19 +202,6 @@ CUDA_DEVICE_SM_LIMIT=50
 EOF
         chown root:root "$CONFIG_FILE"
         chmod 644 "$CONFIG_FILE"
-        # Append softmig to LD_PRELOAD (ensures it's always loaded, users can add but not remove)
-        if [[ -z "$LD_PRELOAD" ]]; then
-            echo export LD_PRELOAD="$SOFTMIG_LIB"
-        else
-            # Ensure softmig is in LD_PRELOAD (prepend if not already present)
-            if [[ "$LD_PRELOAD" != *"libsoftmig.so"* ]]; then
-                echo export LD_PRELOAD="$SOFTMIG_LIB:$LD_PRELOAD"
-            else
-                # Already present, but ensure it's first (remove and re-add at front)
-                LD_PRELOAD_CLEANED=$(echo "$LD_PRELOAD" | sed "s|$SOFTMIG_LIB:||g" | sed "s|:$SOFTMIG_LIB||g" | sed "s|$SOFTMIG_LIB||g")
-                echo export LD_PRELOAD="$SOFTMIG_LIB:$LD_PRELOAD_CLEANED"
-            fi
-        fi
         # Clear any existing cache
         echo "rm -f \${SLURM_TMPDIR}/cudevshr.cache* 2>/dev/null"
         logger -t slurm_task_prolog "Job $SLURM_JOB_ID: Configured softmig for half GPU (24GB, 50% SM) via $CONFIG_FILE"
@@ -198,19 +214,6 @@ CUDA_DEVICE_SM_LIMIT=25
 EOF
         chown root:root "$CONFIG_FILE"
         chmod 644 "$CONFIG_FILE"
-        # Append softmig to LD_PRELOAD (ensures it's always loaded, users can add but not remove)
-        if [[ -z "$LD_PRELOAD" ]]; then
-            echo export LD_PRELOAD="$SOFTMIG_LIB"
-        else
-            # Ensure softmig is in LD_PRELOAD (prepend if not already present)
-            if [[ "$LD_PRELOAD" != *"libsoftmig.so"* ]]; then
-                echo export LD_PRELOAD="$SOFTMIG_LIB:$LD_PRELOAD"
-            else
-                # Already present, but ensure it's first (remove and re-add at front)
-                LD_PRELOAD_CLEANED=$(echo "$LD_PRELOAD" | sed "s|$SOFTMIG_LIB:||g" | sed "s|:$SOFTMIG_LIB||g" | sed "s|$SOFTMIG_LIB||g")
-                echo export LD_PRELOAD="$SOFTMIG_LIB:$LD_PRELOAD_CLEANED"
-            fi
-        fi
         # Clear any existing cache
         echo "rm -f \${SLURM_TMPDIR}/cudevshr.cache* 2>/dev/null"
         logger -t slurm_task_prolog "Job $SLURM_JOB_ID: Configured softmig for quarter GPU (12GB, 25% SM) via $CONFIG_FILE"
@@ -223,19 +226,6 @@ CUDA_DEVICE_SM_LIMIT=12
 EOF
         chown root:root "$CONFIG_FILE"
         chmod 644 "$CONFIG_FILE"
-        # Append softmig to LD_PRELOAD (ensures it's always loaded, users can add but not remove)
-        if [[ -z "$LD_PRELOAD" ]]; then
-            echo export LD_PRELOAD="$SOFTMIG_LIB"
-        else
-            # Ensure softmig is in LD_PRELOAD (prepend if not already present)
-            if [[ "$LD_PRELOAD" != *"libsoftmig.so"* ]]; then
-                echo export LD_PRELOAD="$SOFTMIG_LIB:$LD_PRELOAD"
-            else
-                # Already present, but ensure it's first (remove and re-add at front)
-                LD_PRELOAD_CLEANED=$(echo "$LD_PRELOAD" | sed "s|$SOFTMIG_LIB:||g" | sed "s|:$SOFTMIG_LIB||g" | sed "s|$SOFTMIG_LIB||g")
-                echo export LD_PRELOAD="$SOFTMIG_LIB:$LD_PRELOAD_CLEANED"
-            fi
-        fi
         # Clear any existing cache
         echo "rm -f \${SLURM_TMPDIR}/cudevshr.cache* 2>/dev/null"
         logger -t slurm_task_prolog "Job $SLURM_JOB_ID: Configured softmig for eighth GPU (6GB, 12% SM) via $CONFIG_FILE"
@@ -350,64 +340,21 @@ nvidia-smi
 
 ## Security Considerations
 
-### LD_PRELOAD Enforcement
+With `/etc/ld.so.preload`, users **cannot disable softmig** because:
+- The library is loaded by the dynamic linker before any user code runs
+- Users cannot modify `/etc/ld.so.preload` (requires root)
+- Even if users unset `LD_PRELOAD`, the library from `/etc/ld.so.preload` is still loaded
+- The library only activates when a config file exists (created by prolog), so it's safe for all processes
 
-**Important**: Users can potentially disable softmig by unsetting `LD_PRELOAD` in their job scripts:
+**Why this is safe:**
+- The library is passive (does nothing) when no limits are configured
+- For non-GPU jobs or processes without config files, it just passes through to real CUDA functions
+- Only GPU slice jobs get config files, which activate the library for those specific jobs
 
-```bash
-# User could do this in their job script:
-unset LD_PRELOAD
-# This would bypass softmig limits
-```
-
-**Enforcement Options**:
-
-1. **Task Prolog Enhancement** (Already implemented): The task_prolog now:
-   - Appends to `LD_PRELOAD` instead of replacing it, ensuring softmig is always included
-   - Exports an `ensure_softmig_loaded()` function that automatically re-checks and re-adds softmig if needed
-   - Sets up `PROMPT_COMMAND` for interactive shells to automatically ensure softmig is loaded before each command
-   
-   **This means the wrapper is automatically applied for all jobs via the prolog - users don't need to add anything to their batch scripts.**
-
-2. **Standalone Wrapper Script** (Optional, for additional security or manual use): The wrapper script can still be used standalone:
-   
-   **Installation:**
-   ```bash
-   sudo cp docs/examples/softmig_wrapper.sh /usr/local/bin/
-   sudo chmod 755 /usr/local/bin/softmig_wrapper.sh
-   ```
-   
-   **Note:** The wrapper function is already automatically exported by the task_prolog, so this standalone script is only needed if you want to use it outside of SLURM jobs or for manual enforcement.
-   
-   **Usage Options:**
-   
-   **Option A: Use as command wrapper** (outside SLURM):
-   ```bash
-   /usr/local/bin/softmig_wrapper.sh python your_script.py
-   ```
-   
-   **Option B: Source in scripts** (if needed for manual enforcement):
-   ```bash
-   source /usr/local/bin/softmig_wrapper.sh
-   python your_script.py
-   ```
-   
-   See `docs/examples/softmig_wrapper.sh` for the complete script.
-
-3. **SLURM PrologSlurmctld**: Add validation in `/etc/slurm/prolog_slurmctld.sh`:
-   ```bash
-   # Check if job requested GPU slices and verify LD_PRELOAD is set
-   if [[ "$SLURM_JOB_GRES" == *"l40s.2"* ]] || [[ "$SLURM_JOB_GRES" == *"l40s.4"* ]] || [[ "$SLURM_JOB_GRES" == *"l40s.8"* ]]; then
-       if [[ -z "$LD_PRELOAD" ]] || [[ "$LD_PRELOAD" != *"libsoftmig.so"* ]]; then
-           logger -t slurm_prolog "ERROR: Job $SLURM_JOB_ID missing LD_PRELOAD for GPU slice"
-           # Optionally cancel the job or set LD_PRELOAD
-       fi
-   fi
-   ```
-
-4. **Monitoring**: Regularly check logs to detect when softmig is not active (missing log entries indicate library not loaded).
-
-5. **Job Accounting**: Track GPU usage vs. requested slices - if usage exceeds slice limits, investigate.
+**Monitoring:**
+- Regularly check logs to verify softmig is working: `/var/log/softmig/*.log`
+- Monitor GPU usage vs. requested slices - if usage exceeds slice limits, investigate
+- Check that config files are being created/deleted properly by prolog/epilog
 
 ## Monitoring and Troubleshooting
 

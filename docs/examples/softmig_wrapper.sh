@@ -1,22 +1,22 @@
 #!/bin/bash
-# SoftMig wrapper script - ensures LD_PRELOAD is always set for GPU slice jobs
-# This script prevents users from disabling softmig by unsetting LD_PRELOAD
+# SoftMig wrapper script - ensures LD_PRELOAD is set for GPU slice jobs
+# 
+# NOTE: This wrapper is OPTIONAL if using /etc/ld.so.preload (recommended).
+# With /etc/ld.so.preload, the library is loaded system-wide and users cannot disable it.
+# This wrapper is only needed if NOT using /etc/ld.so.preload (e.g., for testing).
 #
-# INSTALLATION:
+# INSTALLATION (if not using /etc/ld.so.preload):
 #   sudo cp softmig_wrapper.sh /usr/local/bin/
 #   sudo chmod 755 /usr/local/bin/softmig_wrapper.sh
 #
 # USAGE OPTIONS:
 #
-# Option 1: Source in job script (recommended)
+# Option 1: Source in job script
 #   source /usr/local/bin/softmig_wrapper.sh
 #   python your_script.py
 #
 # Option 2: Use as wrapper for specific commands
 #   /usr/local/bin/softmig_wrapper.sh python your_script.py
-#
-# Option 3: Add to job script template (enforced for all jobs)
-#   Add "source /usr/local/bin/softmig_wrapper.sh" to your job script template
 
 # Determine library path
 SOFTMIG_LIB=""

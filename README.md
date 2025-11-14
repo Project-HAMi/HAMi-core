@@ -25,6 +25,9 @@ sudo cp build/libsoftmig.so /var/lib/shared/
 sudo chmod 755 /var/lib/shared/libsoftmig.so
 sudo chown root:root /var/log/softmig /var/run/softmig
 sudo chmod 755 /var/log/softmig /var/run/softmig
+
+# Configure system-wide preload (REQUIRED for production - users cannot disable it)
+echo "/var/lib/shared/libsoftmig.so" | sudo tee -a /etc/ld.so.preload
 ```
 
 ### For Other Systems
@@ -48,7 +51,7 @@ sudo cp build/libsoftmig.so /var/lib/shared/
 
 - `CUDA_DEVICE_MEMORY_LIMIT`: Memory limit (e.g., `16g`, `24G`)
 - `CUDA_DEVICE_SM_LIMIT`: SM utilization percentage (0-100)
-- `LD_PRELOAD`: Path to `libsoftmig.so`
+- `LD_PRELOAD`: Path to `libsoftmig.so` (for testing only - production uses `/etc/ld.so.preload`)
 - `LIBCUDA_LOG_LEVEL`: Log verbosity (0=errors only, 4=debug, default 0)
 
 ### Quick Test
