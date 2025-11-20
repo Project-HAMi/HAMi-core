@@ -40,6 +40,9 @@ void rate_limiter(int grids, int blocks) {
     sleep(1);
   }
   set_recent_kernel(2);
+  // Note: Only checks device 0 SM limit - this is intentional since fractional GPU
+  // jobs (the ones that need SM limiting) only get a single GPU slice.
+  // Full GPU jobs typically have SM_LIMIT=100 (no limit) or 0 (disabled).
   if ((get_current_device_sm_limit(0)>=100) || (get_current_device_sm_limit(0)==0))
     	return;
   if (get_utilization_switch()==0)
@@ -55,7 +58,12 @@ CHECK:
         nanosleep(&g_cycle, NULL);
         goto CHECK;
       }
+      // Atomically decrement tokens by kernel size (throttles if tokens exhausted)
       after_cuda_cores = before_cuda_cores - kernel_size;
+      // Safety: prevent integer underflow (shouldn't happen, but defensive)
+      if (after_cuda_cores < -g_total_cuda_cores) {
+        after_cuda_cores = -g_total_cuda_cores;
+      }
     } while (!CAS(&g_cur_cuda_cores, before_cuda_cores, after_cuda_cores));
   //}
 }
@@ -64,31 +72,40 @@ static void change_token(long delta) {
   int cuda_cores_before = 0, cuda_cores_after = 0;
 
   LOG_DEBUG("delta: %ld, curr: %ld", delta, g_cur_cuda_cores);
+  // Atomically adjust token pool by delta (can be positive or negative)
   do {
     cuda_cores_before = g_cur_cuda_cores;
     cuda_cores_after = cuda_cores_before + delta;
 
+    // Cap at maximum pool size
     if (cuda_cores_after > g_total_cuda_cores) {
       cuda_cores_after = g_total_cuda_cores;
     }
+    // Note: Negative values are allowed (indicates tokens exhausted, throttling active)
   } while (!CAS(&g_cur_cuda_cores, cuda_cores_before, cuda_cores_after));
 }
 
 long delta(int up_limit, int user_current, long share) {
+  // Calculate utilization difference (minimum 5% to ensure some adjustment)
   int utilization_diff =
       abs(up_limit - user_current) < 5 ? 5 : abs(up_limit - user_current);
+  // Calculate token increment based on SM count, threads per SM, and utilization diff
+  // Magic number 2560 is a scaling factor to normalize the increment size
   long increment =
       (long)g_sm_num * (long)g_sm_num * (long)g_max_thread_per_sm * (long)utilization_diff / 2560;
 
   /* Accelerate cuda cores allocation when utilization vary widely */
   if (utilization_diff > up_limit / 2) {
+    // Safety: up_limit is checked to be > 0 before calling this function
     increment = increment * utilization_diff * 2 / (up_limit + 1);
   }
 
   if (user_current <= up_limit) {
+    // Utilization below limit: increase tokens (allow more kernels)
     share = (share + increment) > g_total_cuda_cores ? g_total_cuda_cores
                                                    : (share + increment);
   } else {
+    // Utilization above limit: decrease tokens (throttle more)
     share = (share - increment) < 0 ? 0 : (share - increment);
   }
 
@@ -180,6 +197,9 @@ void* utilization_watcher() {
     int userutil[CUDA_DEVICE_MAX_COUNT];
     int sysprocnum;
     long share = 0;
+    // Note: Only monitors device 0 - this is intentional since fractional GPU jobs
+    // (the ones that need SM limiting) only get a single GPU slice. Full GPU jobs
+    // typically have SM_LIMIT=100 (no limit) or 0 (disabled), so they don't need monitoring.
     int upper_limit = get_current_device_sm_limit(0);
     ensure_initialized();
     LOG_DEBUG("upper_limit=%d\n",upper_limit);
@@ -198,10 +218,14 @@ void* utilization_watcher() {
         //        delta(upper_limit, userutil, share);
         //    continue;
         //}
+        // Safety mechanism: if tokens exhausted but share is at max, double the pool
+        // This prevents deadlock if initial pool size was too small
         if ((share==g_total_cuda_cores) && (g_cur_cuda_cores<0)) {
           g_total_cuda_cores *= 2;
           share = g_total_cuda_cores;
         }
+        // Only adjust tokens if utilization is valid (0-100%)
+        // Only monitor device 0 (see note above)
         if ((userutil[0]<=100) && (userutil[0]>=0)){
           share = delta(upper_limit, userutil[0], share);
           change_token(share);
