@@ -1,8 +1,6 @@
 #!/bin/bash
-# SLURM task_epilog.sh for softmig (Digital Research Alliance Canada)
-# This script runs after each job task and cleans up softmig config files
-#
-# Add this section to your existing task_epilog.sh
+# SLURM epilog.sh for softmig
+# This script runs after each job and cleans up softmig config files
 
 # ===== softmig CLEANUP =====
 # Delete config file for this job (backup cleanup - exit_handler also does this)
@@ -16,7 +14,7 @@ if [[ ! -z "$SLURM_JOB_ID" ]]; then
     
     if [[ -f "$CONFIG_FILE" ]]; then
         rm -f "$CONFIG_FILE"
-        logger -t slurm_task_epilog "Job $SLURM_JOB_ID: Cleaned up softmig config file $CONFIG_FILE"
+        logger -t slurm_epilog "Job $SLURM_JOB_ID: Cleaned up softmig config file $CONFIG_FILE"
     fi
 fi
 

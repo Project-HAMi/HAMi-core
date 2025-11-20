@@ -32,65 +32,49 @@ static inline char* get_log_file_path(void) {
         return log_path;
     }
     
-    // Use /var/log/softmig/ with job info (Digital Research Alliance Canada format)
+    // Use /var/log/softmig/ with job ID (matches config file format: {jobid}_{arrayid}.log or {jobid}.log)
     char* job_id = getenv("SLURM_JOB_ID");
     char* array_id = getenv("SLURM_ARRAY_TASK_ID");
-    char* user = getenv("USER");
-    if (user == NULL) user = getenv("LOGNAME");
-    if (user == NULL) {
-        uid_t uid = getuid();
-        snprintf(log_path, sizeof(log_path), "/var/log/softmig/uid%d", uid);
-    } else {
-        snprintf(log_path, sizeof(log_path), "/var/log/softmig/%s", user);
-    }
     
-    // Add job ID and array ID if available
+    // Build log path: /var/log/softmig/{jobid}_{arrayid}.log or /var/log/softmig/{jobid}.log
+    // This matches the config file naming convention
     if (job_id != NULL) {
-        char temp[2048];
-        strncpy(temp, log_path, sizeof(temp) - 1);
-        temp[sizeof(temp) - 1] = '\0';
-        const char* user_str = user ? user : "user";
-        if (array_id != NULL) {
-            int written = snprintf(log_path, sizeof(log_path), "%s_%s_%s", temp, job_id, array_id);
+        if (array_id != NULL && strlen(array_id) > 0) {
+            // Array job: {jobid}_{arrayid}.log (matches config file format)
+            int written = snprintf(log_path, sizeof(log_path), "/var/log/softmig/%s_%s.log", 
+                                   job_id, array_id);
             if (written >= sizeof(log_path)) {
-                // Truncation occurred, use simpler path
-                snprintf(log_path, sizeof(log_path), "/var/log/softmig/%s_%s_%s.log", 
-                         user_str, job_id, array_id);
+                // Truncation occurred, use fallback to SLURM_TMPDIR
+                char* tmpdir = getenv("SLURM_TMPDIR");
+                if (tmpdir != NULL) {
+                    snprintf(log_path, sizeof(log_path), "%s/softmig_%s_%s.log", tmpdir,
+                             job_id, array_id);
+                } else {
+                    snprintf(log_path, sizeof(log_path), "/var/log/softmig/job_%s_%s.log",
+                             job_id, array_id);
+                }
             }
         } else {
-            int written = snprintf(log_path, sizeof(log_path), "%s_%s", temp, job_id);
+            // Regular job: {jobid}.log (matches config file format)
+            int written = snprintf(log_path, sizeof(log_path), "/var/log/softmig/%s.log", job_id);
             if (written >= sizeof(log_path)) {
-                // Truncation occurred, use simpler path
-                snprintf(log_path, sizeof(log_path), "/var/log/softmig/%s_%s.log", 
-                         user_str, job_id);
+                // Truncation occurred, use fallback to SLURM_TMPDIR
+                char* tmpdir = getenv("SLURM_TMPDIR");
+                if (tmpdir != NULL) {
+                    snprintf(log_path, sizeof(log_path), "%s/softmig_%s.log", tmpdir, job_id);
+                } else {
+                    snprintf(log_path, sizeof(log_path), "/var/log/softmig/job_%s.log", job_id);
+                }
             }
         }
-    }
-    
-    // Add date
-    time_t now = time(NULL);
-    struct tm* tm_info = localtime(&now);
-    char date_str[32];
-    strftime(date_str, sizeof(date_str), "%Y%m%d", tm_info);
-    
-    char final_path[2048];
-    int written = snprintf(final_path, sizeof(final_path), "%s_%s.log", log_path, date_str);
-    if (written >= sizeof(final_path)) {
-        // Truncation occurred, use fallback to SLURM_TMPDIR only
-        char* tmpdir = getenv("SLURM_TMPDIR");
-        if (tmpdir != NULL) {
-            snprintf(log_path, sizeof(log_path), "%s/softmig_%s.log", tmpdir,
-                     job_id ? job_id : "unknown");
-        } else {
-            // No SLURM_TMPDIR, use minimal path
-            snprintf(log_path, sizeof(log_path), "/var/log/softmig/job_%s.log",
-                     job_id ? job_id : "unknown");
-        }
-        log_path[sizeof(log_path) - 1] = '\0';
     } else {
-        strncpy(log_path, final_path, sizeof(log_path) - 1);
-        log_path[sizeof(log_path) - 1] = '\0';
+        // Not in SLURM job - use process ID only (PIDs are unique per process)
+        // If PID is reused, old log is from a dead process, so overwriting is fine
+        pid_t pid = getpid();
+        snprintf(log_path, sizeof(log_path), "/var/log/softmig/pid%d.log", pid);
     }
+    
+    log_path[sizeof(log_path) - 1] = '\0';
     
     // Create directory if it doesn't exist (try, but don't fail if no permission)
     char dir_path[512];

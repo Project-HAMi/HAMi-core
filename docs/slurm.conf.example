@@ -1,0 +1,14 @@
+# ===== SLURM Configuration for softmig =====
+# Minimal configuration needed for softmig to work
+# Add these lines to your existing slurm.conf
+
+# Prolog/Epilog (runs before/after each job)
+# These scripts create/delete softmig config files
+Prolog=/disks/slurm/etc/slurm/prolog.sh
+Epilog=/disks/slurm/etc/slurm/epilog.sh
+
+# Note: Adjust paths to match your SLURM configuration directory
+# Example paths:
+#   Prolog=/etc/slurm/prolog.sh
+#   Epilog=/etc/slurm/epilog.sh
+

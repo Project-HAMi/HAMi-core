@@ -402,7 +402,7 @@ rm -f ${SLURM_TMPDIR}/cudevshr.cache*
 3. **Structured Logging**: Logs to `/var/log/softmig/` with job info
 4. **Environment-First**: Always validates limits from environment, updates cache if mismatch
 5. **Renamed**: "softmig" (software MIG) to reflect DRAC optimization
-6. **Library Name**: `libsoftmig.so` (instead of `libvgpu.so`)
+6. **Library Name**: `libsoftmig.so` 
 7. **SLURM-Only**: Designed for SLURM job environments, not Docker containers
 
 ## Support
