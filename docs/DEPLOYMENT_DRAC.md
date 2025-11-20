@@ -76,87 +76,30 @@ sudo chmod 755 /var/run/softmig
 # Optional: Set up log rotation
 ```
 
-## SLURM Configuration
+## Prolog/Epilog Configuration
 
-### GRES Configuration
-
-Add to `/etc/slurm/gres.conf`:
-
-```bash
-AutoDetect=off
-
-# Physical GPUs (keep existing)
-NodeName=rack[01-14]-[01-16] Name=gpu Type=l40s File=/dev/nvidia[0-3]
-
-# Logical GPU slices for softmig (no File= parameter)
-NodeName=rack[01-14]-[01-16] Name=gpu Type=l40s.1 Count=4   # Full GPU (1x)
-NodeName=rack[01-14]-[01-16] Name=gpu Type=l40s.2 Count=8   # Half GPU (2x sharing)
-NodeName=rack[01-14]-[01-16] Name=gpu Type=l40s.4 Count=16  # Quarter GPU (4x sharing)
-NodeName=rack[01-14]-[01-16] Name=gpu Type=l40s.8 Count=32  # Eighth GPU (8x sharing)
-```
-
-### Partition Configuration
-
-Add to `/etc/slurm/slurm.conf`:
-
-```bash
-# Half GPU sliced partitions (2x oversubscription)
-PartitionName=gpuhalf_bygpu_b1 Nodes=p1,p2,p3,p4,p5 MaxTime=3:00:00 DefaultTime=1:00:00 \
-    DefMemPerNode=500 State=UP OverSubscribe=YES:2 \
-    TRESBillingWeights=CPU=643.75,Mem=81.10G,GRES/gpu:l40s.2=5150
-
-PartitionName=gpuhalf_bygpu_b2 Nodes=p2,p3,p4,p5 MaxTime=12:00:00 DefaultTime=1:00:00 \
-    DefMemPerNode=500 State=UP OverSubscribe=YES:2 \
-    TRESBillingWeights=CPU=643.75,Mem=81.10G,GRES/gpu:l40s.2=5150
-
-# Quarter GPU sliced partitions (4x oversubscription)
-PartitionName=gpuquarter_bygpu_b1 Nodes=p1,p2,p3,p4,p5 MaxTime=3:00:00 DefaultTime=1:00:00 \
-    DefMemPerNode=500 State=UP OverSubscribe=YES:4 \
-    TRESBillingWeights=CPU=643.75,Mem=81.10G,GRES/gpu:l40s.4=2575
-
-# Interactive partitions
-PartitionName=gpuhalf_interac Nodes=compute MaxTime=8:00:00 DefaultTime=0:10:00 \
-    DefMemPerNode=500 State=UP OverSubscribe=YES:2 \
-    TRESBillingWeights=CPU=643.75,Mem=81.10G,GRES/gpu:l40s.2=5150
-
-PartitionName=gpuquarter_interac Nodes=compute MaxTime=8:00:00 DefaultTime=0:10:00 \
-    DefMemPerNode=500 State=UP OverSubscribe=YES:4 \
-    TRESBillingWeights=CPU=643.75,Mem=81.10G,GRES/gpu:l40s.4=2575
-```
-
-### Accounting Configuration
-
-Update `/etc/slurm/slurm.conf`:
-
-```bash
-AccountingStorageTRES=gres/gpu,gres/gpu:l40s,gres/gpu:l40s.1,gres/gpu:l40s.2,gres/gpu:l40s.4,gres/gpu:l40s.8,cpu,mem
-PriorityWeightTRES=CPU=15000,Mem=15000,GRES/gpu=15000,GRES/gpu:l40s=15000,GRES/gpu:l40s.1=15000,GRES/gpu:l40s.2=7500,GRES/gpu:l40s.4=3750,GRES/gpu:l40s.8=1875
-```
-
-## Task Prolog Configuration
-
-### Task Prolog (Creates Secure Config Files)
+### Prolog (Creates Secure Config Files)
 
 **Note:** With `/etc/ld.so.preload`, the library is already loaded system-wide. The prolog only needs to create the config file to activate limits for the job. No `LD_PRELOAD` or wrapper functions are needed.
 
-Create `/etc/slurm/task_prolog.sh` (or update existing):
+Create `/etc/slurm/prolog.sh` (or update existing):
 
 **Critical**: softmig uses secure config files in `/var/run/softmig/{jobid}_{arrayid}.conf` **instead of environment variables**. 
 
 **Priority**: Config file → Environment variables (if config file doesn't exist)
 
 **Important**: 
-- Config files are created **BEFORE** the job starts (in `task_prolog.sh`)
+- Config files are created **BEFORE** the job starts (in `prolog.sh`)
 - If a config file exists, environment variables are **ignored** (config file takes priority)
 - Users cannot modify config files (admin-only directory `/var/run/softmig/`)
-- Config files are deleted **AFTER** the job ends (in `task_epilog.sh`)
+- Config files are deleted **AFTER** the job ends (in `epilog.sh`)
 
 **Security Note**: With `/etc/ld.so.preload`, the library is loaded system-wide and users **cannot disable it**. The library is passive (does nothing) until a config file is created, which activates limits for that job. This is the most secure approach.
 
 ```bash
 #!/bin/bash
-# SLURM task_prolog.sh for softmig (Digital Research Alliance Canada)
-# This script runs BEFORE each job task and creates secure config files
+# SLURM prolog.sh for softmig (Digital Research Alliance Canada)
+# This script runs BEFORE each job and creates secure config files
 
 # Existing prolog content (proxy, SSH, cache, etc.)
 echo export SLURM_TMPDIR=/tmp
@@ -237,16 +180,16 @@ EOF
 fi
 ```
 
-**See `docs/examples/slurm_task_prolog.sh` for the complete example.**
+**See `docs/examples/prolog_softmig.sh` for the complete example.**
 
-### Task Epilog (Cleanup)
+### Epilog (Cleanup)
 
-Create `/etc/slurm/task_epilog.sh` (or update existing) to clean up config files **AFTER** the job ends:
+Create `/etc/slurm/epilog.sh` (or update existing) to clean up config files **AFTER** the job ends:
 
 ```bash
 #!/bin/bash
-# SLURM task_epilog.sh for softmig (Digital Research Alliance Canada)
-# This script runs AFTER each job task and cleans up softmig config files
+# SLURM epilog.sh for softmig (Digital Research Alliance Canada)
+# This script runs AFTER each job and cleans up softmig config files
 
 # ===== softmig CLEANUP =====
 # Delete config file for this job (backup cleanup - exit_handler also does this)
@@ -265,16 +208,7 @@ if [[ ! -z "$SLURM_JOB_ID" ]]; then
 fi
 ```
 
-**See `docs/examples/slurm_task_epilog.sh` for the complete example.**
-
-## Job Submit Lua Script
-
-Create `/etc/slurm/job_submit.lua` (see example file in `docs/examples/`):
-
-Key features:
-- Detects GPU slice type (l40s.2, l40s.4) and routes to appropriate partition
-- Validates that users can only request 1 slice of fractional GPUs
-- Routes jobs to correct partition based on walltime and GPU type
+**See `docs/examples/epilog_softmig.sh` for the complete example.**
 
 ## Memory Limit Management
 
@@ -291,7 +225,7 @@ Key features:
 
 **In SLURM jobs**: Config files take priority over environment variables.
 
-1. **Config file** (`/var/run/softmig/{jobid}_{arrayid}.conf`) - **Created by task_prolog, takes priority**
+1. **Config file** (`/var/run/softmig/{jobid}_{arrayid}.conf`) - **Created by prolog.sh, takes priority**
 2. **Environment variables** - Only used if config file doesn't exist (for testing outside SLURM)
 
 **Important**: If a config file exists, environment variables are **ignored**. This ensures users cannot bypass limits by modifying environment variables.
@@ -362,12 +296,14 @@ With `/etc/ld.so.preload`, users **cannot disable softmig** because:
 
 Logs are written to `/var/log/softmig/` with format:
 ```
-/var/log/softmig/{username}_{jobid}_{arrayid}_{date}.log
+/var/log/softmig/{jobid}_{arrayid}.log  # For array jobs
+/var/log/softmig/{jobid}.log            # For regular jobs
+/var/log/softmig/pid{pid}.log          # For non-SLURM processes
 ```
 
-Example: `/var/log/softmig/rahimk_12345_0_20241112.log`
+Example: `/var/log/softmig/12345.log` or `/var/log/softmig/12345_2.log` (for array task 2)
 
-If `/var/log/softmig/` is not writable, logs fall back to `$SLURM_TMPDIR/softmig_*.log`
+If `/var/log/softmig/` is not writable, logs fall back to `$SLURM_TMPDIR/softmig_{jobid}.log`
 
 ### Viewing Logs
 

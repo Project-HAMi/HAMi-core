@@ -43,7 +43,7 @@ sudo cp build/libsoftmig.so /var/lib/shared/
 
 ### Configuration
 
-**In SLURM jobs**: SoftMig reads limits from secure config files in `/var/run/softmig/{jobid}_{arrayid}.conf` (created by `task_prolog.sh`). Users cannot modify these files.
+**In SLURM jobs**: SoftMig reads limits from secure config files in `/var/run/softmig/{jobid}_{arrayid}.conf` (created by `prolog.sh`). Users cannot modify these files.
 
 **Outside SLURM (testing)**: SoftMig automatically falls back to environment variables if no config file exists.
 
@@ -88,7 +88,7 @@ sbatch --gres=gpu:l40s.8:1 --time=1:00:00 job.sh
 sbatch --gres=gpu:l40s:1 --time=2:00:00 job.sh
 ```
 
-Limits are automatically configured by `task_prolog.sh` based on the requested GPU slice type.
+Limits are automatically configured by `prolog.sh` based on the requested GPU slice type.
 
 ## Memory Limits by GPU Slice
 
@@ -103,14 +103,14 @@ Limits are automatically configured by `task_prolog.sh` based on the requested G
 
 - **Cache files**: `$SLURM_TMPDIR/cudevshr.cache.*` (auto-cleaned when job ends)
 - **Lock files**: `$SLURM_TMPDIR/vgpulock/lock.*` (per-job isolation)
-- **Config files**: `/var/run/softmig/{jobid}_{arrayid}.conf` (created by task_prolog, deleted on exit)
-- **Logs**: `/var/log/softmig/{user}_{jobid}_{arrayid}_{date}.log` (silent to users)
+- **Config files**: `/var/run/softmig/{jobid}_{arrayid}.conf` (created by prolog.sh, deleted by epilog.sh)
+- **Logs**: `/var/log/softmig/{jobid}_{arrayid}.log` or `/var/log/softmig/{jobid}.log` (silent to users)
 
 Logs fall back to `$SLURM_TMPDIR/softmig_{jobid}.log` if `/var/log/softmig` is not writable.
 
 ## Logging
 
-Logs are written to `/var/log/softmig/{user}_{jobid}_{arrayid}_{date}.log` and are completely silent to users by default.
+Logs are written to `/var/log/softmig/{jobid}_{arrayid}.log` (or `/var/log/softmig/{jobid}.log` for non-array jobs) and are completely silent to users by default.
 
 Use `LIBCUDA_LOG_LEVEL` to control verbosity:
 - `0` (default): errors only
@@ -129,13 +129,11 @@ For complete deployment instructions, see **[docs/DEPLOYMENT_DRAC.md](docs/DEPLO
 1. **Build and Install** (see Building section above)
 
 2. **SLURM Configuration**:
-   - Update `gres.conf` with GPU slice definitions
-   - Update `slurm.conf` with new partitions
-   - Create/update `task_prolog.sh` (creates secure config files)
-   - Create/update `task_epilog.sh` (cleanup)
-   - Create/update `job_submit.lua` (job routing and validation)
+   - Update `slurm.conf` to add `Prolog` and `Epilog` paths (see `docs/slurm.conf.example`)
+   - Create/update `prolog.sh` (creates secure config files) - see `docs/examples/prolog_softmig.sh`
+   - Create/update `epilog.sh` (cleanup) - see `docs/examples/epilog_softmig.sh`
 
-3. **Example Configs**: See `docs/examples/` for complete examples
+3. **Example Scripts**: See `docs/examples/` for prolog/epilog scripts
 
 ## Important Notes
 
