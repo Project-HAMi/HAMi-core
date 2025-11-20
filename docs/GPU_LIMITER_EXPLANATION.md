@@ -110,7 +110,10 @@ long delta(int up_limit, int user_current, long share) {
 1. **Only affects kernel launches** - Memory transfers, etc. are not throttled
 2. **Coarse-grained** - Works at kernel launch level, not instruction level
 3. **Measurement delay** - 120ms polling interval means adjustments lag actual usage
-4. **Per-device only** - Currently only monitors device 0 (`userutil[0]`)
+4. **Device 0 only** - Currently only monitors device 0 (`userutil[0]`). This is **intentional by design**:
+   - Fractional GPU jobs (the ones that need SM limiting) only get a single GPU slice
+   - Full GPU jobs typically have `SM_LIMIT=100` (no limit) or `0` (disabled), so they don't need monitoring
+   - If you need multi-GPU SM limiting in the future, the code can be extended to track per-device token pools
 
 ## Configuration
 

@@ -15,9 +15,9 @@ softmig enables GPU oversubscription by:
 
 ```bash
 # On Digital Research Alliance Canada / Compute Canada (CVMFS)
-# Load CUDA module - use CUDA 11 for maximum compatibility (works with CUDA 11, 12, 13)
-module load cuda/11.8
-# Or: module load cuda/12.2
+# NOTE: CUDA 12+ required (CUDA 11 does not work)
+module load cuda/12.2  # Recommended
+# Or: module load cuda/13.0
 
 cd /path/to/softmig
 ./build.sh
@@ -210,7 +210,7 @@ fi
 
 **See `docs/examples/epilog_softmig.sh` for the complete example.**
 
-## Memory Limit Management
+## Memory and SM Limit Management
 
 ### Per-Slice Defaults
 
@@ -220,6 +220,16 @@ fi
 | l40s.2 (half) | 24GB | 50% | Medium models, 2x oversubscription |
 | l40s.4 (quarter) | 12GB | 25% | Small models, 4x oversubscription |
 | l40s.8 (eighth) | 6GB | 12.5% | Very small models, 8x oversubscription |
+
+### How SM Limiting Works
+
+The SM utilization limiter (`CUDA_DEVICE_SM_LIMIT`) restricts GPU compute capacity by throttling kernel launches using a token bucket algorithm:
+
+- **Token-based throttling**: Each kernel launch consumes tokens. If tokens are exhausted, launches are delayed.
+- **Dynamic adjustment**: A background thread measures actual SM utilization every 120ms and adjusts token allocation to converge toward the target limit.
+- **Device 0 only**: Currently monitors device 0 only. This is intentional since fractional GPU jobs (the ones that need SM limiting) only get a single GPU slice. Full GPU jobs typically have `SM_LIMIT=100` (no limit) or `0` (disabled).
+
+For detailed technical information, see [docs/GPU_LIMITER_EXPLANATION.md](GPU_LIMITER_EXPLANATION.md).
 
 ### Configuration Priority
 
@@ -340,6 +350,7 @@ rm -f ${SLURM_TMPDIR}/cudevshr.cache*
 5. **Renamed**: "softmig" (software MIG) to reflect DRAC optimization
 6. **Library Name**: `libsoftmig.so` 
 7. **SLURM-Only**: Designed for SLURM job environments, not Docker containers
+8. **SM Limiting**: GPU compute utilization limiting via kernel launch throttling (device 0 only by design)
 
 ## Support
 

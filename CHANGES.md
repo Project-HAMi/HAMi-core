@@ -126,7 +126,7 @@ This document summarizes all changes made to HAMi-core to create softmig for DRA
 
 ## Deployment Checklist
 
-- [ ] Build library with CUDA 11 headers
+- [ ] Build library with CUDA 12+ (CUDA 11 does not work)
 - [ ] Install to `/var/lib/shared/libsoftmig.so` (or `/opt/softmig/lib/libsoftmig.so`)
 - [ ] Create `/var/log/softmig/` directory
 - [ ] Create `/var/run/softmig/` directory (for secure config files)
@@ -161,5 +161,5 @@ Verify:
 - Project is renamed to "softmig" in documentation
 - Library is renamed to `libsoftmig.so`
 - All changes are backward compatible with original HAMi-core usage
-- Works with CUDA 11, 12, 13 (build with CUDA 11 headers)
+- **CUDA 12+ required** (tested with CUDA 12.2 and 13.0). CUDA 11 does not work.
 

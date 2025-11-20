@@ -13,8 +13,9 @@ Like NVIDIA's hardware MIG, SoftMig enables software-based GPU slicing for any G
 
 ```bash
 # Load CUDA module from CVMFS
-module load cuda/11.8  # Recommended for compatibility (works with CUDA 11, 12, 13)
-# Or: module load cuda/12.2
+# NOTE: CUDA 12+ required (CUDA 11 does not work)
+module load cuda/12.2  # Recommended
+# Or: module load cuda/13.0
 
 # Build the library
 ./build.sh
@@ -33,7 +34,9 @@ echo "/var/lib/shared/libsoftmig.so" | sudo tee -a /etc/ld.so.preload
 ### For Other Systems
 
 ```bash
-export CUDA_HOME=/path/to/cuda-11.8
+# NOTE: CUDA 12+ required (CUDA 11 does not work)
+export CUDA_HOME=/path/to/cuda-12.2
+# Or: export CUDA_HOME=/path/to/cuda-13.0
 ./build.sh
 sudo mkdir -p /var/lib/shared /var/log/softmig /var/run/softmig
 sudo cp build/libsoftmig.so /var/lib/shared/
@@ -50,7 +53,7 @@ sudo cp build/libsoftmig.so /var/lib/shared/
 ### Environment Variables (for testing)
 
 - `CUDA_DEVICE_MEMORY_LIMIT`: Memory limit (e.g., `16g`, `24G`)
-- `CUDA_DEVICE_SM_LIMIT`: SM utilization percentage (0-100)
+- `CUDA_DEVICE_SM_LIMIT`: SM utilization percentage (0-100). Limits GPU compute capacity by throttling kernel launches. Only monitors device 0 (intentional - fractional GPU jobs only get 1 GPU).
 - `LD_PRELOAD`: Path to `libsoftmig.so` (for testing only - production uses `/etc/ld.so.preload`)
 - `LIBCUDA_LOG_LEVEL`: Log verbosity (0=errors only, 4=debug, default 0)
 
@@ -140,7 +143,8 @@ For complete deployment instructions, see **[docs/DEPLOYMENT_DRAC.md](docs/DEPLO
 - **Changing limits**: Always delete cache files before setting new limits
 - **Config files**: In SLURM jobs, limits come from secure config files (users cannot modify)
 - **Cache files**: Auto-cleaned when job ends (SLURM_TMPDIR is job-specific)
-- **Multi-CUDA**: Build with CUDA 11 headers for compatibility with CUDA 11, 12, 13
+- **CUDA Version**: **CUDA 12+ required** (tested with CUDA 12.2 and 13.0). CUDA 11 does not work.
+- **SM Limiting**: GPU compute utilization limiting works via kernel launch throttling. Only monitors device 0 (intentional - fractional GPU jobs only get 1 GPU). See [docs/GPU_LIMITER_EXPLANATION.md](docs/GPU_LIMITER_EXPLANATION.md) for details.
 
 ## License
 
