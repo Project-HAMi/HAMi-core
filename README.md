@@ -6,6 +6,55 @@ Like NVIDIA's hardware MIG, SoftMig enables software-based GPU slicing for any G
 - **GPU Memory Slicing**: Divide GPU memory among multiple jobs (e.g., 12GB, 24GB slices on 48GB GPUs)
 - **GPU Compute Slicing**: Limit SM utilization per job (e.g., 25%, 50% of GPU cycles)
 - **Oversubscription**: Run 2-8 jobs per GPU safely
+- **SLURM Integration**: Uses `SLURM_TMPDIR` for per-job isolation (cache files, locks) - no shared `/tmp` conflicts
+
+## SoftMig vs. NVIDIA Hardware MIG
+
+| Feature | SoftMig (Software MIG) | NVIDIA Hardware MIG |
+|---------|------------------------|---------------------|
+| **GPU Resource Usage** | Uses 100% of GPU resources (no overhead) | Loses ~5-10% of GPU resources to MIG overhead |
+| **Dynamic Configuration** | ✅ Dynamic, on-the-fly changes via SLURM prolog/epilog | ❌ Requires draining SLURM node and rebooting to change MIG mode |
+| **Isolation** | ⚠️ Software-based (process-level) - crashes can affect other jobs | ✅ Hardware-based isolation - crashes isolated to MIG instance |
+| **GPU Compatibility** | ✅ Works on any NVIDIA GPU (Pascal, Volta, Ampere, Ada, Hopper) | ❌ Only works on A100, H100, and newer datacenter GPUs |
+| **Setup Complexity** | ✅ Simple: install library, configure SLURM | ⚠️ Requires GPU driver support, MIG mode configuration |
+| **Performance Overhead** | ⚠️ Minimal (~1-2% from kernel launch throttling) | ✅ No software overhead (hardware-native) |
+| **Multi-Instance Support** | ✅ Unlimited slices (memory/compute limited) | ⚠️ Limited by GPU architecture (max 7 instances on A100) |
+
+**When to Use SoftMig:**
+- Need dynamic GPU slicing without node downtime
+- Want to use 100% of GPU resources
+- Using GPUs that don't support hardware MIG (L40S, RTX, etc.)
+- Need flexible, on-demand slice sizing
+
+**When to Use Hardware MIG:**
+- Need maximum isolation (security, fault tolerance)
+- Using A100/H100 datacenter GPUs
+- Can tolerate node downtime for configuration changes
+- Want zero software overhead
+
+## Differences from Original HAMi-core
+
+SoftMig is optimized for SLURM cluster environments with the following key improvements:
+
+| Feature | Original HAMi-core | SoftMig |
+|---------|-------------------|---------|
+| **Temporary Files** | Uses `/tmp` (shared across all jobs/users) | ✅ Uses `$SLURM_TMPDIR` (per-job isolation) |
+| **Cache Files** | `/tmp/cudevshr.cache` (shared, can conflict) | ✅ `$SLURM_TMPDIR/cudevshr.cache.{jobid}` (job-specific) |
+| **Lock Files** | `/tmp/vgpulock/` (shared) | ✅ `$SLURM_TMPDIR/vgpulock/` (job-specific) |
+| **Configuration** | Environment variables only | ✅ Secure config files (`/var/run/softmig/{jobid}.conf`) + env vars fallback |
+| **Logging** | stderr (visible to users) | ✅ File-only logging (`/var/log/softmig/`) - silent to users |
+| **Log File Names** | Process ID based | ✅ Job ID based (`{jobid}_{arrayid}.log`) |
+| **Library Loading** | `LD_PRELOAD` (users can disable) | ✅ `/etc/ld.so.preload` (users cannot disable) |
+| **SLURM Integration** | Manual setup | ✅ Automated via `prolog.sh`/`epilog.sh` |
+| **Multi-CUDA Support** | CUDA 11+ | ✅ CUDA 12+ (CUDA 11 does not work) |
+| **Library Name** | `libvgpu.so` | ✅ `libsoftmig.so` |
+
+**Key Benefits:**
+- ✅ **Job Isolation**: Each SLURM job gets its own cache/lock files in `SLURM_TMPDIR` (no conflicts)
+- ✅ **Security**: Config files in `/var/run/softmig/` prevent users from modifying limits
+- ✅ **Silent Operation**: No user-visible logs (file-only logging)
+- ✅ **Enforcement**: System-wide preload ensures users cannot disable the library
+- ✅ **Auto-cleanup**: Cache files automatically cleaned when job ends (SLURM_TMPDIR is job-specific)
 
 ## Building
 
@@ -220,9 +269,10 @@ Or install manually (see Building section above for full steps).
 
 ## Important Notes
 
-- **Changing limits**: Always delete cache files before setting new limits
+- **SLURM_TMPDIR Integration**: All temporary files (cache, locks) use `$SLURM_TMPDIR` for per-job isolation. This prevents conflicts between concurrent jobs and ensures automatic cleanup when jobs end.
+- **Changing limits**: Always delete cache files before setting new limits: `rm -f ${SLURM_TMPDIR}/cudevshr.cache*`
 - **Config files**: In SLURM jobs, limits come from secure config files (users cannot modify)
-- **Cache files**: Auto-cleaned when job ends (SLURM_TMPDIR is job-specific)
+- **Cache files**: Auto-cleaned when job ends (SLURM_TMPDIR is job-specific, unlike original HAMi-core which used shared `/tmp`)
 - **CUDA Version**: **CUDA 12+ required** (tested with CUDA 12.2 and 13.0). CUDA 11 does not work.
 - **SM Limiting**: GPU compute utilization limiting works via kernel launch throttling. Only monitors device 0 (intentional - fractional GPU jobs only get 1 GPU). See [docs/GPU_LIMITER_EXPLANATION.md](docs/GPU_LIMITER_EXPLANATION.md) for details.
 
