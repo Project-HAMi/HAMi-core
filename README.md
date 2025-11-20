@@ -23,12 +23,26 @@ module load cuda/12.2  # Recommended
 # Install (as admin)
 sudo mkdir -p /var/lib/shared /var/log/softmig /var/run/softmig
 sudo cp build/libsoftmig.so /var/lib/shared/
-sudo chmod 755 /var/lib/shared/libsoftmig.so
-sudo chown root:root /var/log/softmig /var/run/softmig
-sudo chmod 755 /var/log/softmig /var/run/softmig
+sudo chmod 644 /var/lib/shared/libsoftmig.so  # rw-r--r-- (readable by all)
+sudo chown root:root /var/lib/shared/libsoftmig.so
+
+# Log directory: group writable (775) if slurm group exists, otherwise 1777 (sticky bit)
+if getent group slurm >/dev/null 2>&1; then
+    sudo chown root:slurm /var/log/softmig
+    sudo chmod 775 /var/log/softmig  # drwxrwxr-x (group writable)
+else
+    sudo chown root:root /var/log/softmig
+    sudo chmod 1777 /var/log/softmig  # drwxrwxrwt (sticky bit)
+fi
+
+# Config directory (readable by all, writable only by root)
+sudo chown root:root /var/run/softmig
+sudo chmod 755 /var/run/softmig  # drwxr-xr-x
 
 # Configure system-wide preload (REQUIRED for production - users cannot disable it)
 echo "/var/lib/shared/libsoftmig.so" | sudo tee -a /etc/ld.so.preload
+sudo chmod 644 /etc/ld.so.preload  # rw-r--r-- (readable by all)
+sudo chown root:root /etc/ld.so.preload
 ```
 
 ### For Other Systems
@@ -125,18 +139,84 @@ View logs (as admin): `tail -f /var/log/softmig/*.log`
 
 ## Deployment for Cluster Administrators
 
-For complete deployment instructions, see **[docs/DEPLOYMENT_DRAC.md](docs/DEPLOYMENT_DRAC.md)**.
+### Installation
 
-### Quick Setup
+Use the automated installation script (recommended):
+```bash
+# As root
+sudo ./docs/examples/install_softmig.sh /path/to/build/libsoftmig.so
+```
 
-1. **Build and Install** (see Building section above)
+Or install manually (see Building section above for full steps).
 
-2. **SLURM Configuration**:
-   - Update `slurm.conf` to add `Prolog` and `Epilog` paths (see `docs/slurm.conf.example`)
-   - Create/update `prolog.sh` (creates secure config files) - see `docs/examples/prolog_softmig.sh`
-   - Create/update `epilog.sh` (cleanup) - see `docs/examples/epilog_softmig.sh`
+**Important Permissions:**
+- `/var/lib/shared/libsoftmig.so`: `644` (rw-r--r--) - readable by all
+- `/var/lib/shared/`: `755` (drwxr-xr-x) - readable/executable by all
+- `/var/log/softmig/`: `775` (drwxrwxr-x) with `slurm` group, or `1777` (drwxrwxrwt) with sticky bit
+- `/var/run/softmig/`: `755` (drwxr-xr-x) - readable by all, writable only by root
+- `/etc/ld.so.preload`: `644` (rw-r--r--) - readable by all
 
-3. **Example Scripts**: See `docs/examples/` for prolog/epilog scripts
+### SLURM Configuration
+
+1. **Update `slurm.conf`**:
+   ```bash
+   Prolog=/etc/slurm/prolog.sh
+   Epilog=/etc/slurm/epilog.sh
+   ```
+   See `docs/slurm.conf.example` for minimal configuration.
+
+2. **Create/update `prolog.sh`**:
+   - Creates secure config files in `/var/run/softmig/{jobid}_{arrayid}.conf`
+   - See `docs/examples/prolog_softmig.sh` for complete example
+   - Configures limits based on requested GPU slice type (l40s.2, l40s.4, etc.)
+
+3. **Create/update `epilog.sh`**:
+   - Cleans up config files after job ends
+   - See `docs/examples/epilog_softmig.sh` for complete example
+
+### How It Works
+
+**System-Wide Preload (`/etc/ld.so.preload`):**
+- Library is loaded for ALL processes (users cannot disable it)
+- Library is passive (does nothing) until a config file is created
+- Prolog creates config file → activates limits for that job
+- Epilog deletes config file → deactivates limits when job ends
+
+**Config File Priority:**
+1. Config file (`/var/run/softmig/{jobid}_{arrayid}.conf`) - **Takes priority** (created by prolog)
+2. Environment variables - Only used if config file doesn't exist (for testing)
+
+**Security:**
+- Users cannot modify config files (admin-only directory)
+- Users cannot disable library (system-wide preload)
+- Library only activates when config file exists (safe for all processes)
+
+### Memory and SM Limits by GPU Slice
+
+| GPU Slice | Memory Limit | SM Limit | Oversubscription | Use Case |
+|-----------|-------------|----------|------------------|----------|
+| l40s.1 (full) | 48GB | 100% | 1x | Large models, full GPU needed |
+| l40s.2 (half) | 24GB | 50% | 2x | Medium models, 2x oversubscription |
+| l40s.4 (quarter) | 12GB | 25% | 4x | Small models, 4x oversubscription |
+| l40s.8 (eighth) | 6GB | 12% | 8x | Very small models, 8x oversubscription |
+
+**SM Limiting:** GPU compute utilization limiting works via kernel launch throttling. Only monitors device 0 (intentional - fractional GPU jobs only get 1 GPU). See [docs/GPU_LIMITER_EXPLANATION.md](docs/GPU_LIMITER_EXPLANATION.md) for technical details.
+
+### Monitoring and Troubleshooting
+
+**Log Files:**
+- Location: `/var/log/softmig/{jobid}_{arrayid}.log` or `/var/log/softmig/{jobid}.log`
+- View: `tail -f /var/log/softmig/*.log` (as admin)
+- Silent to users by default (set `LIBCUDA_LOG_LEVEL=2` in job for debugging)
+
+**Cache Files:**
+- Location: `$SLURM_TMPDIR/cudevshr.cache.*` (auto-cleaned when job ends)
+- **Important**: Delete cache files when changing limits: `rm -f ${SLURM_TMPDIR}/cudevshr.cache*`
+
+**Verification:**
+- Check that config files are created: `ls -l /var/run/softmig/`
+- Check that library is loaded: `cat /etc/ld.so.preload`
+- Test in job: `nvidia-smi` should show limited memory
 
 ## Important Notes
 

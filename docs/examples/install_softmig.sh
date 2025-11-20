@@ -82,8 +82,6 @@ echo "Configuring /etc/ld.so.preload..."
 if [[ "$LIB_IN_PRELOAD" == "false" ]]; then
     if ! grep -q "^${LIB_DEST}$" "$PRELOAD_FILE" 2>/dev/null; then
         echo "$LIB_DEST" >> "$PRELOAD_FILE"
-        chmod 644 "$PRELOAD_FILE"  # Set correct permissions (readable by all)
-        chown root:root "$PRELOAD_FILE"
         echo -e "${GREEN}Added ${LIB_DEST} to /etc/ld.so.preload${NC}"
     else
         echo -e "${YELLOW}Library already in /etc/ld.so.preload${NC}"
@@ -91,10 +89,13 @@ if [[ "$LIB_IN_PRELOAD" == "false" ]]; then
 else
     # Re-enable it (uncomment)
     sed -i "s|^#${LIB_DEST}$|${LIB_DEST}|" "$PRELOAD_FILE"
-    chmod 644 "$PRELOAD_FILE"  # Ensure correct permissions
-    chown root:root "$PRELOAD_FILE"
     echo -e "${GREEN}Re-enabled library in /etc/ld.so.preload${NC}"
 fi
+
+# Always ensure correct permissions for /etc/ld.so.preload
+chmod 644 "$PRELOAD_FILE"  # rw-r--r-- (readable by all)
+chown root:root "$PRELOAD_FILE"
+echo "Set /etc/ld.so.preload permissions to 644"
 
 # 5. Verify
 echo ""
@@ -113,6 +114,7 @@ echo "  /etc/ld.so.preload:"
 if grep -q "^${LIB_DEST}$" "$PRELOAD_FILE" 2>/dev/null; then
     echo -e "    ${GREEN}✓ Library is configured${NC}"
     grep "^${LIB_DEST}$" "$PRELOAD_FILE"
+    echo "    Permissions: $(stat -c '%a' "$PRELOAD_FILE" 2>/dev/null || stat -f '%A' "$PRELOAD_FILE" 2>/dev/null || echo 'unknown')"
 else
     echo -e "    ${RED}✗ Library not found in /etc/ld.so.preload${NC}"
 fi
