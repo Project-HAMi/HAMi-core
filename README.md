@@ -267,6 +267,73 @@ Or install manually (see Building section above for full steps).
 - Check that library is loaded: `cat /etc/ld.so.preload`
 - Test in job: `nvidia-smi` should show limited memory
 
+## Testing
+
+Tests are automatically built when you compile the project. To run the tests:
+
+### C/CUDA Tests
+
+```bash
+# Build the project (tests are built automatically)
+cd build
+make
+
+# Set up environment for testing
+export CUDA_DEVICE_MEMORY_LIMIT=4G  # Set a memory limit for testing
+export LD_PRELOAD=./libsoftmig.so   # Load the library
+
+# Run individual tests (from build/test directory)
+cd test
+./test_alloc                    # Test basic memory allocation
+./test_alloc_host              # Test host memory allocation
+./test_alloc_managed           # Test managed memory
+./test_runtime_alloc           # Test CUDA runtime API allocation
+./test_runtime_launch          # Test kernel launches (CUDA)
+
+# Or run all tests
+for test in test_*; do
+    echo "Running $test..."
+    ./$test
+done
+```
+
+### Python Framework Tests
+
+```bash
+# Python tests are copied to build/test/python/ during build
+cd build/test/python
+
+# Test with PyTorch
+export CUDA_DEVICE_MEMORY_LIMIT=4G
+export LD_PRELOAD=../../libsoftmig.so
+python limit_pytorch.py
+
+# Test with TensorFlow
+python limit_tensorflow.py
+
+# Test with TensorFlow 2
+python limit_tensorflow2.py
+
+# Test with MXNet
+python limit_mxnet.py
+```
+
+### Testing with Different Limits
+
+```bash
+# Test with different memory limits
+export CUDA_DEVICE_MEMORY_LIMIT=2G
+export LD_PRELOAD=./libsoftmig.so
+./test_alloc
+
+# Test with SM utilization limit
+export CUDA_DEVICE_SM_LIMIT=50  # 50% utilization
+export LD_PRELOAD=./libsoftmig.so
+./test_runtime_launch
+```
+
+**Note**: Tests use `LD_PRELOAD` for development/testing. In production, the library is loaded via `/etc/ld.so.preload`.
+
 ## Important Notes
 
 - **SLURM_TMPDIR Integration**: All temporary files (cache, locks) use `$SLURM_TMPDIR` for per-job isolation. This prevents conflicts between concurrent jobs and ensures automatic cleanup when jobs end.
