@@ -492,7 +492,7 @@ CUresult cuMemAdvise( CUdeviceptr devPtr, size_t count, CUmem_advise advice, CUd
 
 #ifdef HOOK_MEMINFO_ENABLE
 #undef cuMemGetInfo
-CUresult cuMemGetInfo(size_t* free, size_t* total) {
+FUNC_ATTR_VISIBLE CUresult cuMemGetInfo(size_t* free, size_t* total) {
     CUdevice dev;
     LOG_DEBUG("cuMemGetInfo");
     ENSURE_INITIALIZED();
@@ -531,7 +531,7 @@ CUresult cuMemGetInfo(size_t* free, size_t* total) {
 }
 
 #undef cuMemGetInfo_v2
-CUresult cuMemGetInfo_v2(size_t* free, size_t* total) {
+FUNC_ATTR_VISIBLE CUresult cuMemGetInfo_v2(size_t* free, size_t* total) {
     CUdevice dev;
     LOG_DEBUG("cuMemGetInfo_v2");
     ENSURE_INITIALIZED();
