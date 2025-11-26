@@ -106,7 +106,6 @@ static inline char* get_log_file_path(void) {
 
 // All logs go to file only - never to stderr (Compute Canada/Digital Research Alliance optimized)
 // Logs are completely silent to users unless explicitly enabled via LIBCUDA_LOG_LEVEL
-// Set SOFTMIG_LOG_STDOUT=1 to also log to stdout
 #define LOG_DEBUG(msg, ...) { \
     char* log_level_str = getenv("LIBCUDA_LOG_LEVEL"); \
     int log_level = log_level_str ? atoi(log_level_str) : 0; \
@@ -118,11 +117,6 @@ static inline char* get_log_file_path(void) {
         if (fp1 != NULL) { \
             fprintf(fp1, "[softmig Debug(%d:%ld:%s:%d)]: "msg"\n", getpid(), pthread_self(), basename(__FILE__), __LINE__, ##__VA_ARGS__); \
             fflush(fp1); \
-        } \
-        char* log_stdout = getenv("SOFTMIG_LOG_STDOUT"); \
-        if (log_stdout && atoi(log_stdout) == 1) { \
-            fprintf(stdout, "[softmig Debug(%d:%ld:%s:%d)]: "msg"\n", getpid(), pthread_self(), basename(__FILE__), __LINE__, ##__VA_ARGS__); \
-            fflush(stdout); \
         } \
     } \
 }
@@ -139,11 +133,6 @@ static inline char* get_log_file_path(void) {
             fprintf(fp1, "[softmig Info(%d:%ld:%s:%d)]: "msg"\n", getpid(), pthread_self(), basename(__FILE__), __LINE__, ##__VA_ARGS__); \
             fflush(fp1); \
         } \
-        char* log_stdout = getenv("SOFTMIG_LOG_STDOUT"); \
-        if (log_stdout && atoi(log_stdout) == 1) { \
-            fprintf(stdout, "[softmig Info(%d:%ld:%s:%d)]: "msg"\n", getpid(), pthread_self(), basename(__FILE__), __LINE__, ##__VA_ARGS__); \
-            fflush(stdout); \
-        } \
     } \
 }
 
@@ -158,11 +147,6 @@ static inline char* get_log_file_path(void) {
         if (fp1 != NULL) { \
             fprintf(fp1, "[softmig Warn(%d:%ld:%s:%d)]: "msg"\n", getpid(), pthread_self(), basename(__FILE__), __LINE__, ##__VA_ARGS__); \
             fflush(fp1); \
-        } \
-        char* log_stdout = getenv("SOFTMIG_LOG_STDOUT"); \
-        if (log_stdout && atoi(log_stdout) == 1) { \
-            fprintf(stdout, "[softmig Warn(%d:%ld:%s:%d)]: "msg"\n", getpid(), pthread_self(), basename(__FILE__), __LINE__, ##__VA_ARGS__); \
-            fflush(stdout); \
         } \
     } \
 }
@@ -179,11 +163,6 @@ static inline char* get_log_file_path(void) {
             fprintf(fp1, "[softmig Msg(%d:%ld:%s:%d)]: "msg"\n", getpid(), pthread_self(), basename(__FILE__), __LINE__, ##__VA_ARGS__); \
             fflush(fp1); \
         } \
-        char* log_stdout = getenv("SOFTMIG_LOG_STDOUT"); \
-        if (log_stdout && atoi(log_stdout) == 1) { \
-            fprintf(stdout, "[softmig Msg(%d:%ld:%s:%d)]: "msg"\n", getpid(), pthread_self(), basename(__FILE__), __LINE__, ##__VA_ARGS__); \
-            fflush(stdout); \
-        } \
     } \
 }
 
@@ -195,11 +174,6 @@ static inline char* get_log_file_path(void) {
     if (fp1 != NULL) { \
         fprintf(fp1, "[softmig ERROR (pid:%d thread=%ld %s:%d)]: "msg"\n", getpid(), pthread_self(), basename(__FILE__), __LINE__, ##__VA_ARGS__); \
         fflush(fp1); \
-    } \
-    char* log_stdout = getenv("SOFTMIG_LOG_STDOUT"); \
-    if (log_stdout && atoi(log_stdout) == 1) { \
-        fprintf(stdout, "[softmig ERROR (pid:%d thread=%ld %s:%d)]: "msg"\n", getpid(), pthread_self(), basename(__FILE__), __LINE__, ##__VA_ARGS__); \
-        fflush(stdout); \
     } \
 }
 

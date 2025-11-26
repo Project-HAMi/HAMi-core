@@ -41,19 +41,6 @@ int oom_check(const int dev, size_t addon) {
         cuCtxGetDevice(&d);
     else
         d=dev;
-    
-    // Validate CUDA device ID before array access
-    if (d < 0 || d >= CUDA_DEVICE_MAX_COUNT) {
-        LOG_ERROR("Invalid CUDA device ID %d (must be in range [0, %d))", d, CUDA_DEVICE_MAX_COUNT);
-        return 0;  // Can't check limit, allow allocation
-    }
-    
-    // Convert CUDA device ID to NVML device ID
-    unsigned int nvml_dev = cuda_to_nvml_map(d);
-    if (nvml_dev >= CUDA_DEVICE_MAX_COUNT) {
-        LOG_ERROR("Invalid NVML device ID %u for CUDA device %d", nvml_dev, d);
-        return 0;  // Can't check limit, allow allocation
-    }
     uint64_t limit = get_current_device_memory_limit(nvml_dev);
     size_t _usage = get_gpu_memory_usage(nvml_dev);
 
