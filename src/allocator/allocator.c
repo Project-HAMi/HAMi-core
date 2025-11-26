@@ -41,8 +41,8 @@ int oom_check(const int dev, size_t addon) {
         cuCtxGetDevice(&d);
     else
         d=dev;
-    uint64_t limit = get_current_device_memory_limit(nvml_dev);
-    size_t _usage = get_gpu_memory_usage(nvml_dev);
+    uint64_t limit = get_current_device_memory_limit(d);
+    size_t _usage = get_gpu_memory_usage(d);
 
     if (limit == 0) {
         return 0;
