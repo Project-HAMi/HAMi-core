@@ -1,8 +1,11 @@
 #include <dirent.h>
 #include <time.h>
+#include <unistd.h>
+#include <string.h>
 
 #include "allocator/allocator.h"
 #include "include/libcuda_hook.h"
+#include "include/libsoftmig.h"
 #include "include/memory_limit.h"
 
 extern int pidfound;
@@ -488,7 +491,47 @@ CUresult cuMemAdvise( CUdeviceptr devPtr, size_t count, CUmem_advise advice, CUd
 }
 
 #ifdef HOOK_MEMINFO_ENABLE
-CUresult cuMemGetInfo_v2(size_t* free, size_t* total) {
+#undef cuMemGetInfo
+FUNC_ATTR_VISIBLE CUresult cuMemGetInfo(size_t* free, size_t* total) {
+    CUdevice dev;
+    LOG_DEBUG("cuMemGetInfo");
+    ENSURE_INITIALIZED();
+    CHECK_DRV_API(cuCtxGetDevice(&dev));
+    size_t usage = get_current_device_memory_usage(cuda_to_nvml_map(dev));
+    size_t limit = get_current_device_memory_limit(cuda_to_nvml_map(dev));
+    
+    // Check if real cuMemGetInfo exists, otherwise fall back to cuMemGetInfo_v2
+    void* real_fn = CUDA_FIND_ENTRY(cuda_library_entry, cuMemGetInfo);
+    if (real_fn == NULL) {
+        LOG_DEBUG("cuMemGetInfo not found, falling back to cuMemGetInfo_v2");
+        return cuMemGetInfo_v2(free, total);
+    }
+    
+    if (limit == 0) {
+        CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo, free, total);
+        LOG_INFO("orig free=%ld total=%ld", *free, *total);
+        *free = *total - usage;
+        LOG_INFO("after free=%ld total=%ld", *free, *total);
+        return CUDA_SUCCESS;
+    } else if (limit < usage) {
+        LOG_WARN("limit < usage; usage=%ld, limit=%ld", usage, limit);
+        return CUDA_ERROR_INVALID_VALUE;
+    } else {
+        CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo, free, total);
+        LOG_INFO("orig free=%ld total=%ld limit=%ld usage=%ld",
+            *free, *total, limit, usage);
+        // Ensure total memory does not exceed the physical or imposed limit.
+        size_t actual_limit = (limit > *total) ? *total : limit;
+        *free = (actual_limit > usage) ? (actual_limit - usage) : 0;
+        *total = actual_limit;
+        LOG_INFO("after free=%ld total=%ld limit=%ld usage=%ld",
+            *free, *total, limit, usage);
+        return CUDA_SUCCESS;
+    }
+}
+
+#undef cuMemGetInfo_v2
+FUNC_ATTR_VISIBLE CUresult cuMemGetInfo_v2(size_t* free, size_t* total) {
     CUdevice dev;
     LOG_DEBUG("cuMemGetInfo_v2");
     ENSURE_INITIALIZED();

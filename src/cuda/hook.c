@@ -75,6 +75,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemcpyHtoD_v2"},
     {.name = "cuMipmappedArrayCreate"},
     {.name = "cuMipmappedArrayDestroy"},
+    {.name = "cuMemGetInfo"},
     {.name = "cuMemGetInfo_v2"},
     {.name = "cuMemcpy"},
     {.name = "cuPointerGetAttribute"},

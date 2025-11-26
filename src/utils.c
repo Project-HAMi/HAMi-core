@@ -222,6 +222,7 @@ nvmlReturn_t set_task_pid() {
         LOG_ERROR("host pid is error!");
         return NVML_ERROR_DRIVER_NOT_LOADED;
     }
+    
     LOG_INFO("hostPid=%d",hostpid);
     if (set_host_pid(hostpid)==0) {
         for (i=0;i<running_processes;i++) {
