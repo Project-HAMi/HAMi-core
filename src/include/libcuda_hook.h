@@ -106,6 +106,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuMemcpyHtoD_v2),
     CUDA_OVERRIDE_ENUM(cuMipmappedArrayCreate),
     CUDA_OVERRIDE_ENUM(cuMipmappedArrayDestroy),
+    CUDA_OVERRIDE_ENUM(cuMemGetInfo),
     CUDA_OVERRIDE_ENUM(cuMemGetInfo_v2),
     CUDA_OVERRIDE_ENUM(cuMemcpy),
     CUDA_OVERRIDE_ENUM(cuPointerGetAttribute),

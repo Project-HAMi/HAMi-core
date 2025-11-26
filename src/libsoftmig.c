@@ -415,6 +415,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuGraphExecDestroy);
     DLSYM_HOOK_FUNC(cuGraphDestroy);
 #ifdef HOOK_MEMINFO_ENABLE
+    DLSYM_HOOK_FUNC(cuMemGetInfo);
     DLSYM_HOOK_FUNC(cuMemGetInfo_v2);
 #endif
     return NULL;
