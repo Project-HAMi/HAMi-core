@@ -356,7 +356,18 @@ CUresult _cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, c
 
 CUresult cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ) {
     LOG_INFO("into cuGetProcAddress symbol=%s:%d",symbol,cudaVersion);
+    // Special logging for cuMemGetInfo functions
+    if (strcmp(symbol, "cuMemGetInfo") == 0 || strcmp(symbol, "cuMemGetInfo_v2") == 0) {
+        LOG_ERROR("*** cuGetProcAddress REQUEST for %s ***", symbol);
+    }
     *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
+    if (strcmp(symbol, "cuMemGetInfo") == 0 || strcmp(symbol, "cuMemGetInfo_v2") == 0) {
+        if (*pfn != NULL) {
+            LOG_ERROR("*** cuGetProcAddress RETURNING HOOK for %s: %p ***", symbol, *pfn);
+        } else {
+            LOG_ERROR("*** cuGetProcAddress HOOK NOT FOUND for %s, will call real function ***", symbol);
+        }
+    }
     if (strcmp(symbol,"cuGetProcAddress")==0) {
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress,symbol,pfn,cudaVersion,flags); 
         if (res==CUDA_SUCCESS) {

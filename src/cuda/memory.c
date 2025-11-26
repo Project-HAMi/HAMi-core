@@ -1,8 +1,11 @@
 #include <dirent.h>
 #include <time.h>
+#include <unistd.h>
+#include <string.h>
 
 #include "allocator/allocator.h"
 #include "include/libcuda_hook.h"
+#include "include/libsoftmig.h"
 #include "include/memory_limit.h"
 
 extern int pidfound;
@@ -488,6 +491,7 @@ CUresult cuMemAdvise( CUdeviceptr devPtr, size_t count, CUmem_advise advice, CUd
 }
 
 #ifdef HOOK_MEMINFO_ENABLE
+#undef cuMemGetInfo
 CUresult cuMemGetInfo(size_t* free, size_t* total) {
     CUdevice dev;
     LOG_DEBUG("cuMemGetInfo");
@@ -526,6 +530,7 @@ CUresult cuMemGetInfo(size_t* free, size_t* total) {
     }
 }
 
+#undef cuMemGetInfo_v2
 CUresult cuMemGetInfo_v2(size_t* free, size_t* total) {
     CUdevice dev;
     LOG_DEBUG("cuMemGetInfo_v2");

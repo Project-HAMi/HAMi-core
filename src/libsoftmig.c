@@ -179,9 +179,15 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
         //Compatible with cuda 12.8+ fix
         if (strcmp(symbol,"cuGetExportTable")!=0)
             pthread_once(&pre_cuinit_flag,(void(*)(void))preInit);
-        void *f = real_dlsym(vgpulib,symbol);
-        if (f!=NULL)
+        // Try to get our hooked version first
+        void* f = __dlsym_hook_section(handle, symbol);
+        if (f != NULL) {
             return f;
+        }
+        // Fallback to real library if hook not found
+        void *f2 = real_dlsym(vgpulib,symbol);
+        if (f2!=NULL)
+            return f2;
     }
     #ifdef HOOK_NVML_ENABLE
     if (symbol[0] == 'n' && symbol[1] == 'v' &&
@@ -200,9 +206,10 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     for (it=0;it<CUDA_ENTRY_END;it++){
         if (strcmp(cuda_library_entry[it].name,symbol) == 0){
             if (cuda_library_entry[it].fn_ptr == NULL) {
-                LOG_WARN("NEED TO RETURN NULL");
+                LOG_WARN("NEED TO RETURN NULL for %s", symbol);
                 return NULL;
             }else{
+                // Found the symbol - break and let DLSYM_HOOK_FUNC macros return our hook function
                 break;
             }
         }

@@ -211,21 +211,46 @@ nvmlReturn_t set_task_pid() {
         mergepid(&running_processes,&merged_num,(nvmlProcessInfo_t1 *)tmp_pids_on_device,pids_on_device);
         break;
     }
+    unsigned int current_running_processes = running_processes;  // Save before overwriting
     running_processes = merged_num;
     LOG_INFO("current processes num = %u %u",previous,running_processes);
     for (i=0;i<merged_num;i++){
         LOG_INFO("current pid in use is %d %d",i,pids_on_device[i].pid);
         //tmp_pids_on_device[i].pid=0;
     }
-    unsigned int hostpid = getextrapid(previous,running_processes,pre_pids_on_device,pids_on_device); 
-    if (hostpid==0) {
-        LOG_ERROR("host pid is error!");
-        return NVML_ERROR_DRIVER_NOT_LOADED;
+    
+    // First, try to find the current process in the GPU process list
+    // This is more reliable than trying to detect a "new" process
+    pid_t current_pid = getpid();
+    unsigned int hostpid = 0;
+    int found_current_pid = 0;
+    
+    // Search tmp_pids_on_device directly to get both PID and memory info
+    for (i=0; i<current_running_processes; i++) {
+        if (tmp_pids_on_device[i].pid == current_pid) {
+            hostpid = current_pid;
+            found_current_pid = 1;
+            LOG_INFO("Found current process %d in GPU process list", current_pid);
+            break;
+        }
     }
+    
+    // If current process not found, fall back to the diff-based detection
+    if (!found_current_pid) {
+        LOG_INFO("Current process %d not found in GPU list, trying diff-based detection", current_pid);
+        hostpid = getextrapid(previous,running_processes,pre_pids_on_device,pids_on_device);
+        if (hostpid==0) {
+            LOG_ERROR("host pid is error! Current pid=%d, previous=%u, running=%u", 
+                      current_pid, previous, running_processes);
+            return NVML_ERROR_DRIVER_NOT_LOADED;
+        }
+    }
+    
     LOG_INFO("hostPid=%d",hostpid);
     if (set_host_pid(hostpid)==0) {
-        for (i=0;i<running_processes;i++) {
-            if (pids_on_device[i].pid==hostpid) {
+        // Find the memory usage for this PID
+        for (i=0;i<current_running_processes;i++) {
+            if (tmp_pids_on_device[i].pid==hostpid) {
                 LOG_INFO("Primary Context Size==%lld",tmp_pids_on_device[i].usedGpuMemory);
                 context_size = tmp_pids_on_device[i].usedGpuMemory; 
                 break;
