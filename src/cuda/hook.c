@@ -111,6 +111,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuFuncGetAttribute"},
     {.name = "cuFuncSetAttribute"},
     {.name = "cuLaunchKernel"},
+    {.name = "cuLaunchKernelEx"},
     {.name = "cuLaunchCooperativeKernel"},
     /* cuEvent Part */
     {.name = "cuEventCreate"},

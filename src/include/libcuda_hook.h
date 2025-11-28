@@ -145,6 +145,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuFuncGetAttribute),
     CUDA_OVERRIDE_ENUM(cuFuncSetAttribute),
     CUDA_OVERRIDE_ENUM(cuLaunchKernel),
+    CUDA_OVERRIDE_ENUM(cuLaunchKernelEx),
     CUDA_OVERRIDE_ENUM(cuLaunchCooperativeKernel),
     /* cuEvent Part */
     CUDA_OVERRIDE_ENUM(cuEventCreate),

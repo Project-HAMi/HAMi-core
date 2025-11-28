@@ -203,6 +203,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuFuncGetAttribute);
     DLSYM_HOOK_FUNC(cuFuncSetAttribute);
     DLSYM_HOOK_FUNC(cuLaunchKernel);
+    DLSYM_HOOK_FUNC(cuLaunchKernelEx);
     DLSYM_HOOK_FUNC(cuLaunchCooperativeKernel);
     DLSYM_HOOK_FUNC(cuIpcOpenMemHandle_v2);
     DLSYM_HOOK_FUNC(cuIpcGetMemHandle);
