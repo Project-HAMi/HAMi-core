@@ -34,7 +34,7 @@ int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 void rate_limiter(int grids, int blocks) {
   long before_cuda_cores = 0;
   long after_cuda_cores = 0;
-  long kernel_size = grids;
+  long kernel_size = (long)grids * (long)blocks;
 
   while (get_recent_kernel()<0) {
     sleep(1);
