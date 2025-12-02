@@ -43,7 +43,7 @@ typedef CUresult (*cuda_sym_t)();
 typedef enum {
     /* cuInit Part */
     CUDA_OVERRIDE_ENUM(cuInit),
-    /* cuDeivce Part */
+    /* cuDevice Part */
     CUDA_OVERRIDE_ENUM(cuDeviceGetAttribute),
     CUDA_OVERRIDE_ENUM(cuDeviceGet),
     CUDA_OVERRIDE_ENUM(cuDeviceGetCount),
