@@ -469,6 +469,15 @@ void exit_handler() {
         return;
     }
     shared_region_t* region = region_info.shared_region;
+    
+    // Check if shared region was never initialized (e.g., program failed to start)
+    // This can happen when bash loads the library but the program doesn't exist
+    if (region == NULL) {
+        // Clean up config file even if shared region wasn't initialized
+        cleanup_config_file();
+        return;
+    }
+    
     int slot = 0;
     LOG_MSG("Calling exit handler %d",getpid());
     
