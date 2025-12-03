@@ -375,14 +375,9 @@ nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,void* memory,int versi
     size_t limit = get_current_device_memory_limit(cudadev);
     LOG_DEBUG("usage=%ld limit=%ld monitor=%ld", usage, limit, monitor);
     if (limit == 0) {
-        switch (version) {
-        case 1:
-             ((nvmlMemory_t*)memory)->used = usage;
-            return NVML_SUCCESS;
-        case 2:
-            ((nvmlMemory_v2_t *)memory)->used = usage;
-            return NVML_SUCCESS;
-        }
+        // No limit (e.g., root user) - pass through original NVML values unchanged
+        // The original NVML call already set free, total, and used correctly
+        return NVML_SUCCESS;
     } else {
         switch (version) {
         case 1:
