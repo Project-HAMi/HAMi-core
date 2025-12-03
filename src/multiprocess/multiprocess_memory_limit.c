@@ -44,6 +44,22 @@ int env_utilization_switch;
 int enable_active_oom_killer;
 size_t context_size;
 size_t initial_offset=0;
+// Flag to track if softmig is disabled (when env vars are not set)
+static int softmig_disabled = -1;  // -1 = not checked yet, 0 = enabled, 1 = disabled
+
+// Helper function to check if softmig is enabled
+static int is_softmig_enabled(void) {
+    if (softmig_disabled == -1) {
+        // First time check - see if environment variables are configured
+        if (!is_softmig_configured()) {
+            softmig_disabled = 1;
+            LOG_DEBUG("softmig: CUDA_DEVICE_MEMORY_LIMIT and CUDA_DEVICE_SM_LIMIT not set - softmig disabled (passive mode)");
+            return 0;
+        }
+        softmig_disabled = 0;
+    }
+    return (softmig_disabled == 0);
+}
 //lock for record kernel time
 pthread_mutex_t _kernel_mutex;
 int _record_kernel_interval = 1;
@@ -54,6 +70,9 @@ void do_init_device_memory_limits(uint64_t*, int);
 void exit_withlock(int exitcode);
 
 void set_current_gpu_status(int status){
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return;  // No-op when softmig is disabled
+    }
     int i;
     for (i=0;i<region_info.shared_region->proc_num;i++)
         if (getpid()==region_info.shared_region->procs[i].pid){
@@ -73,6 +92,7 @@ void sig_swap_stub(int signo){
 
 // External function from config_file.c - reads from config file or env
 extern size_t get_limit_from_config_or_env(const char* env_name);
+extern int is_softmig_configured(void);
 
 // get device memory from config file (priority) or env (fallback)
 // This is now a wrapper that calls the config file reader
@@ -81,6 +101,9 @@ size_t get_limit_from_env(const char* env_name) {
 }
 
 int init_device_info() {
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;  // No-op when softmig is disabled
+    }
     unsigned int i,nvmlDevicesCount;
     CHECK_NVML_API(nvmlDeviceGetCount_v2(&nvmlDevicesCount));
     region_info.shared_region->device_num=nvmlDevicesCount;
@@ -158,6 +181,9 @@ void do_init_device_sm_limits(uint64_t *arr, int len) {
 }
 
 int active_oom_killer() {
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;  // No-op when softmig is disabled
+    }
     int i;
     for (i=0;i<region_info.shared_region->proc_num;i++) {
         kill(region_info.shared_region->procs[i].pid,9);
@@ -166,6 +192,9 @@ int active_oom_killer() {
 }
 
 void pre_launch_kernel() {
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return;  // No-op when softmig is disabled
+    }
     uint64_t now = time(NULL);
     pthread_mutex_lock(&_kernel_mutex);
     if (now - region_info.last_kernel_time < _record_kernel_interval) {
@@ -194,6 +223,9 @@ int shrreg_minor_version() {
 size_t get_gpu_memory_monitor(const int dev) {
     LOG_DEBUG("get_gpu_memory_monitor dev=%d",dev);
     ensure_initialized();
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;
+    }
     int i=0;
     size_t total=0;
     lock_shrreg();
@@ -208,6 +240,9 @@ size_t get_gpu_memory_monitor(const int dev) {
 size_t get_gpu_memory_usage(const int dev) {
     LOG_INFO("get_gpu_memory_usage dev=%d",dev);
     ensure_initialized();
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;
+    }
     int i=0;
     size_t total=0;
     lock_shrreg();
@@ -224,6 +259,9 @@ int set_gpu_device_memory_monitor(int32_t pid,int dev,size_t monitor){
     //LOG_WARN("set_gpu_device_memory_monitor:%d %d %lu",pid,dev,monitor);
     int i;
     ensure_initialized();
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;  // No-op when softmig is disabled
+    }
     lock_shrreg();
     for (i=0;i<region_info.shared_region->proc_num;i++){
         if (region_info.shared_region->procs[i].hostpid == pid){
@@ -239,6 +277,9 @@ int set_gpu_device_memory_monitor(int32_t pid,int dev,size_t monitor){
 int set_gpu_device_sm_utilization(int32_t pid,int dev, unsigned int smUtil){  // new function
     int i;
     ensure_initialized();
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;  // No-op when softmig is disabled
+    }
     lock_shrreg();
     for (i=0;i<region_info.shared_region->proc_num;i++){
         if (region_info.shared_region->procs[i].hostpid == pid){
@@ -254,6 +295,9 @@ int set_gpu_device_sm_utilization(int32_t pid,int dev, unsigned int smUtil){  //
 int init_gpu_device_utilization(){
     int i,dev;
     ensure_initialized();
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;  // No-op when softmig is disabled
+    }
     lock_shrreg();
     for (i=0;i<region_info.shared_region->proc_num;i++){
         for (dev=0;dev<CUDA_DEVICE_MAX_COUNT;dev++){
@@ -302,6 +346,9 @@ int add_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
     LOG_INFO("add_gpu_device_memory:%d %d->%d %lu",pid,cudadev,cuda_to_nvml_map(cudadev),usage);
     int dev = cuda_to_nvml_map(cudadev);
     ensure_initialized();
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;  // No-op when softmig is disabled
+    }
     lock_shrreg();
     int i;
     for (i=0;i<region_info.shared_region->proc_num;i++){
@@ -331,6 +378,9 @@ int rm_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
     LOG_INFO("rm_gpu_device_memory:%d %d->%d %d:%lu",pid,cudadev,cuda_to_nvml_map(cudadev),type,usage);
     int dev = cuda_to_nvml_map(cudadev);
     ensure_initialized();
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;  // No-op when softmig is disabled
+    }
     lock_shrreg();
     int i;
     for (i=0;i<region_info.shared_region->proc_num;i++){
@@ -450,6 +500,9 @@ void exit_handler() {
 
 
 void lock_shrreg() {
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return;  // No-op when softmig is disabled
+    }
     struct timespec sem_ts;
     get_timespec(SEM_WAIT_TIME, &sem_ts);
     shared_region_t* region = region_info.shared_region;
@@ -496,6 +549,9 @@ void lock_shrreg() {
 }
 
 void unlock_shrreg() {
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return;  // No-op when softmig is disabled
+    }
     SEQ_POINT_MARK(SEQ_BEFORE_UNLOCK_SHRREG);
     shared_region_t* region = region_info.shared_region;
 
@@ -510,6 +566,9 @@ void unlock_shrreg() {
 
 
 int clear_proc_slot_nolock(int do_clear) {
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;  // No-op when softmig is disabled
+    }
     int slot = 0;
     int res=0;
     shared_region_t* region = region_info.shared_region;
@@ -565,6 +624,10 @@ void init_proc_slot_withlock() {
 }
 
 void print_all() {
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        LOG_INFO("softmig is disabled - no process information available");
+        return;
+    }
     int i;
     LOG_INFO("Total process: %d",region_info.shared_region->proc_num);
     for (i=0;i<region_info.shared_region->proc_num;i++) {
@@ -761,6 +824,12 @@ void try_create_shrreg() {
 }
 
 void initialized() {
+    // Check if softmig should be active (if env vars are set)
+    if (!is_softmig_enabled()) {
+        // softmig is disabled - don't initialize anything
+        return;
+    }
+    
     pthread_mutex_init(&_kernel_mutex, NULL);
     char* _record_kernel_interval_env = getenv("RECORD_KERNEL_INTERVAL");
     if (_record_kernel_interval_env) {
@@ -771,10 +840,20 @@ void initialized() {
 }
 
 void ensure_initialized() {
+    // Check if softmig should be active before initializing
+    if (!is_softmig_enabled()) {
+        // softmig is disabled - don't initialize anything
+        return;
+    }
+    
     (void) pthread_once(&region_info.init_status, initialized);
 }
 
 int update_host_pid() {
+    ensure_initialized();
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;  // No-op when softmig is disabled
+    }
     int i;
     for (i=0;i<region_info.shared_region->proc_num;i++){
         if (region_info.shared_region->procs[i].pid == getpid()){
@@ -786,6 +865,10 @@ int update_host_pid() {
 }
 
 int set_host_pid(int hostpid) {
+    ensure_initialized();
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;  // No-op when softmig is disabled
+    }
     int i,j,found=0;
     for (i=0;i<region_info.shared_region->proc_num;i++){
         if (region_info.shared_region->procs[i].pid == getpid()){
@@ -806,6 +889,9 @@ int set_host_pid(int hostpid) {
 
 int set_current_device_sm_limit_scale(int dev, int scale) {
     ensure_initialized();
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;  // No-op when softmig is disabled
+    }
     if (region_info.shared_region->sm_init_flag==1) return 0;
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
@@ -818,6 +904,9 @@ int set_current_device_sm_limit_scale(int dev, int scale) {
 
 int get_current_device_sm_limit(int dev) {
     ensure_initialized();
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 100;  // No limit (100%) when softmig is disabled
+    }
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
     }
@@ -826,6 +915,9 @@ int get_current_device_sm_limit(int dev) {
 
 int set_current_device_memory_limit(const int dev,size_t newlimit) {
     ensure_initialized();
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;  // No-op when softmig is disabled
+    }
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
     }
@@ -836,6 +928,9 @@ int set_current_device_memory_limit(const int dev,size_t newlimit) {
 
 uint64_t get_current_device_memory_limit(const int dev) {
     ensure_initialized();
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;  // No limit when softmig is disabled
+    }
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
     }
@@ -844,6 +939,9 @@ uint64_t get_current_device_memory_limit(const int dev) {
 
 uint64_t get_current_device_memory_monitor(const int dev) {
     ensure_initialized();
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;  // No monitoring when softmig is disabled
+    }
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
     }
@@ -857,6 +955,9 @@ uint64_t get_current_device_memory_usage(const int dev) {
     uint64_t result;
     start = clock();
     ensure_initialized();
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;  // No usage tracking when softmig is disabled
+    }
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
     }
@@ -868,14 +969,23 @@ uint64_t get_current_device_memory_usage(const int dev) {
 }
 
 int get_current_priority() {
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 1;  // Default priority when softmig is disabled
+    }
     return region_info.shared_region->priority;
 }
 
 int get_recent_kernel(){
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;  // Default when softmig is disabled
+    }
     return region_info.shared_region->recent_kernel;
 }
 
 int set_recent_kernel(int value){
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;  // No-op when softmig is disabled
+    }
     region_info.shared_region->recent_kernel=value;
     return 0;
 }
@@ -885,10 +995,16 @@ int get_utilization_switch() {
         return 1;
     if (env_utilization_switch==2)
         return 0;
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 0;  // Default when softmig is disabled
+    }
     return region_info.shared_region->utilization_switch; 
 }
 
 void suspend_all(){
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return;  // No-op when softmig is disabled
+    }
     int i;
     for (i=0;i<region_info.shared_region->proc_num;i++){
         LOG_INFO("Sending USR2 to %d",region_info.shared_region->procs[i].pid);
@@ -897,6 +1013,9 @@ void suspend_all(){
 }
 
 void resume_all(){
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return;  // No-op when softmig is disabled
+    }
     int i;
     for (i=0;i<region_info.shared_region->proc_num;i++){
         LOG_INFO("Sending USR1 to %d",region_info.shared_region->procs[i].pid);
@@ -905,6 +1024,9 @@ void resume_all(){
 }
 
 int wait_status_self(int status){
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 1;  // Always return "ready" when softmig is disabled
+    }
     int i;
     for (i=0;i<region_info.shared_region->proc_num;i++){
         if (region_info.shared_region->procs[i].pid==getpid()){
@@ -918,6 +1040,9 @@ int wait_status_self(int status){
 }
 
 int wait_status_all(int status){
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return 1;  // Always return "ready" when softmig is disabled
+    }
     int i;
     int released = 1;
     for (i=0;i<region_info.shared_region->proc_num;i++) {
@@ -930,6 +1055,9 @@ int wait_status_all(int status){
 }
 
 shrreg_proc_slot_t *find_proc_by_hostpid(int hostpid) {
+    if (!is_softmig_enabled() || region_info.shared_region == NULL) {
+        return NULL;  // No process found when softmig is disabled
+    }
     int i;
     for (i=0;i<region_info.shared_region->proc_num;i++) {
         if (region_info.shared_region->procs[i].hostpid == hostpid) 

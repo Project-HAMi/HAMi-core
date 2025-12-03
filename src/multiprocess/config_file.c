@@ -189,3 +189,22 @@ void cleanup_config_file(void) {
     }
 }
 
+// Check if softmig should be active (either CUDA_DEVICE_MEMORY_LIMIT or CUDA_DEVICE_SM_LIMIT is set)
+// Returns 1 if at least one is set, 0 if neither is set
+int is_softmig_configured(void) {
+    // Check if CUDA_DEVICE_MEMORY_LIMIT is set (from config file or environment)
+    size_t memory_limit = get_limit_from_config_or_env("CUDA_DEVICE_MEMORY_LIMIT");
+    if (memory_limit > 0) {
+        return 1;
+    }
+    
+    // Check if CUDA_DEVICE_SM_LIMIT is set (from config file or environment)
+    size_t sm_limit = get_limit_from_config_or_env("CUDA_DEVICE_SM_LIMIT");
+    if (sm_limit > 0) {
+        return 1;
+    }
+    
+    // Neither is set - softmig should be passive
+    return 0;
+}
+
