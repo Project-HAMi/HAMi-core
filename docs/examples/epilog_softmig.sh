@@ -5,12 +5,7 @@
 # ===== softmig CLEANUP =====
 # Delete config file for this job (backup cleanup - exit_handler also does this)
 if [[ ! -z "$SLURM_JOB_ID" ]]; then
-    CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}"
-    if [[ ! -z "$SLURM_ARRAY_TASK_ID" ]]; then
-        CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}.conf"
-    else
-        CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}.conf"
-    fi
+    CONFIG_FILE="/var/run/softmig/${SLURM_JOB_ID}.conf"
     
     if [[ -f "$CONFIG_FILE" ]]; then
         rm -f "$CONFIG_FILE"

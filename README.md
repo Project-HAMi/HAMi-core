@@ -43,7 +43,7 @@ SoftMig is optimized for SLURM cluster environments with the following key impro
 | **Lock Files** | `/tmp/vgpulock/` (shared) | ✅ `$SLURM_TMPDIR/vgpulock/` (job-specific) |
 | **Configuration** | Environment variables only | ✅ Secure config files (`/var/run/softmig/{jobid}.conf`) + env vars fallback |
 | **Logging** | stderr (visible to users) | ✅ File-only logging (`/var/log/softmig/`) - silent to users |
-| **Log File Names** | Process ID based | ✅ Job ID based (`{jobid}_{arrayid}.log`) |
+| **Log File Names** | Process ID based | ✅ Job ID based (`{jobid}.log`) |
 | **Library Loading** | `LD_PRELOAD` (users can disable) | ✅ `/etc/ld.so.preload` (users cannot disable) |
 | **SLURM Integration** | Manual setup | ✅ Automated via `prolog.sh`/`epilog.sh` |
 | **Multi-CUDA Support** | CUDA 11+ | ✅ CUDA 12+ (CUDA 11 does not work) |
@@ -109,7 +109,7 @@ sudo cp build/libsoftmig.so /var/lib/shared/
 
 ### Configuration
 
-**In SLURM jobs**: SoftMig reads limits from secure config files in `/var/run/softmig/{jobid}_{arrayid}.conf` (created by `prolog.sh`). Users cannot modify these files.
+**In SLURM jobs**: SoftMig reads limits from secure config files in `/var/run/softmig/{jobid}.conf` (created by `prolog.sh`). Users cannot modify these files.
 
 **Outside SLURM (testing)**: SoftMig automatically falls back to environment variables if no config file exists.
 
@@ -169,14 +169,14 @@ Limits are automatically configured by `prolog.sh` based on the requested GPU sl
 
 - **Cache files**: `$SLURM_TMPDIR/cudevshr.cache.*` (auto-cleaned when job ends)
 - **Lock files**: `$SLURM_TMPDIR/vgpulock/lock.*` (per-job isolation)
-- **Config files**: `/var/run/softmig/{jobid}_{arrayid}.conf` (created by prolog.sh, deleted by epilog.sh)
-- **Logs**: `/var/log/softmig/{jobid}_{arrayid}.log` or `/var/log/softmig/{jobid}.log` (silent to users)
+- **Config files**: `/var/run/softmig/{jobid}.conf` (created by prolog.sh, deleted by epilog.sh)
+- **Logs**: `/var/log/softmig/{jobid}.log` (silent to users)
 
 Logs fall back to `$SLURM_TMPDIR/softmig_{jobid}.log` if `/var/log/softmig` is not writable.
 
 ## Logging
 
-Logs are written to `/var/log/softmig/{jobid}_{arrayid}.log` (or `/var/log/softmig/{jobid}.log` for non-array jobs) and are completely silent to users by default.
+Logs are written to `/var/log/softmig/{jobid}.log` and are completely silent to users by default.
 
 Use `LIBCUDA_LOG_LEVEL` to control verbosity:
 - `0` (default): errors only
@@ -215,7 +215,7 @@ Or install manually (see Building section above for full steps).
    See `docs/slurm.conf.example` for minimal configuration.
 
 2. **Create/update `prolog.sh`**:
-   - Creates secure config files in `/var/run/softmig/{jobid}_{arrayid}.conf`
+   - Creates secure config files in `/var/run/softmig/{jobid}.conf`
    - See `docs/examples/prolog_softmig.sh` for complete example
    - Configures limits based on requested GPU slice type (l40s.2, l40s.4, etc.)
 
@@ -232,7 +232,7 @@ Or install manually (see Building section above for full steps).
 - Epilog deletes config file → deactivates limits when job ends
 
 **Config File Priority:**
-1. Config file (`/var/run/softmig/{jobid}_{arrayid}.conf`) - **Takes priority** (created by prolog)
+1. Config file (`/var/run/softmig/{jobid}.conf`) - **Takes priority** (created by prolog)
 2. Environment variables - Only used if config file doesn't exist (for testing)
 
 **Security:**
@@ -254,7 +254,7 @@ Or install manually (see Building section above for full steps).
 ### Monitoring and Troubleshooting
 
 **Log Files:**
-- Location: `/var/log/softmig/{jobid}_{arrayid}.log` or `/var/log/softmig/{jobid}.log`
+- Location: `/var/log/softmig/{jobid}.log`
 - View: `tail -f /var/log/softmig/*.log` (as admin)
 - Silent to users by default (set `LIBCUDA_LOG_LEVEL=2` in job for debugging)
 
