@@ -48,12 +48,8 @@ if [[ "${REQ_TRES:-}" == *"gres/shard"* ]]; then
         if [[ "$shard_spec" =~ gres/shard=([0-9]+) ]]; then
             count="${BASH_REMATCH[1]}"
             SHARD_COUNT=$((SHARD_COUNT + count))
-        # Match gres/shard with optional GPU type: gres/shard(:gpu_name:)?count (colon format)
-        elif [[ "$shard_spec" =~ gres/shard(:[^:=]+:)?([0-9]+) ]]; then
-            count="${BASH_REMATCH[2]}"
-            SHARD_COUNT=$((SHARD_COUNT + count))
         fi
-    done < <(echo "$REQ_TRES_CLEAN" | grep -oE 'gres/shard=[0-9]+|gres/shard(:[^,}":]+:)?[0-9]+' || true)
+    done < <(echo "$REQ_TRES_CLEAN" | grep -oE 'gres/shard=[0-9]+' || true)
     
     # Default to 1 shard if parsing failed
     if [[ $SHARD_COUNT -eq 0 ]]; then
