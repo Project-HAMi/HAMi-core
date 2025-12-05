@@ -21,10 +21,14 @@ The system uses a **token bucket** algorithm:
 When `cuLaunchKernel` is called:
 
 ```c
-// In src/cuda/memory.c:545
+// In src/cuda/memory.c:588
 CUresult cuLaunchKernel(...) {
-    // Calculate kernel "size" (grid dimensions)
-    rate_limiter(gridDimX * gridDimY * gridDimZ, blockDimX * blockDimY * blockDimZ);
+    ENSURE_RUNNING();
+    pre_launch_kernel();
+    if (pidfound==1){ 
+        rate_limiter(gridDimX * gridDimY * gridDimZ,
+                   blockDimX * blockDimY * blockDimZ);
+    }
     // Then launch the actual kernel
     CUDA_OVERRIDE_CALL(...);
 }
@@ -100,10 +104,10 @@ long delta(int up_limit, int user_current, long share) {
 
 ## Key Code Locations
 
-- **Kernel hook**: `src/cuda/memory.c:545` - `cuLaunchKernel()`
+- **Kernel hook**: `src/cuda/memory.c:588` - `cuLaunchKernel()` (calls `rate_limiter()`)
 - **Rate limiter**: `src/multiprocess/multiprocess_utilization_watcher.c:34` - `rate_limiter()`
-- **Watcher thread**: `src/multiprocess/multiprocess_utilization_watcher.c:178` - `utilization_watcher()`
-- **Initialization**: `src/multiprocess/multiprocess_utilization_watcher.c:213` - `init_utilization_watcher()`
+- **Watcher thread**: `src/multiprocess/multiprocess_utilization_watcher.c` - `utilization_watcher()` (background thread)
+- **Initialization**: `src/multiprocess/multiprocess_utilization_watcher.c` - `init_utilization_watcher()`
 
 ## Limitations
 
@@ -117,11 +121,18 @@ long delta(int up_limit, int user_current, long share) {
 
 ## Configuration
 
-Set in config file or environment:
+Set in config file (`/var/run/softmig/{jobid}.conf`) or environment variable:
 ```
 CUDA_DEVICE_SM_LIMIT=50  # 50% utilization
 ```
 
+**Priority**: Config file (created by `prolog_softmig.sh`) takes priority over environment variables.
+
+**Values**:
 - `0` or `>=100`: No limit (disabled)
 - `1-99`: Percentage of SM utilization allowed
+
+**Note**: The SM limit is automatically calculated by `prolog_softmig.sh` based on the GPU slice request. For example, with 4 shards per GPU:
+- Half GPU (`l40s.2:1`) → 2 shards → 50% SM limit
+- Quarter GPU (`l40s.4:1`) → 1 shard → 25% SM limit
 

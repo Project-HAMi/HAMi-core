@@ -109,9 +109,11 @@ sudo cp build/libsoftmig.so /var/lib/shared/
 
 ### Configuration
 
-**In SLURM jobs**: SoftMig reads limits from secure config files in `/var/run/softmig/{jobid}.conf` (created by `prolog.sh`). Users cannot modify these files.
+**In SLURM jobs**: SoftMig reads limits from secure config files in `/var/run/softmig/{jobid}.conf` (or `/var/run/softmig/{jobid}_{arrayid}.conf` for array jobs), created by `prolog_softmig.sh`. Users cannot modify these files.
 
 **Outside SLURM (testing)**: SoftMig automatically falls back to environment variables if no config file exists.
+
+**Passive Mode**: When no config file exists and no environment variables are set, SoftMig operates in passive mode - it loads but does not enforce any limits. This ensures the library is safe to load system-wide via `/etc/ld.so.preload`.
 
 ### Environment Variables (for testing)
 
@@ -141,38 +143,42 @@ nvidia-smi  # Should show: 0MiB / 16384MiB (16GB limit)
 Once deployed, simply request GPU slices:
 
 ```bash
-# Half GPU slice (24GB, 50% SM)
+# Half GPU slice (24GB, 50% SM) - with job_submit.lua, this translates to gres/shard:l40s:2
 sbatch --gres=gpu:l40s.2:1 --time=2:00:00 job.sh
 
-# Quarter GPU slice (12GB, 25% SM)
+# Quarter GPU slice (12GB, 25% SM) - translates to gres/shard:l40s:1
 sbatch --gres=gpu:l40s.4:1 --time=5:00:00 job.sh
-
-# Eighth GPU slice (6GB, 12% SM)
-sbatch --gres=gpu:l40s.8:1 --time=1:00:00 job.sh
 
 # Full GPU (no limits)
 sbatch --gres=gpu:l40s:1 --time=2:00:00 job.sh
 ```
 
-Limits are automatically configured by `prolog.sh` based on the requested GPU slice type.
+**Note**: The `job_submit_softmig.lua` plugin (if configured) automatically:
+- Validates that slice requests have `count=1` (no multiple slices of same size)
+- Translates `gpu:type.denominator:count` to `gres/shard:type:shard_count` format
+- Default configuration: 4 shards per GPU (so `l40s.2:1` = 2 shards, `l40s.4:1` = 1 shard)
+
+Limits are automatically configured by `prolog_softmig.sh` based on the requested GPU slice type.
 
 ## Memory Limits by GPU Slice
 
-| Slice Type | Memory | SM Limit | Oversubscription |
-|------------|--------|----------|------------------|
-| l40s.1 (full) | 48GB | 100% | 1x |
-| l40s.2 (half) | 24GB | 50% | 2x |
-| l40s.4 (quarter) | 12GB | 25% | 4x |
-| l40s.8 (eighth) | 6GB | 12% | 8x |
+**Default Configuration**: 4 shards per GPU (configurable in `prolog_softmig.sh` and `job_submit_softmig.lua`)
+
+| Slice Type | Shard Count | Memory (48GB GPU) | SM Limit | Oversubscription |
+|------------|-------------|-------------------|----------|------------------|
+| l40s (full) | N/A | 48GB | 100% | 1x |
+| l40s.2 (half) | 2 shards | 24GB | 50% | 2x |
+| l40s.4 (quarter) | 1 shard | 12GB | 25% | 4x |
+
+**Note**: With 4 shards per GPU, the smallest slice is 1/4 GPU. For 1/8 GPU slices, configure 8 shards per GPU.
 
 ## File Locations
 
-- **Cache files**: `$SLURM_TMPDIR/cudevshr.cache.*` (auto-cleaned when job ends)
-- **Lock files**: `$SLURM_TMPDIR/vgpulock/lock.*` (per-job isolation)
-- **Config files**: `/var/run/softmig/{jobid}.conf` (created by prolog.sh, deleted by epilog.sh)
-- **Logs**: `/var/log/softmig/{jobid}.log` (silent to users)
+- **Cache files**: `$SLURM_TMPDIR/cudevshr.cache.{jobid}` or `$SLURM_TMPDIR/cudevshr.cache.{jobid}.{arrayid}` (auto-cleaned when job ends)
+- **Config files**: `/var/run/softmig/{jobid}.conf` or `/var/run/softmig/{jobid}_{arrayid}.conf` (created by `prolog_softmig.sh`, deleted by `epilog_softmig.sh`)
+- **Logs**: `/var/log/softmig/{jobid}.log` or `/var/log/softmig/{jobid}_{arrayid}.log` (silent to users)
 
-Logs fall back to `$SLURM_TMPDIR/softmig_{jobid}.log` if `/var/log/softmig` is not writable.
+Logs fall back to `$SLURM_TMPDIR/softmig_{jobid}.log` (or `$SLURM_TMPDIR/softmig_{jobid}_{arrayid}.log` for array jobs) if `/var/log/softmig` is not writable. Outside SLURM jobs, logs use `/var/log/softmig/pid{pid}.log`.
 
 ## Logging
 
@@ -196,6 +202,13 @@ Use the automated installation script (recommended):
 sudo ./docs/examples/install_softmig.sh /path/to/build/libsoftmig.so
 ```
 
+The installation script:
+- Creates required directories (`/var/lib/shared`, `/var/log/softmig`, `/var/run/softmig`)
+- Copies library to `/var/lib/shared/libsoftmig.so`
+- Sets proper permissions (644 for library, 775/1777 for log directory, 755 for config directory)
+- Configures `/etc/ld.so.preload` (temporarily disables if already present to allow safe installation)
+- Verifies installation
+
 Or install manually (see Building section above for full steps).
 
 **Important Permissions:**
@@ -215,13 +228,19 @@ Or install manually (see Building section above for full steps).
    See `docs/slurm.conf.example` for minimal configuration.
 
 2. **Create/update `prolog.sh`**:
-   - Creates secure config files in `/var/run/softmig/{jobid}.conf`
+   - Creates secure config files in `/var/run/softmig/{jobid}.conf` (or `{jobid}_{arrayid}.conf` for array jobs)
    - See `docs/examples/prolog_softmig.sh` for complete example
-   - Configures limits based on requested GPU slice type (l40s.2, l40s.4, etc.)
+   - Configures limits based on requested GPU slice type (e.g., `gres/shard:l40s:2` for half GPU)
+   - Calculates memory and SM limits from shard count (default: 4 shards per GPU)
 
 3. **Create/update `epilog.sh`**:
    - Cleans up config files after job ends
    - See `docs/examples/epilog_softmig.sh` for complete example
+
+4. **Create/update `job_submit.lua`** (optional but recommended):
+   - Validates GPU slice requests (ensures count=1 for slices, prevents invalid denominators)
+   - Translates GPU slice syntax (e.g., `l40s.2:1`) to `gres/shard:l40s:2` format
+   - See `docs/examples/job_submit_softmig.lua` for complete example
 
 ### How It Works
 
@@ -232,8 +251,14 @@ Or install manually (see Building section above for full steps).
 - Epilog deletes config file → deactivates limits when job ends
 
 **Config File Priority:**
-1. Config file (`/var/run/softmig/{jobid}.conf`) - **Takes priority** (created by prolog)
+1. Config file (`/var/run/softmig/{jobid}.conf` or `/var/run/softmig/{jobid}_{arrayid}.conf`) - **Takes priority** (created by `prolog_softmig.sh`)
 2. Environment variables - Only used if config file doesn't exist (for testing)
+
+**Passive Mode:**
+- If neither config file nor environment variables are set, SoftMig operates in passive mode
+- Library loads but does not enforce any limits (checks `is_softmig_configured()` internally)
+- This allows safe system-wide preload via `/etc/ld.so.preload` - the library is loaded for all processes but only activates when configured
+- All SoftMig functions check `is_softmig_enabled()` and return early (no-op) when in passive mode
 
 **Security:**
 - Users cannot modify config files (admin-only directory)
@@ -242,12 +267,13 @@ Or install manually (see Building section above for full steps).
 
 ### Memory and SM Limits by GPU Slice
 
-| GPU Slice | Memory Limit | SM Limit | Oversubscription | Use Case |
-|-----------|-------------|----------|------------------|----------|
-| l40s.1 (full) | 48GB | 100% | 1x | Large models, full GPU needed |
-| l40s.2 (half) | 24GB | 50% | 2x | Medium models, 2x oversubscription |
-| l40s.4 (quarter) | 12GB | 25% | 4x | Small models, 4x oversubscription |
-| l40s.8 (eighth) | 6GB | 12% | 8x | Very small models, 8x oversubscription |
+**Default Configuration**: 4 shards per GPU (configurable in `prolog_softmig.sh` via `NUM_SHARDS_PER_GPU`)
+
+| GPU Slice | Shard Count | Memory Limit (48GB GPU) | SM Limit | Oversubscription | Use Case |
+|-----------|-------------|------------------------|----------|------------------|----------|
+| l40s (full) | N/A | 48GB | 100% | 1x | Large models, full GPU needed |
+| l40s.2 (half) | 2 shards | 24GB | 50% | 2x | Medium models, 2x oversubscription |
+| l40s.4 (quarter) | 1 shard | 12GB | 25% | 4x | Small models, 4x oversubscription |
 
 **SM Limiting:** GPU compute utilization limiting works via kernel launch throttling. Only monitors device 0 (intentional - fractional GPU jobs only get 1 GPU). See [docs/GPU_LIMITER_EXPLANATION.md](docs/GPU_LIMITER_EXPLANATION.md) for technical details.
 
@@ -259,13 +285,14 @@ Or install manually (see Building section above for full steps).
 - Silent to users by default (set `LIBCUDA_LOG_LEVEL=2` in job for debugging)
 
 **Cache Files:**
-- Location: `$SLURM_TMPDIR/cudevshr.cache.*` (auto-cleaned when job ends)
+- Location: `$SLURM_TMPDIR/cudevshr.cache.{jobid}` or `$SLURM_TMPDIR/cudevshr.cache.{jobid}.{arrayid}` (auto-cleaned when job ends)
 - **Important**: Delete cache files when changing limits: `rm -f ${SLURM_TMPDIR}/cudevshr.cache*`
 
 **Verification:**
-- Check that config files are created: `ls -l /var/run/softmig/`
-- Check that library is loaded: `cat /etc/ld.so.preload`
-- Test in job: `nvidia-smi` should show limited memory
+- Check that config files are created: `ls -l /var/run/softmig/` (should see `{jobid}.conf` files)
+- Check that library is loaded: `cat /etc/ld.so.preload` (should contain `/var/lib/shared/libsoftmig.so`)
+- Test in job: `nvidia-smi` should show limited memory (e.g., `0MiB / 12288MiB` for 12GB limit)
+- Check logs: `tail -f /var/log/softmig/{jobid}.log` (as admin)
 
 ## Testing
 

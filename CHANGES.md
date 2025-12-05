@@ -16,8 +16,9 @@ This document summarizes all changes made to HAMi-core to create softmig for DRA
 
 **Changes**:
 - ✅ All logs now go to file only (no stderr output)
-- ✅ Logs written to `/var/log/softmig/{user}_{jobid}_{arrayid}_{date}.log`
-- ✅ Falls back to `$SLURM_TMPDIR/softmig_{jobid}.log` if `/var/log` not writable (SLURM_TMPDIR only, not regular /tmp)
+- ✅ Logs written to `/var/log/softmig/{jobid}.log` or `/var/log/softmig/{jobid}_{arrayid}.log` (matches config file naming)
+- ✅ Falls back to `$SLURM_TMPDIR/softmig_{jobid}.log` (or `$SLURM_TMPDIR/softmig_{jobid}_{arrayid}.log` for array jobs) if `/var/log` not writable (SLURM_TMPDIR only, not regular /tmp)
+- ✅ Outside SLURM jobs: logs use `/var/log/softmig/pid{pid}.log`
 - ✅ Completely silent to users (no visible messages)
 - ✅ Renamed from "HAMI-core" to "softmig" in log messages
 - ✅ Library renamed from `libvgpu.so` to `libsoftmig.so`
@@ -32,11 +33,11 @@ This document summarizes all changes made to HAMi-core to create softmig for DRA
 - `src/utils.c`
 
 **Changes**:
-- ✅ Cache files use `$SLURM_TMPDIR/cudevshr.cache.{jobid}`
-- ✅ Lock files use `$SLURM_TMPDIR/vgpulock/lock.{jobid}`
+- ✅ Cache files use `$SLURM_TMPDIR/cudevshr.cache.{jobid}` or `$SLURM_TMPDIR/cudevshr.cache.{jobid}.{arrayid}` for array jobs
 - ✅ Per-job isolation prevents cross-job interference
 - ✅ Auto-cleaned when job ends (SLURM_TMPDIR is job-specific)
 - ✅ Only uses `SLURM_TMPDIR` (not regular `/tmp`) for proper job isolation
+- ✅ Cache file cleanup: `prolog_softmig.sh` removes old cache files on job start
 
 **Impact**: Proper isolation between jobs, no cache conflicts.
 
@@ -87,11 +88,13 @@ This document summarizes all changes made to HAMi-core to create softmig for DRA
 - `docs/examples/slurm_task_epilog.sh` (new)
 
 **Changes**:
-- ✅ Reads limits from secure config files in `/var/run/softmig/{jobid}_{arrayid}.conf`
-- ✅ Users cannot modify config files (admin-only directory)
+- ✅ Reads limits from secure config files in `/var/run/softmig/{jobid}.conf` or `/var/run/softmig/{jobid}_{arrayid}.conf` for array jobs
+- ✅ Users cannot modify config files (admin-only directory `/var/run/softmig/`)
 - ✅ Falls back to environment variables if config file doesn't exist (for non-SLURM testing)
-- ✅ Config files automatically deleted on job exit
-- ✅ Task prolog creates config files, task epilog cleans them up
+- ✅ Config files automatically deleted on job exit (via `epilog_softmig.sh` and exit handler)
+- ✅ Prolog (`prolog_softmig.sh`) creates config files based on GPU slice requests
+- ✅ Epilog (`epilog_softmig.sh`) cleans up config files
+- ✅ **Passive mode**: Library operates in passive mode when no config file or environment variables are set (safe for system-wide preload)
 
 **Impact**: Prevents users from modifying limits by changing environment variables. Limits are enforced via secure config files.
 
@@ -99,22 +102,22 @@ This document summarizes all changes made to HAMi-core to create softmig for DRA
 
 **New Files**:
 - ✅ `docs/DEPLOYMENT_DRAC.md`: Complete deployment guide
-- ✅ `docs/examples/slurm_job_submit.lua`: Job routing example
-- ✅ `docs/examples/slurm_task_prolog.sh`: Automatic configuration with config files
-- ✅ `docs/examples/slurm_task_epilog.sh`: Config file cleanup
-- ✅ `docs/examples/slurm_gres.conf`: GRES definitions
-- ✅ `docs/examples/slurm_partitions.conf`: Partition configurations
+- ✅ `docs/examples/job_submit_softmig.lua`: Validates and translates GPU slice requests (e.g., `l40s.2:1` → `gres/shard:l40s:2`)
+- ✅ `docs/examples/prolog_softmig.sh`: Automatic configuration with config files (creates `/var/run/softmig/{jobid}.conf`)
+- ✅ `docs/examples/epilog_softmig.sh`: Config file cleanup
+- ✅ `docs/examples/install_softmig.sh`: Automated installation script
 
 ## Configuration Summary
 
 ### Memory Limits by GPU Slice
 
-| Slice Type | Memory | SM Limit | Oversubscription | Use Case |
-|------------|--------|----------|------------------|----------|
-| l40s.1 (full) | 48GB | 100% | 1x | Large models |
-| l40s.2 (half) | 24GB | 50% | 2x | Medium models |
-| l40s.4 (quarter) | 12GB | 25% | 4x | Small models |
-| l40s.8 (eighth) | 6GB | 12% | 8x | Tiny models |
+**Default Configuration**: 4 shards per GPU (configurable in `prolog_softmig.sh` and `job_submit_softmig.lua`)
+
+| Slice Type | Shard Count | Memory (48GB GPU) | SM Limit | Oversubscription | Use Case |
+|------------|-------------|-------------------|----------|------------------|----------|
+| l40s (full) | N/A | 48GB | 100% | 1x | Large models |
+| l40s.2 (half) | 2 shards | 24GB | 50% | 2x | Medium models |
+| l40s.4 (quarter) | 1 shard | 12GB | 25% | 4x | Small models |
 
 ### Environment Variables
 
