@@ -839,7 +839,13 @@ void* __dlsym_hook_section_nvml(void* handle, const char* symbol) {
 void preInit(){
     LOG_MSG("Initializing.....");
     if (real_dlsym == NULL) {
-        real_dlsym = _dl_sym(RTLD_NEXT, "dlsym", dlsym);
+        real_dlsym = dlvsym(RTLD_NEXT,"dlsym","GLIBC_2.2.5");
+        if (real_dlsym == NULL) {
+            LOG_ERROR("real dlsym not found");
+            real_dlsym = _dl_sym(RTLD_NEXT, "dlsym", dlsym);
+            if (real_dlsym == NULL)
+                LOG_ERROR("real dlsym not found");
+        }
     }
     real_realpath = NULL;
     load_cuda_libraries();
