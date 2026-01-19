@@ -74,7 +74,23 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
     LOG_DEBUG("into dlsym %s",symbol);
     pthread_once(&dlsym_init_flag,init_dlsym);
     if (real_dlsym == NULL) {
-        real_dlsym = dlvsym(RTLD_NEXT,"dlsym","GLIBC_2.2.5");
+        const char* glibc_versions[] = {
+                "GLIBC_2.2.5",  // for amd64
+                "GLIBC_2.17",   // for arm64
+                "GLIBC_2.3",
+                "GLIBC_2.4",
+                "GLIBC_2.10",
+                "GLIBC_2.18",
+                "GLIBC_2.22",
+                NULL
+        };
+        for (int i = 0; glibc_versions[i] != NULL; i++) {
+            real_dlsym = dlvsym(RTLD_NEXT, "dlsym", glibc_versions[i]);
+            if (real_dlsym != NULL) {
+                LOG_DEBUG("found dlsym with version: %s", glibc_versions[i]);
+                break;
+            }
+        }
         char *path_search=getenv("CUDA_REDIRECT");
         if ((path_search!=NULL) && (strlen(path_search)>0)){
             vgpulib = dlopen(path_search,RTLD_LAZY);
