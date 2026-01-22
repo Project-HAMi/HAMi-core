@@ -52,6 +52,7 @@ int _record_kernel_interval = 1;
 
 void do_init_device_memory_limits(uint64_t*, int);
 void exit_withlock(int exitcode);
+uint64_t nvml_get_device_memory_usage(const int dev);
 
 void set_current_gpu_status(int status){
     int i;
@@ -255,6 +256,20 @@ size_t get_gpu_memory_usage(const int dev) {
     return total;
 }
 
+size_t get_gpu_memory_real_usage(const int dev) {
+    LOG_INFO("get_gpu_memory_real_usage dev=%d",dev);
+    ensure_initialized();
+    // Query NVML directly for real-time memory usage instead of using cached monitor value
+    // This ensures OOM checks use current actual GPU memory, not stale data
+    size_t nvml_usage = nvml_get_device_memory_usage(dev);
+    size_t tracked_usage = get_gpu_memory_usage(dev);
+    // Use the maximum of NVML-reported and tracked value to be conservative
+    // NVML gives real GPU memory, tracked gives what we've accounted for
+    size_t real_usage = (nvml_usage > tracked_usage) ? nvml_usage : tracked_usage;
+    LOG_INFO("get_gpu_memory_real_usage dev=%d nvml_usage=%lu tracked_usage=%lu real_usage=%lu", dev, nvml_usage, tracked_usage, real_usage);
+    return real_usage;
+}
+
 int set_gpu_device_memory_monitor(int32_t pid,int dev,size_t monitor){
     //LOG_WARN("set_gpu_device_memory_monitor:%d %d %lu",pid,dev,monitor);
     int i;
@@ -307,6 +322,7 @@ uint64_t nvml_get_device_memory_usage(const int dev) {
     ret = nvmlDeviceGetHandleByIndex(dev, &ndev);
     if (ret != NVML_SUCCESS) {
         LOG_ERROR("NVML get device %d error, %s", dev, nvmlErrorString(ret));
+        return 0;
     }
     unsigned int pcnt = SHARED_REGION_MAX_PROCESS_NUM;
     nvmlProcessInfo_v1_t infos[SHARED_REGION_MAX_PROCESS_NUM];
@@ -314,6 +330,7 @@ uint64_t nvml_get_device_memory_usage(const int dev) {
     ret = nvmlDeviceGetComputeRunningProcesses(ndev, &pcnt, infos);
     if (ret != NVML_SUCCESS) {
         LOG_ERROR("NVML get process error, %s", nvmlErrorString(ret));
+        return 0;
     }
     int i = 0;
     uint64_t usage = 0;
@@ -322,9 +339,13 @@ uint64_t nvml_get_device_memory_usage(const int dev) {
     for (; i < pcnt; i++) {
         int slot = 0;
         for (; slot < region->proc_num; slot++) {
-            if (infos[i].pid != region->procs[slot].pid)
+            // NVML returns host PIDs, so we need to compare with hostpid, not pid
+            // pid is the container PID (from getpid()), hostpid is the real host PID
+            if (infos[i].pid != region->procs[slot].hostpid)
                 continue;
             usage += infos[i].usedGpuMemory;
+            LOG_DEBUG("nvml_get_device_memory_usage: matched hostpid=%d, usedGpuMemory=%lu", 
+                infos[i].pid, infos[i].usedGpuMemory);
         }
     }
     unlock_shrreg();
@@ -851,8 +872,8 @@ uint64_t get_current_device_memory_usage(const int dev) {
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
     }
-    result = get_gpu_memory_usage(dev);
-//    result= nvml_get_device_memory_usage(dev);
+    // Use real NVML-reported memory usage for accurate memory tracking
+    result = get_gpu_memory_real_usage(dev);
     finish=clock();
     LOG_DEBUG("get_current_device_memory_usage:tick=%lu result=%lu\n",finish-start,result);
     return result;

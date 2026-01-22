@@ -338,10 +338,10 @@ nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,void* memory,int versi
     if (cudadev < 0) {
         return NVML_SUCCESS;
     }
+    // get_current_device_memory_usage now returns real NVML-reported usage
     size_t usage = get_current_device_memory_usage(cudadev);
-    size_t monitor = get_current_device_memory_monitor(cudadev);
     size_t limit = get_current_device_memory_limit(cudadev);
-    LOG_DEBUG("usage=%ld limit=%ld monitor=%ld", usage, limit, monitor);
+    LOG_DEBUG("usage=%ld limit=%ld", usage, limit);
     if (limit == 0) {
         switch (version) {
         case 1:
@@ -354,12 +354,12 @@ nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,void* memory,int versi
     } else {
         switch (version) {
         case 1:
-             ((nvmlMemory_t*)memory)->free = (limit-usage);
+             ((nvmlMemory_t*)memory)->free = (limit > usage) ? (limit - usage) : 0;
              ((nvmlMemory_t*)memory)->total = limit;
              ((nvmlMemory_t*)memory)->used = usage;
             return NVML_SUCCESS;
         case 2:
-            ((nvmlMemory_v2_t *)memory)->free = (limit-usage);
+            ((nvmlMemory_v2_t *)memory)->free = (limit > usage) ? (limit - usage) : 0;
             ((nvmlMemory_v2_t *)memory)->total = limit;
             ((nvmlMemory_v2_t *)memory)->used = usage;
             return NVML_SUCCESS;

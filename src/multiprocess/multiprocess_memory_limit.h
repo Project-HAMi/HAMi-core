@@ -133,6 +133,7 @@ int set_host_pid(int hostpid);
 uint64_t get_current_device_memory_monitor(const int dev);
 uint64_t get_current_device_memory_usage(const int dev);
 size_t get_gpu_memory_usage(const int dev);
+size_t get_gpu_memory_real_usage(const int dev);
 
 // Priority-related
 int get_current_priority();
