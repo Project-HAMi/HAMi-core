@@ -42,7 +42,9 @@ int oom_check(const int dev, size_t addon) {
     else
         d=dev;
     uint64_t limit = get_current_device_memory_limit(d);
-    size_t _usage = get_gpu_memory_usage(d);
+    // Use real NVML-reported memory usage instead of internally tracked value
+    // This ensures OOM is triggered based on actual GPU memory consumption
+    size_t _usage = get_gpu_memory_real_usage(d);
 
     if (limit == 0) {
         return 0;
