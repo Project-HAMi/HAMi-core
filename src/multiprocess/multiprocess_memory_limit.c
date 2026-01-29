@@ -38,7 +38,7 @@ int pidfound;
 
 int ctx_activate[32];
 
-static shared_region_info_t region_info = {0, -1, PTHREAD_ONCE_INIT, NULL, 0};
+static shared_region_info_t region_info = {0, -1, PTHREAD_ONCE_INIT, NULL, 0, NULL};
 //size_t initial_offset=117440512;
 int env_utilization_switch;
 int enable_active_oom_killer;
@@ -54,12 +54,23 @@ void do_init_device_memory_limits(uint64_t*, int);
 void exit_withlock(int exitcode);
 
 void set_current_gpu_status(int status){
+    // Fast path: use cached slot if available
+    if (region_info.my_slot != NULL) {
+        atomic_store_explicit(&region_info.my_slot->status, status, memory_order_release);
+        return;
+    }
+
+    // Slow path: search for our slot
+    int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
     int i;
-    for (i=0;i<region_info.shared_region->proc_num;i++)
-        if (getpid()==region_info.shared_region->procs[i].pid){
-            region_info.shared_region->procs[i].status = status;
+    int32_t my_pid = getpid();
+    for (i=0;i<proc_num;i++) {
+        int32_t slot_pid = atomic_load_explicit(&region_info.shared_region->procs[i].pid, memory_order_acquire);
+        if (my_pid == slot_pid){
+            atomic_store_explicit(&region_info.shared_region->procs[i].status, status, memory_order_release);
             return;
         }
+    }
 }
 
 void sig_restore_stub(int signo){
@@ -240,18 +251,26 @@ size_t get_gpu_memory_monitor(const int dev) {
     return total;
 }
 
+// Lock-free memory usage aggregation
 size_t get_gpu_memory_usage(const int dev) {
-    LOG_INFO("get_gpu_memory_usage dev=%d",dev);
+    LOG_INFO("get_gpu_memory_usage_lockfree dev=%d",dev);
     ensure_initialized();
     int i=0;
     size_t total=0;
-    lock_shrreg();
-    for (i=0;i<region_info.shared_region->proc_num;i++){
-        LOG_INFO("dev=%d pid=%d host pid=%d i=%lu",dev,region_info.shared_region->procs[i].pid,region_info.shared_region->procs[i].hostpid,region_info.shared_region->procs[i].used[dev].total)
-        total+=region_info.shared_region->procs[i].used[dev].total;
+
+    // Lock-free read with acquire semantics for proc_num
+    int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
+
+    for (i=0;i<proc_num;i++){
+        // Atomic loads with relaxed ordering (aggregation doesn't need strict ordering)
+        int32_t pid = atomic_load_explicit(&region_info.shared_region->procs[i].pid, memory_order_relaxed);
+        int32_t hostpid = atomic_load_explicit(&region_info.shared_region->procs[i].hostpid, memory_order_relaxed);
+        uint64_t proc_usage = atomic_load_explicit(&region_info.shared_region->procs[i].used[dev].total, memory_order_relaxed);
+
+        LOG_INFO("dev=%d pid=%d host pid=%d i=%lu",dev,pid,hostpid,proc_usage);
+        total+=proc_usage;
     }
     total+=initial_offset;
-    unlock_shrreg();
     return total;
 }
 
@@ -271,19 +290,22 @@ int set_gpu_device_memory_monitor(int32_t pid,int dev,size_t monitor){
     return 1;
 }
 
-int set_gpu_device_sm_utilization(int32_t pid,int dev, unsigned int smUtil){  // new function
+// Lock-free SM utilization update
+int set_gpu_device_sm_utilization(int32_t pid,int dev, unsigned int smUtil){
     int i;
     ensure_initialized();
-    lock_shrreg();
-    for (i=0;i<region_info.shared_region->proc_num;i++){
-        if (region_info.shared_region->procs[i].hostpid == pid){
-            LOG_INFO("set_gpu_device_sm_utilization:%d %d %lu->%u", pid, dev, region_info.shared_region->procs[i].device_util[dev].sm_util, smUtil);
-            region_info.shared_region->procs[i].device_util[dev].sm_util = smUtil;
-            break;
+
+    int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
+    for (i=0;i<proc_num;i++){
+        int32_t hostpid = atomic_load_explicit(&region_info.shared_region->procs[i].hostpid, memory_order_acquire);
+        if (hostpid == pid){
+            uint64_t old_util = atomic_load_explicit(&region_info.shared_region->procs[i].device_util[dev].sm_util, memory_order_relaxed);
+            LOG_INFO("set_gpu_device_sm_utilization_lockfree:%d %d %lu->%u", pid, dev, old_util, smUtil);
+            atomic_store_explicit(&region_info.shared_region->procs[i].device_util[dev].sm_util, smUtil, memory_order_relaxed);
+            return 1;
         }
     }
-    unlock_shrreg();
-    return 1;
+    return 0;
 }
 
 int init_gpu_device_utilization(){
@@ -333,62 +355,108 @@ uint64_t nvml_get_device_memory_usage(const int dev) {
     return usage;
 }
 
+// Lock-free memory add using atomics
 int add_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
-    LOG_INFO("add_gpu_device_memory:%d %d->%d %lu",pid,cudadev,cuda_to_nvml_map(cudadev),usage);
+    LOG_INFO("add_gpu_device_memory_lockfree:%d %d->%d %lu",pid,cudadev,cuda_to_nvml_map(cudadev),usage);
     int dev = cuda_to_nvml_map(cudadev);
     ensure_initialized();
-    lock_shrreg();
+
+    // Fast path: use cached slot pointer for our own process
+    if (pid == getpid() && region_info.my_slot != NULL) {
+        atomic_fetch_add_explicit(&region_info.my_slot->used[dev].total, usage, memory_order_relaxed);
+        switch (type) {
+            case 0:
+                atomic_fetch_add_explicit(&region_info.my_slot->used[dev].context_size, usage, memory_order_relaxed);
+                break;
+            case 1:
+                atomic_fetch_add_explicit(&region_info.my_slot->used[dev].module_size, usage, memory_order_relaxed);
+                break;
+            case 2:
+                atomic_fetch_add_explicit(&region_info.my_slot->used[dev].data_size, usage, memory_order_relaxed);
+                break;
+        }
+        LOG_INFO("gpu_device_memory_added_lockfree:%d %d %lu",pid,dev,usage);
+        return 0;
+    }
+
+    // Slow path: find slot for other process (still lock-free)
+    int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
     int i;
-    for (i=0;i<region_info.shared_region->proc_num;i++){
-        if (region_info.shared_region->procs[i].pid == pid){
-            region_info.shared_region->procs[i].used[dev].total+=usage;
+    for (i=0;i<proc_num;i++){
+        int32_t slot_pid = atomic_load_explicit(&region_info.shared_region->procs[i].pid, memory_order_acquire);
+        if (slot_pid == pid){
+            atomic_fetch_add_explicit(&region_info.shared_region->procs[i].used[dev].total, usage, memory_order_relaxed);
             switch (type) {
-                case 0:{
-                    region_info.shared_region->procs[i].used[dev].context_size += usage;
+                case 0:
+                    atomic_fetch_add_explicit(&region_info.shared_region->procs[i].used[dev].context_size, usage, memory_order_relaxed);
                     break;
-                }
-                case 1:{
-                    region_info.shared_region->procs[i].used[dev].module_size += usage;
+                case 1:
+                    atomic_fetch_add_explicit(&region_info.shared_region->procs[i].used[dev].module_size, usage, memory_order_relaxed);
                     break;
-                }
-                case 2:{
-                    region_info.shared_region->procs[i].used[dev].data_size += usage;
-                }
+                case 2:
+                    atomic_fetch_add_explicit(&region_info.shared_region->procs[i].used[dev].data_size, usage, memory_order_relaxed);
+                    break;
             }
+            LOG_INFO("gpu_device_memory_added_lockfree:%d %d %lu",pid,dev,usage);
+            return 0;
         }
     }
-    unlock_shrreg();
-    LOG_INFO("gpu_device_memory_added:%d %d %lu -> %lu",pid,dev,usage,get_gpu_memory_usage(dev));
-    return 0;
+
+    LOG_WARN("Process slot not found for pid %d", pid);
+    return -1;
 }
 
+// Lock-free memory remove using atomics
 int rm_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
-    LOG_INFO("rm_gpu_device_memory:%d %d->%d %d:%lu",pid,cudadev,cuda_to_nvml_map(cudadev),type,usage);
+    LOG_INFO("rm_gpu_device_memory_lockfree:%d %d->%d %d:%lu",pid,cudadev,cuda_to_nvml_map(cudadev),type,usage);
     int dev = cuda_to_nvml_map(cudadev);
     ensure_initialized();
-    lock_shrreg();
+
+    // Fast path: use cached slot pointer for our own process
+    if (pid == getpid() && region_info.my_slot != NULL) {
+        atomic_fetch_sub_explicit(&region_info.my_slot->used[dev].total, usage, memory_order_relaxed);
+        switch (type) {
+            case 0:
+                atomic_fetch_sub_explicit(&region_info.my_slot->used[dev].context_size, usage, memory_order_relaxed);
+                break;
+            case 1:
+                atomic_fetch_sub_explicit(&region_info.my_slot->used[dev].module_size, usage, memory_order_relaxed);
+                break;
+            case 2:
+                atomic_fetch_sub_explicit(&region_info.my_slot->used[dev].data_size, usage, memory_order_relaxed);
+                break;
+        }
+        uint64_t new_total = atomic_load_explicit(&region_info.my_slot->used[dev].total, memory_order_relaxed);
+        LOG_INFO("after delete_lockfree:%lu",new_total);
+        return 0;
+    }
+
+    // Slow path: find slot for other process (still lock-free)
+    int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
     int i;
-    for (i=0;i<region_info.shared_region->proc_num;i++){
-        if (region_info.shared_region->procs[i].pid == pid){
-            region_info.shared_region->procs[i].used[dev].total-=usage;
+    for (i=0;i<proc_num;i++){
+        int32_t slot_pid = atomic_load_explicit(&region_info.shared_region->procs[i].pid, memory_order_acquire);
+        if (slot_pid == pid){
+            atomic_fetch_sub_explicit(&region_info.shared_region->procs[i].used[dev].total, usage, memory_order_relaxed);
             switch (type) {
-                case 0:{
-                    region_info.shared_region->procs[i].used[dev].context_size -= usage;
+                case 0:
+                    atomic_fetch_sub_explicit(&region_info.shared_region->procs[i].used[dev].context_size, usage, memory_order_relaxed);
                     break;
-                }
-                case 1:{
-                    region_info.shared_region->procs[i].used[dev].module_size -= usage;
+                case 1:
+                    atomic_fetch_sub_explicit(&region_info.shared_region->procs[i].used[dev].module_size, usage, memory_order_relaxed);
                     break;
-                }
-                case 2:{
-                    region_info.shared_region->procs[i].used[dev].data_size -= usage;
-                }
+                case 2:
+                    atomic_fetch_sub_explicit(&region_info.shared_region->procs[i].used[dev].data_size, usage, memory_order_relaxed);
+                    break;
             }
-            LOG_INFO("after delete:%lu",region_info.shared_region->procs[i].used[dev].total);
+            uint64_t new_total = atomic_load_explicit(&region_info.shared_region->procs[i].used[dev].total, memory_order_relaxed);
+            LOG_INFO("after delete_lockfree:%lu",new_total);
+            return 0;
         }
     }
-    unlock_shrreg();
-    return 0;
+
+    LOG_WARN("Process slot not found for pid %d", pid);
+    return -1;
 }
 
 void get_timespec(int seconds, struct timespec* spec) {
@@ -561,31 +629,57 @@ int clear_proc_slot_nolock(int do_clear) {
 
 void init_proc_slot_withlock() {
     int32_t current_pid = getpid();
-    lock_shrreg();
+    lock_shrreg();  // Still need lock for modifying process slots
     shared_region_t* region = region_info.shared_region;
-    if (region->proc_num >= SHARED_REGION_MAX_PROCESS_NUM) {
+
+    int proc_num = atomic_load_explicit(&region->proc_num, memory_order_acquire);
+    if (proc_num >= SHARED_REGION_MAX_PROCESS_NUM) {
         exit_withlock(-1);
     }
     signal(SIGUSR2,sig_swap_stub);
     signal(SIGUSR1,sig_restore_stub);
+
     // If, by any means a pid of itself is found in region->process, then it is probably caused by crashloop
     // we need to reset it.
     int i,found=0;
-    for (i=0; i<region->proc_num; i++) {
-        if (region->procs[i].pid == current_pid) {
-            region->procs[i].status = 1;
-            memset(region->procs[i].used,0,sizeof(device_memory_t)*CUDA_DEVICE_MAX_COUNT);
-            memset(region->procs[i].device_util,0,sizeof(device_util_t)*CUDA_DEVICE_MAX_COUNT);
+    for (i=0; i<proc_num; i++) {
+        int32_t slot_pid = atomic_load_explicit(&region->procs[i].pid, memory_order_acquire);
+        if (slot_pid == current_pid) {
+            atomic_store_explicit(&region->procs[i].status, 1, memory_order_release);
+
+            // Zero out atomics
+            for (int dev=0; dev<CUDA_DEVICE_MAX_COUNT; dev++) {
+                atomic_store_explicit(&region->procs[i].used[dev].total, 0, memory_order_relaxed);
+                atomic_store_explicit(&region->procs[i].used[dev].context_size, 0, memory_order_relaxed);
+                atomic_store_explicit(&region->procs[i].used[dev].module_size, 0, memory_order_relaxed);
+                atomic_store_explicit(&region->procs[i].used[dev].data_size, 0, memory_order_relaxed);
+                atomic_store_explicit(&region->procs[i].device_util[dev].sm_util, 0, memory_order_relaxed);
+                atomic_store_explicit(&region->procs[i].monitorused[dev], 0, memory_order_relaxed);
+            }
+
+            region_info.my_slot = &region->procs[i];  // Cache our slot pointer
             found = 1;
             break;
         }
     }
+
     if (!found) {
-        region->procs[region->proc_num].pid = current_pid;
-        region->procs[region->proc_num].status = 1;
-        memset(region->procs[region->proc_num].used,0,sizeof(device_memory_t)*CUDA_DEVICE_MAX_COUNT);
-        memset(region->procs[region->proc_num].device_util,0,sizeof(device_util_t)*CUDA_DEVICE_MAX_COUNT);
-        region->proc_num++;
+        // Initialize new slot with atomics
+        atomic_store_explicit(&region->procs[proc_num].pid, current_pid, memory_order_release);
+        atomic_store_explicit(&region->procs[proc_num].hostpid, 0, memory_order_relaxed);
+        atomic_store_explicit(&region->procs[proc_num].status, 1, memory_order_release);
+
+        for (int dev=0; dev<CUDA_DEVICE_MAX_COUNT; dev++) {
+            atomic_store_explicit(&region->procs[proc_num].used[dev].total, 0, memory_order_relaxed);
+            atomic_store_explicit(&region->procs[proc_num].used[dev].context_size, 0, memory_order_relaxed);
+            atomic_store_explicit(&region->procs[proc_num].used[dev].module_size, 0, memory_order_relaxed);
+            atomic_store_explicit(&region->procs[proc_num].used[dev].data_size, 0, memory_order_relaxed);
+            atomic_store_explicit(&region->procs[proc_num].device_util[dev].sm_util, 0, memory_order_relaxed);
+            atomic_store_explicit(&region->procs[proc_num].monitorused[dev], 0, memory_order_relaxed);
+        }
+
+        region_info.my_slot = &region->procs[proc_num];  // Cache our slot pointer
+        atomic_fetch_add_explicit(&region->proc_num, 1, memory_order_release);
     }
 
     clear_proc_slot_nolock(1);
@@ -697,8 +791,8 @@ void try_create_shrreg() {
         LOG_ERROR("Fail to lock shrreg %s: errno=%d", shr_reg_file, errno);
     }
     //put_device_info();
-    if (region->initialized_flag != 
-          MULTIPROCESS_SHARED_REGION_MAGIC_FLAG) {
+    int32_t init_flag = atomic_load_explicit(&region->initialized_flag, memory_order_acquire);
+    if (init_flag != MULTIPROCESS_SHARED_REGION_MAGIC_FLAG) {
         region->major_version = MAJOR_VERSION;
         region->minor_version = MINOR_VERSION;
         do_init_device_memory_limits(
@@ -708,14 +802,17 @@ void try_create_shrreg() {
         if (sem_init(&region->sem, 1, 1) != 0) {
             LOG_ERROR("Fail to init sem %s: errno=%d", shr_reg_file, errno);
         }
-        __sync_synchronize();
-        region->sm_init_flag = 0;
-        region->utilization_switch = 1;
-        region->recent_kernel = 2;
+        atomic_store_explicit(&region->sm_init_flag, 0, memory_order_relaxed);
+        atomic_store_explicit(&region->utilization_switch, 1, memory_order_relaxed);
+        atomic_store_explicit(&region->recent_kernel, 2, memory_order_relaxed);
+        atomic_store_explicit(&region->proc_num, 0, memory_order_relaxed);
         region->priority = 1;
         if (getenv(CUDA_TASK_PRIORITY_ENV)!=NULL)
             region->priority = atoi(getenv(CUDA_TASK_PRIORITY_ENV));
-        region->initialized_flag = MULTIPROCESS_SHARED_REGION_MAGIC_FLAG;
+
+        // Release barrier ensures all initialization is visible before flag is set
+        atomic_thread_fence(memory_order_release);
+        atomic_store_explicit(&region->initialized_flag, MULTIPROCESS_SHARED_REGION_MAGIC_FLAG, memory_order_release);
     } else {
         if (region->major_version != MAJOR_VERSION || 
                 region->minor_version != MINOR_VERSION) {
