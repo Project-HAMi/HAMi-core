@@ -251,7 +251,7 @@ size_t get_gpu_memory_monitor(const int dev) {
     return total;
 }
 
-// Lock-free memory usage aggregation
+// Lock-free memory usage aggregation with seqlock for consistent snapshots
 size_t get_gpu_memory_usage(const int dev) {
     LOG_INFO("get_gpu_memory_usage_lockfree dev=%d",dev);
     ensure_initialized();
@@ -262,14 +262,62 @@ size_t get_gpu_memory_usage(const int dev) {
     int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
 
     for (i=0;i<proc_num;i++){
-        // Atomic loads with relaxed ordering (aggregation doesn't need strict ordering)
-        int32_t pid = atomic_load_explicit(&region_info.shared_region->procs[i].pid, memory_order_relaxed);
-        int32_t hostpid = atomic_load_explicit(&region_info.shared_region->procs[i].hostpid, memory_order_relaxed);
-        uint64_t proc_usage = atomic_load_explicit(&region_info.shared_region->procs[i].used[dev].total, memory_order_relaxed);
+        shrreg_proc_slot_t* slot = &region_info.shared_region->procs[i];
+        uint64_t proc_usage;
+        uint64_t seq1, seq2;
+        int retry_count = 0;
+        const int MAX_RETRIES = 100;
+
+        // Seqlock read protocol: retry until we get a consistent snapshot
+        do {
+            // Read sequence number (must be even = no write in progress)
+            seq1 = atomic_load_explicit(&slot->seqlock, memory_order_acquire);
+
+            // If odd, writer is in progress, spin briefly
+            while (seq1 & 1) {
+                // CPU pause instruction to avoid hammering cache
+                #if defined(__x86_64__) || defined(__i386__)
+                __asm__ __volatile__("pause" ::: "memory");
+                #elif defined(__aarch64__)
+                __asm__ __volatile__("yield" ::: "memory");
+                #endif
+                seq1 = atomic_load_explicit(&slot->seqlock, memory_order_acquire);
+
+                if (++retry_count > MAX_RETRIES) {
+                    LOG_WARN("Seqlock retry limit exceeded for slot %d, using best-effort read", i);
+                    goto best_effort_read;
+                }
+            }
+
+            // Read the data with acquire semantics
+            proc_usage = atomic_load_explicit(&slot->used[dev].total, memory_order_acquire);
+
+            // Memory barrier to prevent reordering
+            atomic_thread_fence(memory_order_acquire);
+
+            // Read sequence number again
+            seq2 = atomic_load_explicit(&slot->seqlock, memory_order_acquire);
+
+            // If sequence numbers match and still even, read was consistent
+        } while (seq1 != seq2);
+
+        // Consistent read obtained
+        int32_t pid = atomic_load_explicit(&slot->pid, memory_order_relaxed);
+        int32_t hostpid = atomic_load_explicit(&slot->hostpid, memory_order_relaxed);
 
         LOG_INFO("dev=%d pid=%d host pid=%d i=%lu",dev,pid,hostpid,proc_usage);
         total+=proc_usage;
+        continue;
+
+best_effort_read:
+        // Fallback: best-effort read if spinning too long
+        proc_usage = atomic_load_explicit(&slot->used[dev].total, memory_order_acquire);
+        pid = atomic_load_explicit(&slot->pid, memory_order_relaxed);
+        hostpid = atomic_load_explicit(&slot->hostpid, memory_order_relaxed);
+        LOG_WARN("dev=%d pid=%d host pid=%d i=%lu (best-effort)",dev,pid,hostpid,proc_usage);
+        total+=proc_usage;
     }
+
     total+=initial_offset;
     return total;
 }
@@ -355,7 +403,7 @@ uint64_t nvml_get_device_memory_usage(const int dev) {
     return usage;
 }
 
-// Lock-free memory add using atomics
+// Lock-free memory add using atomics with seqlock for consistent reads
 int add_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
     LOG_INFO("add_gpu_device_memory_lockfree:%d %d->%d %lu",pid,cudadev,cuda_to_nvml_map(cudadev),usage);
     int dev = cuda_to_nvml_map(cudadev);
@@ -363,18 +411,28 @@ int add_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
 
     // Fast path: use cached slot pointer for our own process
     if (pid == getpid() && region_info.my_slot != NULL) {
-        atomic_fetch_add_explicit(&region_info.my_slot->used[dev].total, usage, memory_order_relaxed);
+        shrreg_proc_slot_t* slot = region_info.my_slot;
+
+        // Seqlock protocol: increment to odd (write in progress)
+        atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
+
+        // Perform updates with release semantics for visibility
+        atomic_fetch_add_explicit(&slot->used[dev].total, usage, memory_order_release);
         switch (type) {
             case 0:
-                atomic_fetch_add_explicit(&region_info.my_slot->used[dev].context_size, usage, memory_order_relaxed);
+                atomic_fetch_add_explicit(&slot->used[dev].context_size, usage, memory_order_release);
                 break;
             case 1:
-                atomic_fetch_add_explicit(&region_info.my_slot->used[dev].module_size, usage, memory_order_relaxed);
+                atomic_fetch_add_explicit(&slot->used[dev].module_size, usage, memory_order_release);
                 break;
             case 2:
-                atomic_fetch_add_explicit(&region_info.my_slot->used[dev].data_size, usage, memory_order_relaxed);
+                atomic_fetch_add_explicit(&slot->used[dev].data_size, usage, memory_order_release);
                 break;
         }
+
+        // Seqlock protocol: increment to even (write complete)
+        atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
+
         LOG_INFO("gpu_device_memory_added_lockfree:%d %d %lu",pid,dev,usage);
         return 0;
     }
@@ -385,18 +443,28 @@ int add_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
     for (i=0;i<proc_num;i++){
         int32_t slot_pid = atomic_load_explicit(&region_info.shared_region->procs[i].pid, memory_order_acquire);
         if (slot_pid == pid){
-            atomic_fetch_add_explicit(&region_info.shared_region->procs[i].used[dev].total, usage, memory_order_relaxed);
+            shrreg_proc_slot_t* slot = &region_info.shared_region->procs[i];
+
+            // Seqlock protocol: increment to odd (write in progress)
+            atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
+
+            // Perform updates
+            atomic_fetch_add_explicit(&slot->used[dev].total, usage, memory_order_release);
             switch (type) {
                 case 0:
-                    atomic_fetch_add_explicit(&region_info.shared_region->procs[i].used[dev].context_size, usage, memory_order_relaxed);
+                    atomic_fetch_add_explicit(&slot->used[dev].context_size, usage, memory_order_release);
                     break;
                 case 1:
-                    atomic_fetch_add_explicit(&region_info.shared_region->procs[i].used[dev].module_size, usage, memory_order_relaxed);
+                    atomic_fetch_add_explicit(&slot->used[dev].module_size, usage, memory_order_release);
                     break;
                 case 2:
-                    atomic_fetch_add_explicit(&region_info.shared_region->procs[i].used[dev].data_size, usage, memory_order_relaxed);
+                    atomic_fetch_add_explicit(&slot->used[dev].data_size, usage, memory_order_release);
                     break;
             }
+
+            // Seqlock protocol: increment to even (write complete)
+            atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
+
             LOG_INFO("gpu_device_memory_added_lockfree:%d %d %lu",pid,dev,usage);
             return 0;
         }
@@ -406,7 +474,7 @@ int add_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
     return -1;
 }
 
-// Lock-free memory remove using atomics
+// Lock-free memory remove using atomics with seqlock for consistent reads
 int rm_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
     LOG_INFO("rm_gpu_device_memory_lockfree:%d %d->%d %d:%lu",pid,cudadev,cuda_to_nvml_map(cudadev),type,usage);
     int dev = cuda_to_nvml_map(cudadev);
@@ -414,19 +482,29 @@ int rm_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
 
     // Fast path: use cached slot pointer for our own process
     if (pid == getpid() && region_info.my_slot != NULL) {
-        atomic_fetch_sub_explicit(&region_info.my_slot->used[dev].total, usage, memory_order_relaxed);
+        shrreg_proc_slot_t* slot = region_info.my_slot;
+
+        // Seqlock protocol: increment to odd (write in progress)
+        atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
+
+        // Perform updates with release semantics
+        atomic_fetch_sub_explicit(&slot->used[dev].total, usage, memory_order_release);
         switch (type) {
             case 0:
-                atomic_fetch_sub_explicit(&region_info.my_slot->used[dev].context_size, usage, memory_order_relaxed);
+                atomic_fetch_sub_explicit(&slot->used[dev].context_size, usage, memory_order_release);
                 break;
             case 1:
-                atomic_fetch_sub_explicit(&region_info.my_slot->used[dev].module_size, usage, memory_order_relaxed);
+                atomic_fetch_sub_explicit(&slot->used[dev].module_size, usage, memory_order_release);
                 break;
             case 2:
-                atomic_fetch_sub_explicit(&region_info.my_slot->used[dev].data_size, usage, memory_order_relaxed);
+                atomic_fetch_sub_explicit(&slot->used[dev].data_size, usage, memory_order_release);
                 break;
         }
-        uint64_t new_total = atomic_load_explicit(&region_info.my_slot->used[dev].total, memory_order_relaxed);
+
+        // Seqlock protocol: increment to even (write complete)
+        atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
+
+        uint64_t new_total = atomic_load_explicit(&slot->used[dev].total, memory_order_acquire);
         LOG_INFO("after delete_lockfree:%lu",new_total);
         return 0;
     }
@@ -437,19 +515,29 @@ int rm_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
     for (i=0;i<proc_num;i++){
         int32_t slot_pid = atomic_load_explicit(&region_info.shared_region->procs[i].pid, memory_order_acquire);
         if (slot_pid == pid){
-            atomic_fetch_sub_explicit(&region_info.shared_region->procs[i].used[dev].total, usage, memory_order_relaxed);
+            shrreg_proc_slot_t* slot = &region_info.shared_region->procs[i];
+
+            // Seqlock protocol: increment to odd (write in progress)
+            atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
+
+            // Perform updates
+            atomic_fetch_sub_explicit(&slot->used[dev].total, usage, memory_order_release);
             switch (type) {
                 case 0:
-                    atomic_fetch_sub_explicit(&region_info.shared_region->procs[i].used[dev].context_size, usage, memory_order_relaxed);
+                    atomic_fetch_sub_explicit(&slot->used[dev].context_size, usage, memory_order_release);
                     break;
                 case 1:
-                    atomic_fetch_sub_explicit(&region_info.shared_region->procs[i].used[dev].module_size, usage, memory_order_relaxed);
+                    atomic_fetch_sub_explicit(&slot->used[dev].module_size, usage, memory_order_release);
                     break;
                 case 2:
-                    atomic_fetch_sub_explicit(&region_info.shared_region->procs[i].used[dev].data_size, usage, memory_order_relaxed);
+                    atomic_fetch_sub_explicit(&slot->used[dev].data_size, usage, memory_order_release);
                     break;
             }
-            uint64_t new_total = atomic_load_explicit(&region_info.shared_region->procs[i].used[dev].total, memory_order_relaxed);
+
+            // Seqlock protocol: increment to even (write complete)
+            atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
+
+            uint64_t new_total = atomic_load_explicit(&slot->used[dev].total, memory_order_acquire);
             LOG_INFO("after delete_lockfree:%lu",new_total);
             return 0;
         }
@@ -645,6 +733,7 @@ void init_proc_slot_withlock() {
     for (i=0; i<proc_num; i++) {
         int32_t slot_pid = atomic_load_explicit(&region->procs[i].pid, memory_order_acquire);
         if (slot_pid == current_pid) {
+            atomic_store_explicit(&region->procs[i].seqlock, 0, memory_order_relaxed);  // Reset seqlock
             atomic_store_explicit(&region->procs[i].status, 1, memory_order_release);
 
             // Zero out atomics
@@ -665,6 +754,7 @@ void init_proc_slot_withlock() {
 
     if (!found) {
         // Initialize new slot with atomics
+        atomic_store_explicit(&region->procs[proc_num].seqlock, 0, memory_order_relaxed);  // Start with even (no write)
         atomic_store_explicit(&region->procs[proc_num].pid, current_pid, memory_order_release);
         atomic_store_explicit(&region->procs[proc_num].hostpid, 0, memory_order_relaxed);
         atomic_store_explicit(&region->procs[proc_num].status, 1, memory_order_release);
