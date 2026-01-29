@@ -78,11 +78,12 @@ typedef struct {
 typedef struct {
     _Atomic int32_t pid;           // Atomic to detect slot allocation
     _Atomic int32_t hostpid;
+    _Atomic uint64_t seqlock;      // Sequence lock for consistent snapshots
     device_memory_t used[CUDA_DEVICE_MAX_COUNT];
     _Atomic uint64_t monitorused[CUDA_DEVICE_MAX_COUNT];
     device_util_t device_util[CUDA_DEVICE_MAX_COUNT];
     _Atomic int32_t status;
-    uint64_t unused[3];
+    uint64_t unused[2];
 } shrreg_proc_slot_t;
 
 typedef char uuid[96];
