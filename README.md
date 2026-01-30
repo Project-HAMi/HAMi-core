@@ -1,6 +1,6 @@
 # HAMi-core —— Hook library for CUDA Environments
 
-English | [中文](README_CN.md)
+English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 ## Introduction
 
@@ -48,7 +48,6 @@ If you run CUDA applications locally, please create the local directory first.
 mkdir /tmp/vgpulock/
 ```
 
-```
 If you have updated `CUDA_DEVICE_MEMORY_LIMIT` or `CUDA_DEVICE_SM_LIMIT`, please delete the local cache file.
 
 ```
