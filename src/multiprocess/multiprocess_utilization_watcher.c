@@ -95,18 +95,18 @@ long delta(int up_limit, int user_current, long share) {
   return share;
 }
 
-unsigned int nvml_to_cuda_map(unsigned int nvmldev){
+int nvml_to_cuda_map(unsigned int nvmldev){
     unsigned int devcount;
     CHECK_NVML_API(nvmlDeviceGetCount_v2(&devcount));
-    int i=0;
-    for (i=0;i<devcount;i++){
-        if (cuda_to_nvml_map(i)==nvmldev)
-          return i;
+    for (unsigned int i = 0; i < devcount; i++){
+        int mapped = cuda_to_nvml_map(i);
+        if ((mapped >= 0) && (mapped == (int)nvmldev))
+          return (int)i;
     }
     return -1;
 }
 
-unsigned int cuda_to_nvml_map(unsigned int cudadev){
+int cuda_to_nvml_map(unsigned int cudadev){
     return cuda_to_nvml_map_array[cudadev];
 }
 
