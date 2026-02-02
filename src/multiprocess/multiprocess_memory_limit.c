@@ -34,6 +34,10 @@
 #define SEM_WAIT_RETRY_TIMES 30
 #endif
 
+#ifndef BUFFER_SIZE
+#define BUFFER_SIZE 8192
+#endif
+
 int pidfound;
 
 int ctx_activate[32];
@@ -640,8 +644,33 @@ int set_env_utilization_switch() {
     return 0;
 }
 
+void load_environ() {
+    FILE *file = fopen("/proc/1/environ", "r");
+    if (!file) {
+        return;
+    }
+    char buffer[BUFFER_SIZE];
+    size_t bytesRead = fread(buffer, 1, sizeof(buffer) - 1, file);
+    if (bytesRead == 0) {
+        fclose(file);
+        return;
+    }
+    buffer[bytesRead] = '\0';
+    size_t i = 0;
+    while (i < bytesRead) {
+        char *line = &buffer[i];
+        size_t len = strlen(line);
+        if (len > 0) {
+            putenv(strdup(line));
+        }
+        i += len + 1;
+    }
+    fclose(file);
+}
+
 void try_create_shrreg() {
     LOG_DEBUG("Try create shrreg")
+    load_environ();
     if (region_info.fd == -1) {
         // use .fd to indicate whether a reinit after fork happen
         // no need to register exit handler after fork
