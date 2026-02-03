@@ -651,29 +651,41 @@ void lock_shrreg() {
             trials = 0;
             break;
         } else if (errno == ETIMEDOUT) {
-            LOG_WARN("Lock shrreg timeout, try fix (%d:%ld)", region_info.pid,region->owner_pid);
+            trials++;
+            LOG_WARN("Lock shrreg timeout (trial %d/%d), try fix (%d:%ld)",
+                     trials, SEM_WAIT_RETRY_TIMES, region_info.pid, region->owner_pid);
             int32_t current_owner = region->owner_pid;
+
+            // Check if owner is dead or if this is our own PID (deadlock)
             if (current_owner != 0 && (current_owner == region_info.pid ||
                     proc_alive(current_owner) == PROC_STATE_NONALIVE)) {
-                LOG_WARN("Owner proc dead (%d), try fix", current_owner);
+                LOG_WARN("Owner proc dead or self-deadlock (%d), forcing recovery", current_owner);
+                if (0 == fix_lock_shrreg()) {
+                    break;  // Successfully recovered
+                }
+                // If fix failed, force-post the semaphore to unlock it
+                LOG_WARN("fix_lock_shrreg failed, force-posting semaphore");
+                sem_post(&region->sem);
+                continue;
+            }
+
+            // If too many retries, force recovery even if owner seems alive
+            if (trials > SEM_WAIT_RETRY_TIMES) {
+                LOG_WARN("Exceeded retry limit (%d sec), forcing recovery",
+                         SEM_WAIT_RETRY_TIMES * SEM_WAIT_TIME);
+                if (current_owner == 0) {
+                    LOG_WARN("Owner is 0, setting to %d", region_info.pid);
+                    region->owner_pid = region_info.pid;
+                }
                 if (0 == fix_lock_shrreg()) {
                     break;
                 }
-            } else {
-                trials++;
-                if (trials > SEM_WAIT_RETRY_TIMES) {
-                    LOG_WARN("Fail to lock shrreg in %d seconds",
-                        SEM_WAIT_RETRY_TIMES * SEM_WAIT_TIME);
-                    if (current_owner == 0) {
-                        LOG_WARN("fix current_owner 0>%d",region_info.pid);
-                        region->owner_pid = region_info.pid;
-                        if (0 == fix_lock_shrreg()) {
-                            break;
-                        } 
-                    }
-                }
-                continue;  // slow wait path
+                // Last resort: force-post semaphore
+                LOG_WARN("All recovery attempts failed, force-posting semaphore");
+                sem_post(&region->sem);
+                continue;
             }
+            continue;  // Retry with backoff
         } else {
             LOG_ERROR("Failed to lock shrreg: %d", errno);
         }
@@ -702,21 +714,29 @@ void lock_postinit() {
         int status = sem_timedwait(&region->sem_postinit, &sem_ts);
         if (status == 0) {
             // Lock acquired successfully
+            LOG_DEBUG("Acquired postinit lock (PID %d)", getpid());
             trials = 0;
             break;
         } else if (errno == ETIMEDOUT) {
             trials++;
+            LOG_MSG("Waiting for postinit lock (trial %d/%d, PID %d)",
+                    trials, SEM_WAIT_RETRY_TIMES, getpid());
+
+            // After many retries, assume deadlock and force recovery
             if (trials > SEM_WAIT_RETRY_TIMES) {
-                LOG_WARN("Fail to lock postinit semaphore in %d seconds, forcing lock",
-                    SEM_WAIT_RETRY_TIMES * SEM_WAIT_TIME);
-                // Force acquire by posting (increment) then waiting
+                LOG_WARN("Postinit lock deadlock detected after %d seconds, forcing recovery",
+                         SEM_WAIT_RETRY_TIMES * SEM_WAIT_TIME);
+                // Force-post the semaphore to increment it (unlock)
                 sem_post(&region->sem_postinit);
+                // Try to acquire again immediately
                 continue;
             }
-            LOG_MSG("Waiting for postinit lock (trial %d/%d)", trials, SEM_WAIT_RETRY_TIMES);
             continue;
         } else {
-            LOG_ERROR("Failed to lock postinit semaphore: %d", errno);
+            LOG_ERROR("Failed to lock postinit semaphore: errno=%d", errno);
+            // Don't give up - keep retrying
+            trials++;
+            continue;
         }
     }
 }

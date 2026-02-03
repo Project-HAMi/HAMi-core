@@ -134,6 +134,12 @@ nvmlReturn_t set_task_pid() {
     merged_num = 0;
     memset(tmp_pids_on_device,0,sizeof(nvmlProcessInfo_v1_t)*SHARED_REGION_MAX_PROCESS_NUM);
     CHECK_CU_RESULT(cuDevicePrimaryCtxRetain(&pctx,0));
+
+    // CRITICAL: Give NVML time to detect the newly created CUDA context
+    // Without this delay, NVML may not have updated its process list yet,
+    // causing getextrapid() to return 0 (no new process found)
+    usleep(200000);  // 200ms delay to ensure NVML sees the new process
+
     for (i=0;i<nvmlCounts;i++) {
         cudaDev=nvml_to_cuda_map(i);
         if (cudaDev<0) {
