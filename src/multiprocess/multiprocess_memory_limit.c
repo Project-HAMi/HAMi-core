@@ -612,22 +612,54 @@ void exit_withlock(int exitcode) {
 }
 
 
+// Signal handler for cleanup
+void signal_cleanup_handler(int signum) {
+    LOG_WARN("Caught signal %d, cleaning up", signum);
+    exit_handler();
+    // Re-raise signal with default handler to ensure proper exit code
+    signal(signum, SIG_DFL);
+    raise(signum);
+}
+
 void exit_handler() {
+    static int cleanup_done = 0;
+    // Prevent re-entry (exit_handler might be called multiple times)
+    if (__sync_lock_test_and_set(&cleanup_done, 1)) {
+        return;
+    }
+
     if (region_info.init_status == PTHREAD_ONCE_INIT) {
         return;
     }
     shared_region_t* region = region_info.shared_region;
+    if (region == NULL) {
+        return;
+    }
+
+    int32_t my_pid = region_info.pid;
+    LOG_MSG("Cleanup on exit for PID %d", my_pid);
+
+    // CLEANUP 1: If we're holding owner_pid, release it
+    size_t current_owner = atomic_load_explicit(&region->owner_pid, memory_order_acquire);
+    if (current_owner == (size_t)my_pid) {
+        LOG_WARN("Exit while holding owner_pid, releasing");
+        atomic_store_explicit(&region->owner_pid, 0, memory_order_release);
+        // Try to unlock the semaphore we were holding
+        sem_post(&region->sem);
+    }
+
+    // CLEANUP 2: Remove our process slot
     int slot = 0;
-    LOG_MSG("Calling exit handler %d",getpid());
     struct timespec sem_ts;
     get_timespec(SEM_WAIT_TIME_ON_EXIT, &sem_ts);
     int status = sem_timedwait(&region->sem, &sem_ts);
-    if (status == 0) {  // just give up on lock failure
-        region->owner_pid = region_info.pid;
+    if (status == 0) {
+        atomic_store_explicit(&region->owner_pid, my_pid, memory_order_release);
         while (slot < region->proc_num) {
-            if (region->procs[slot].pid == region_info.pid) {
-                memset(region->procs[slot].used,0,sizeof(device_memory_t)*CUDA_DEVICE_MAX_COUNT);
-                memset(region->procs[slot].device_util,0,sizeof(device_util_t)*CUDA_DEVICE_MAX_COUNT);
+            if (region->procs[slot].pid == my_pid) {
+                LOG_DEBUG("Removing process slot %d", slot);
+                memset(region->procs[slot].used, 0, sizeof(device_memory_t) * CUDA_DEVICE_MAX_COUNT);
+                memset(region->procs[slot].device_util, 0, sizeof(device_util_t) * CUDA_DEVICE_MAX_COUNT);
                 region->proc_num--;
                 region->procs[slot] = region->procs[region->proc_num];
                 break;
@@ -635,11 +667,13 @@ void exit_handler() {
             slot++;
         }
         __sync_synchronize();
-        region->owner_pid = 0;
+        atomic_store_explicit(&region->owner_pid, 0, memory_order_release);
         sem_post(&region->sem);
     } else {
-        LOG_WARN("Failed to take lock on exit: errno=%d", errno);
+        LOG_WARN("Failed to take lock on exit: errno=%d (process slot may remain)", errno);
     }
+
+    LOG_DEBUG("Exit cleanup complete for PID %d", my_pid);
 }
 
 
@@ -664,36 +698,18 @@ void lock_shrreg() {
             break;
         } else if (errno == ETIMEDOUT) {
             trials++;
-            LOG_WARN("Lock shrreg timeout (trial %d/%d), try fix (%d:%ld)",
-                     trials, SEM_WAIT_RETRY_TIMES, region_info.pid, region->owner_pid);
-            int32_t current_owner = region->owner_pid;
-
-            // Check if owner is dead or if this is our own PID (deadlock)
-            if (current_owner != 0 && (current_owner == region_info.pid ||
-                    proc_alive(current_owner) == PROC_STATE_NONALIVE)) {
-                LOG_WARN("Owner proc dead or self-deadlock (%d), attempting recovery", current_owner);
-
-                // Try atomic CAS to reset owner_pid (only one process succeeds)
-                size_t expected_owner = current_owner;
-                if (atomic_compare_exchange_strong_explicit(&region->owner_pid, &expected_owner, 0,
-                                                           memory_order_release, memory_order_acquire)) {
-                    LOG_WARN("Won CAS race to reset owner_pid, posting semaphore");
-                    sem_post(&region->sem);  // Unlock the semaphore (only this process does it)
-                    continue;  // Try to acquire again
-                } else {
-                    LOG_DEBUG("Another process is handling recovery, retrying");
-                    // Another process won the CAS and will post the semaphore
-                    usleep(100000);  // Wait 100ms for recovery to complete
-                    continue;
-                }
+            if (trials <= 3 || trials % 5 == 0) {  // Log first 3, then every 5th
+                LOG_WARN("Lock shrreg timeout (trial %d/%d), owner=%ld",
+                         trials, SEM_WAIT_RETRY_TIMES, atomic_load(&region->owner_pid));
             }
 
             // If too many retries, give up gracefully
             if (trials > SEM_WAIT_RETRY_TIMES) {
-                LOG_ERROR("Exceeded retry limit (%d sec), giving up on lock",
+                LOG_ERROR("Exceeded retry limit (%d sec), cannot acquire lock",
                          SEM_WAIT_RETRY_TIMES * SEM_WAIT_TIME);
-                LOG_ERROR("This is a fatal error - cannot register process slot");
-                exit(-1);  // Fatal: can't continue without process slot
+                LOG_ERROR("This likely means another process crashed holding the lock.");
+                LOG_ERROR("Exiting - cleanup handlers from all processes should resolve this.");
+                exit(-1);  // Exit cleanly, triggering our cleanup handler
             }
             continue;  // Retry with backoff
         } else {
@@ -897,6 +913,14 @@ void try_create_shrreg() {
         if (0 != atexit(exit_handler)) {
             LOG_ERROR("Register exit handler failed: %d", errno);
         }
+
+        // Register signal handlers for cleanup on crashes
+        signal(SIGTERM, signal_cleanup_handler);
+        signal(SIGINT, signal_cleanup_handler);
+        signal(SIGHUP, signal_cleanup_handler);
+        signal(SIGABRT, signal_cleanup_handler);
+        // Note: SIGKILL and SIGSTOP cannot be caught
+        LOG_DEBUG("Registered cleanup handlers for signals");
     }
 
     enable_active_oom_killer = set_active_oom_killer();
@@ -951,22 +975,6 @@ void try_create_shrreg() {
     if (init_flag == INIT_STATE_COMPLETE) {
         // Already initialized by another process! Skip to validation
         LOG_DEBUG("Shared region already initialized, skipping init (fast path)");
-
-        // CRITICAL: Clean up stale lock state from previous crashed runs
-        // If owner_pid is set but process is dead, reset to 0 using atomic CAS
-        size_t current_owner = atomic_load_explicit(&region->owner_pid, memory_order_acquire);
-        if (current_owner != 0 && proc_alive(current_owner) == PROC_STATE_NONALIVE) {
-            LOG_WARN("Detected dead owner PID %ld from previous run, resetting", current_owner);
-            // Use CAS so only one process resets it
-            size_t expected_owner = current_owner;
-            if (atomic_compare_exchange_strong_explicit(&region->owner_pid, &expected_owner, 0,
-                                                       memory_order_release, memory_order_acquire)) {
-                LOG_WARN("Successfully reset owner_pid to 0");
-                // Also reset the semaphore to ensure it's in unlocked state
-                sem_post(&region->sem);  // Safe: brings value from 0 to 1 (unlocked)
-            }
-        }
-
         goto validate_limits;
     }
 
