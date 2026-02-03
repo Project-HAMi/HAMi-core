@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <signal.h>
+#include <stdatomic.h>
 
 #include <assert.h>
 #include <cuda.h>
@@ -871,39 +872,98 @@ void try_create_shrreg() {
         LOG_ERROR("Fail to reseek shrreg %s: errno=%d", shr_reg_file, errno);
     }
     region_info.shared_region = (shared_region_t*) mmap(
-        NULL, SHARED_REGION_SIZE_MAGIC, 
+        NULL, SHARED_REGION_SIZE_MAGIC,
         PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0);
     shared_region_t* region = region_info.shared_region;
     if (region == NULL) {
         LOG_ERROR("Fail to map shrreg %s: errno=%d", shr_reg_file, errno);
     }
-    if (lockf(fd, F_LOCK, SHARED_REGION_SIZE_MAGIC) != 0) {
-        LOG_ERROR("Fail to lock shrreg %s: errno=%d", shr_reg_file, errno);
-    }
-    //put_device_info();
+
+    // ============================================================================
+    // OPTION C: Atomic Double-Checked Locking (Eliminates File Lock!)
+    // ============================================================================
+    // Fast path: Check if already initialized (no lock needed)
     int32_t init_flag = atomic_load_explicit(&region->initialized_flag, memory_order_acquire);
-    if (init_flag != MULTIPROCESS_SHARED_REGION_MAGIC_FLAG) {
-        region->major_version = MAJOR_VERSION;
-        region->minor_version = MINOR_VERSION;
-        do_init_device_memory_limits(
-            region->limit, CUDA_DEVICE_MAX_COUNT);
-        do_init_device_sm_limits(
-            region->sm_limit,CUDA_DEVICE_MAX_COUNT);
+    if (init_flag == INIT_STATE_COMPLETE) {
+        // Already initialized by another process! Skip to validation
+        LOG_DEBUG("Shared region already initialized, skipping init (fast path)");
+        goto validate_limits;
+    }
+
+    // Slow path: Try to become the initializer using atomic CAS
+    int32_t expected = INIT_STATE_UNINIT;
+    if (atomic_compare_exchange_strong_explicit(
+            &region->initialized_flag,
+            &expected,
+            INIT_STATE_IN_PROGRESS,
+            memory_order_acquire,
+            memory_order_acquire)) {
+
+        // ========================================================================
+        // WE WON THE RACE! This process is the designated initializer
+        // ========================================================================
+        LOG_INFO("Process %d won initializer race, performing initialization", getpid());
+
+        // Initialize semaphore FIRST (needed for process slot management)
         if (sem_init(&region->sem, 1, 1) != 0) {
             LOG_ERROR("Fail to init sem %s: errno=%d", shr_reg_file, errno);
         }
+
+        // Initialize version and limits for ALL 8 GPUs
+        region->major_version = MAJOR_VERSION;
+        region->minor_version = MINOR_VERSION;
+        do_init_device_memory_limits(region->limit, CUDA_DEVICE_MAX_COUNT);
+        do_init_device_sm_limits(region->sm_limit, CUDA_DEVICE_MAX_COUNT);
+
+        // Initialize atomic fields
         atomic_store_explicit(&region->sm_init_flag, 0, memory_order_relaxed);
         atomic_store_explicit(&region->utilization_switch, 1, memory_order_relaxed);
         atomic_store_explicit(&region->recent_kernel, 2, memory_order_relaxed);
         atomic_store_explicit(&region->proc_num, 0, memory_order_relaxed);
+
         region->priority = 1;
-        if (getenv(CUDA_TASK_PRIORITY_ENV)!=NULL)
+        if (getenv(CUDA_TASK_PRIORITY_ENV) != NULL)
             region->priority = atoi(getenv(CUDA_TASK_PRIORITY_ENV));
 
-        // Release barrier ensures all initialization is visible before flag is set
+        // Release barrier: ensure all writes are visible before marking complete
         atomic_thread_fence(memory_order_release);
-        atomic_store_explicit(&region->initialized_flag, MULTIPROCESS_SHARED_REGION_MAGIC_FLAG, memory_order_release);
+
+        // Mark initialization complete (releases waiting processes)
+        atomic_store_explicit(&region->initialized_flag, INIT_STATE_COMPLETE, memory_order_release);
+
+        LOG_INFO("Initialization complete by process %d", getpid());
     } else {
+        // ========================================================================
+        // Another process is initializing or already initialized
+        // ========================================================================
+        LOG_DEBUG("Process %d waiting for initialization by another process...", getpid());
+
+        // Spin-wait for initialization to complete (should be fast, ~2 seconds max)
+        int spin_count = 0;
+        while (1) {
+            init_flag = atomic_load_explicit(&region->initialized_flag, memory_order_acquire);
+            if (init_flag == INIT_STATE_COMPLETE) {
+                LOG_DEBUG("Process %d detected initialization complete after %d spins",
+                         getpid(), spin_count);
+                break;
+            }
+
+            // Avoid busy-waiting: small sleep reduces CPU usage
+            usleep(1000);  // 1ms
+            spin_count++;
+
+            if (spin_count > 10000) {  // 10 seconds timeout
+                LOG_ERROR("Timeout waiting for initialization (current state: %d)", init_flag);
+                break;
+            }
+        }
+    }
+
+validate_limits:
+    // ============================================================================
+    // Validation: All processes check their environment matches shared state
+    // ============================================================================
+    if (region->initialized_flag == INIT_STATE_COMPLETE) {
         if (region->major_version != MAJOR_VERSION || 
                 region->minor_version != MINOR_VERSION) {
             LOG_ERROR("The current version number %d.%d"
@@ -932,9 +992,8 @@ void try_create_shrreg() {
         }
     }
     region->last_kernel_time = region_info.last_kernel_time;
-    if (lockf(fd, F_ULOCK, SHARED_REGION_SIZE_MAGIC) != 0) {
-        LOG_ERROR("Fail to unlock shrreg %s: errno=%d", shr_reg_file, errno);
-    }
+
+    // No lockf unlock needed - we used atomic CAS instead of file lock!
     LOG_DEBUG("shrreg created");
 }
 
