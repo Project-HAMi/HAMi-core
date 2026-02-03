@@ -850,9 +850,12 @@ void preInit(){
 void postInit(){
     allocator_init();
     map_cuda_visible_devices();
-    try_lock_unified_lock();
+
+    // Use shared memory semaphore instead of file lock for reliable serialization
+    lock_postinit();
     nvmlReturn_t res = set_task_pid();
-    try_unlock_unified_lock();
+    unlock_postinit();
+
     LOG_MSG("Initialized");
     if (res!=NVML_SUCCESS){
         LOG_WARN("SET_TASK_PID FAILED.");

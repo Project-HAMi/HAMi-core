@@ -693,6 +693,39 @@ void unlock_shrreg() {
     SEQ_POINT_MARK(SEQ_RELEASE_SEMLOCK_OK);
 }
 
+void lock_postinit() {
+    struct timespec sem_ts;
+    get_timespec(SEM_WAIT_TIME, &sem_ts);
+    shared_region_t* region = region_info.shared_region;
+    int trials = 0;
+    while (1) {
+        int status = sem_timedwait(&region->sem_postinit, &sem_ts);
+        if (status == 0) {
+            // Lock acquired successfully
+            trials = 0;
+            break;
+        } else if (errno == ETIMEDOUT) {
+            trials++;
+            if (trials > SEM_WAIT_RETRY_TIMES) {
+                LOG_WARN("Fail to lock postinit semaphore in %d seconds, forcing lock",
+                    SEM_WAIT_RETRY_TIMES * SEM_WAIT_TIME);
+                // Force acquire by posting (increment) then waiting
+                sem_post(&region->sem_postinit);
+                continue;
+            }
+            LOG_MSG("Waiting for postinit lock (trial %d/%d)", trials, SEM_WAIT_RETRY_TIMES);
+            continue;
+        } else {
+            LOG_ERROR("Failed to lock postinit semaphore: %d", errno);
+        }
+    }
+}
+
+void unlock_postinit() {
+    shared_region_t* region = region_info.shared_region;
+    sem_post(&region->sem_postinit);
+}
+
 
 int clear_proc_slot_nolock(int do_clear) {
     int slot = 0;
@@ -904,9 +937,12 @@ void try_create_shrreg() {
         // ========================================================================
         LOG_INFO("Process %d won initializer race, performing initialization", getpid());
 
-        // Initialize semaphore FIRST (needed for process slot management)
+        // Initialize semaphores FIRST (needed for process slot and postInit serialization)
         if (sem_init(&region->sem, 1, 1) != 0) {
             LOG_ERROR("Fail to init sem %s: errno=%d", shr_reg_file, errno);
+        }
+        if (sem_init(&region->sem_postinit, 1, 1) != 0) {
+            LOG_ERROR("Fail to init sem_postinit %s: errno=%d", shr_reg_file, errno);
         }
 
         // Initialize version and limits for ALL 8 GPUs
