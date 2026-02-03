@@ -671,31 +671,29 @@ void lock_shrreg() {
             // Check if owner is dead or if this is our own PID (deadlock)
             if (current_owner != 0 && (current_owner == region_info.pid ||
                     proc_alive(current_owner) == PROC_STATE_NONALIVE)) {
-                LOG_WARN("Owner proc dead or self-deadlock (%d), forcing recovery", current_owner);
-                if (0 == fix_lock_shrreg()) {
-                    break;  // Successfully recovered
+                LOG_WARN("Owner proc dead or self-deadlock (%d), attempting recovery", current_owner);
+
+                // Try atomic CAS to reset owner_pid (only one process succeeds)
+                size_t expected_owner = current_owner;
+                if (atomic_compare_exchange_strong_explicit(&region->owner_pid, &expected_owner, 0,
+                                                           memory_order_release, memory_order_acquire)) {
+                    LOG_WARN("Won CAS race to reset owner_pid, posting semaphore");
+                    sem_post(&region->sem);  // Unlock the semaphore (only this process does it)
+                    continue;  // Try to acquire again
+                } else {
+                    LOG_DEBUG("Another process is handling recovery, retrying");
+                    // Another process won the CAS and will post the semaphore
+                    usleep(100000);  // Wait 100ms for recovery to complete
+                    continue;
                 }
-                // If fix failed, force-post the semaphore to unlock it
-                LOG_WARN("fix_lock_shrreg failed, force-posting semaphore");
-                sem_post(&region->sem);
-                continue;
             }
 
-            // If too many retries, force recovery even if owner seems alive
+            // If too many retries, give up gracefully
             if (trials > SEM_WAIT_RETRY_TIMES) {
-                LOG_WARN("Exceeded retry limit (%d sec), forcing recovery",
+                LOG_ERROR("Exceeded retry limit (%d sec), giving up on lock",
                          SEM_WAIT_RETRY_TIMES * SEM_WAIT_TIME);
-                if (current_owner == 0) {
-                    LOG_WARN("Owner is 0, setting to %d", region_info.pid);
-                    region->owner_pid = region_info.pid;
-                }
-                if (0 == fix_lock_shrreg()) {
-                    break;
-                }
-                // Last resort: force-post semaphore
-                LOG_WARN("All recovery attempts failed, force-posting semaphore");
-                sem_post(&region->sem);
-                continue;
+                LOG_ERROR("This is a fatal error - cannot register process slot");
+                exit(-1);  // Fatal: can't continue without process slot
             }
             continue;  // Retry with backoff
         } else {
@@ -953,6 +951,22 @@ void try_create_shrreg() {
     if (init_flag == INIT_STATE_COMPLETE) {
         // Already initialized by another process! Skip to validation
         LOG_DEBUG("Shared region already initialized, skipping init (fast path)");
+
+        // CRITICAL: Clean up stale lock state from previous crashed runs
+        // If owner_pid is set but process is dead, reset to 0 using atomic CAS
+        size_t current_owner = atomic_load_explicit(&region->owner_pid, memory_order_acquire);
+        if (current_owner != 0 && proc_alive(current_owner) == PROC_STATE_NONALIVE) {
+            LOG_WARN("Detected dead owner PID %ld from previous run, resetting", current_owner);
+            // Use CAS so only one process resets it
+            size_t expected_owner = current_owner;
+            if (atomic_compare_exchange_strong_explicit(&region->owner_pid, &expected_owner, 0,
+                                                       memory_order_release, memory_order_acquire)) {
+                LOG_WARN("Successfully reset owner_pid to 0");
+                // Also reset the semaphore to ensure it's in unlocked state
+                sem_post(&region->sem);  // Safe: brings value from 0 to 1 (unlocked)
+            }
+        }
+
         goto validate_limits;
     }
 
