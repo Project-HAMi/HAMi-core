@@ -12,7 +12,7 @@
 #include "multiprocess/multiprocess_memory_limit.h"
 
 const char* unified_lock="/tmp/vgpulock/lock";
-const int retry_count=20;
+const int retry_count=10;  // Reduced from 20 for faster initialization
 extern size_t context_size;
 extern int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 
@@ -29,8 +29,9 @@ int try_lock_unified_lock() {
             int res = remove(unified_lock);
             LOG_MSG("remove unified_lock:%d",res);
         }else{
-            LOG_MSG("unified_lock locked, waiting 1 second...");
-            sleep(rand()%5 + 1);
+            // Reduced from 1-5s to 0.1-0.5s for faster initialization
+            LOG_MSG("unified_lock locked, waiting 0.1-0.5 seconds...");
+            usleep((rand()%400 + 100) * 1000);  // 100-500ms in microseconds
         }
         cnt++;
         fd = open(unified_lock,O_CREAT | O_EXCL,S_IRWXU); 
