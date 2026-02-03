@@ -183,19 +183,44 @@ cuInit() → postInit() → ensure_initialized() → initialized() →
 
 ### Same Fix Applied to `lock_postinit()`
 
-Also improved deadlock recovery for the new `sem_postinit` semaphore:
+Also improved timeout handling for the new `sem_postinit` semaphore:
+
+**Changes**:
+1. **Fresh timeout per iteration** - Moved `get_timespec()` inside loop
+2. **Longer timeout** - 30 seconds per wait (vs 10s) since `set_task_pid()` can take longer
+3. **Graceful timeout** - Returns 0 instead of force-posting (prevents semaphore corruption)
 
 ```c
-// In lock_postinit() at multiprocess_memory_limit.c:697-733
-if (trials > SEM_WAIT_RETRY_TIMES) {
-    LOG_WARN("Postinit lock deadlock detected after %d seconds, forcing recovery",
-             SEM_WAIT_RETRY_TIMES * SEM_WAIT_TIME);
-    // Force-post the semaphore to increment it (unlock)
-    sem_post(&region->sem_postinit);  // ← NEW: Force unlock!
-    // Try to acquire again immediately
-    continue;
+// In lock_postinit() at multiprocess_memory_limit.c:714-750
+int lock_postinit() {
+    while (1) {
+        // Fresh timeout for each iteration
+        struct timespec sem_ts;
+        get_timespec(SEM_WAIT_TIME_POSTINIT, &sem_ts);  // 30 seconds
+
+        if (sem_timedwait(...) == 0) {
+            return 1;  // Success
+        }
+
+        if (trials > SEM_WAIT_RETRY_TIMES_POSTINIT) {  // 10 retries
+            LOG_ERROR("Postinit lock timeout after %d seconds", 300);
+            return 0;  // Timeout - caller skips host PID detection
+        }
+    }
+}
+
+// In libvgpu.c postInit()
+int lock_acquired = lock_postinit();
+if (lock_acquired) {
+    res = set_task_pid();
+    unlock_postinit();
+} else {
+    // Skip host PID detection on timeout
+    res = NVML_ERROR_TIMEOUT;
 }
 ```
+
+**Why not force-post?**: Force-posting `sem_post()` corrupts the semaphore by incrementing it above 1, allowing multiple processes to enter simultaneously, which breaks host PID detection.
 
 ---
 
