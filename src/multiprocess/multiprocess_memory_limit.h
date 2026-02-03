@@ -166,6 +166,9 @@ int init_device_info();
 void lock_shrreg();
 void unlock_shrreg();
 
+int lock_postinit();  // Returns 1 on success, 0 on timeout
+void unlock_postinit();
+
 //Setspec of the corresponding device
 int setspec();
 //Remove quit process

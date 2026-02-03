@@ -872,9 +872,26 @@ void preInit(){
 void postInit(){
     allocator_init();
     map_cuda_visible_devices();
-    int lock_ret = try_lock_unified_lock();
-    if (lock_ret != 0) {
-        LOG_WARN("try_lock_unified_lock failed, skipping set_task_pid");
+
+    // Use shared memory semaphore to serialize host PID detection
+    // Returns 1 if lock acquired, 0 if timeout (skip detection)
+    int lock_acquired = lock_postinit();
+    nvmlReturn_t res = NVML_SUCCESS;
+
+    if (lock_acquired) {
+        // Lock acquired - safe to call set_task_pid()
+        res = set_task_pid();
+        unlock_postinit();
+    } else {
+        // Timeout - another process likely crashed holding the lock
+        // Skip host PID detection for this process
+        LOG_WARN("Skipped host PID detection due to lock timeout");
+        res = NVML_ERROR_TIMEOUT;
+    }
+
+    LOG_MSG("Initialized");
+    if (res!=NVML_SUCCESS){
+        LOG_WARN("SET_TASK_PID FAILED - using container PID for accounting");
         pidfound=0;
     } else {
         nvmlReturn_t res = set_task_pid();

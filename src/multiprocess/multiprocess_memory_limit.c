@@ -34,6 +34,15 @@
 #define SEM_WAIT_RETRY_TIMES 30
 #endif
 
+// Longer timeout for postinit since set_task_pid() with adaptive polling can take several seconds
+#ifndef SEM_WAIT_TIME_POSTINIT
+#define SEM_WAIT_TIME_POSTINIT 30
+#endif
+
+#ifndef SEM_WAIT_RETRY_TIMES_POSTINIT
+#define SEM_WAIT_RETRY_TIMES_POSTINIT 10
+#endif
+
 int pidfound;
 
 int ctx_activate[32];
@@ -660,11 +669,14 @@ void exit_handler() {
 
 
 void lock_shrreg() {
-    struct timespec sem_ts;
-    get_timespec(SEM_WAIT_TIME, &sem_ts);
     shared_region_t* region = region_info.shared_region;
     int trials = 0;
     while (1) {
+        // CRITICAL: Create fresh timeout for each iteration!
+        // If created outside loop, timestamp becomes stale after first timeout
+        struct timespec sem_ts;
+        get_timespec(SEM_WAIT_TIME, &sem_ts);
+
         int status = sem_timedwait(&region->sem, &sem_ts);
         SEQ_POINT_MARK(SEQ_ACQUIRE_SEMLOCK_OK);
 
@@ -716,6 +728,48 @@ void unlock_shrreg() {
 
     sem_post(&region->sem);
     SEQ_POINT_MARK(SEQ_RELEASE_SEMLOCK_OK);
+}
+
+int lock_postinit() {
+    shared_region_t* region = region_info.shared_region;
+    int trials = 0;
+    while (1) {
+        // CRITICAL: Create fresh timeout for each iteration!
+        // If created outside loop, timestamp becomes stale after first timeout
+        // Use longer timeout for postinit since set_task_pid() can take several seconds
+        struct timespec sem_ts;
+        get_timespec(SEM_WAIT_TIME_POSTINIT, &sem_ts);
+
+        int status = sem_timedwait(&region->sem_postinit, &sem_ts);
+        if (status == 0) {
+            // Lock acquired successfully
+            LOG_DEBUG("Acquired postinit lock after %d waits (PID %d)", trials, getpid());
+            return 1;  // Success
+        } else if (errno == ETIMEDOUT) {
+            trials++;
+            LOG_MSG("Waiting for postinit lock (trial %d/%d, waited %ds, PID %d)",
+                    trials, SEM_WAIT_RETRY_TIMES_POSTINIT, trials * SEM_WAIT_TIME_POSTINIT, getpid());
+
+            // After many retries, give up
+            if (trials > SEM_WAIT_RETRY_TIMES_POSTINIT) {
+                LOG_ERROR("Postinit lock timeout after %d seconds - another process may have crashed",
+                          SEM_WAIT_RETRY_TIMES_POSTINIT * SEM_WAIT_TIME_POSTINIT);
+                LOG_ERROR("Skipping host PID detection for this process (will use container PID)");
+                return 0;  // Timeout - didn't acquire lock
+            }
+            continue;
+        } else {
+            LOG_ERROR("Failed to lock postinit semaphore: errno=%d", errno);
+            // Don't give up - keep retrying
+            trials++;
+            continue;
+        }
+    }
+}
+
+void unlock_postinit() {
+    shared_region_t* region = region_info.shared_region;
+    sem_post(&region->sem_postinit);
 }
 
 
