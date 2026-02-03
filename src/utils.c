@@ -135,36 +135,57 @@ nvmlReturn_t set_task_pid() {
     memset(tmp_pids_on_device,0,sizeof(nvmlProcessInfo_v1_t)*SHARED_REGION_MAX_PROCESS_NUM);
     CHECK_CU_RESULT(cuDevicePrimaryCtxRetain(&pctx,0));
 
-    // CRITICAL: Give NVML time to detect the newly created CUDA context
-    // Without this delay, NVML may not have updated its process list yet,
-    // causing getextrapid() to return 0 (no new process found)
-    usleep(200000);  // 200ms delay to ensure NVML sees the new process
+    // ADAPTIVE POLLING: Poll NVML until we see the new process appear
+    // This is faster than fixed sleep - only waits as long as needed
+    // Typical: 50-100ms, Max: 200ms (10 retries × 20ms)
+    unsigned int hostpid = 0;
+    int retry;
+    for (retry = 0; retry < 10; retry++) {
+        merged_num = 0;
+        memset(tmp_pids_on_device, 0, sizeof(nvmlProcessInfo_v1_t) * SHARED_REGION_MAX_PROCESS_NUM);
 
-    for (i=0;i<nvmlCounts;i++) {
-        cudaDev=nvml_to_cuda_map(i);
-        if (cudaDev<0) {
-            continue;
-        }
-        CHECK_NVML_API(nvmlDeviceGetHandleByIndex (i, &device)); 
-        do{
-            res = nvmlDeviceGetComputeRunningProcesses(device, &running_processes, tmp_pids_on_device);
-            if ((res != NVML_SUCCESS) && (res != NVML_ERROR_INSUFFICIENT_SIZE)) {
-                LOG_ERROR("Device2GetComputeRunningProcesses failed %d\n",res);
-                return res;
+        // Query NVML for current running processes
+        for (i=0; i<nvmlCounts; i++) {
+            cudaDev = nvml_to_cuda_map(i);
+            if (cudaDev < 0) {
+                continue;
             }
-        }while(res == NVML_ERROR_INSUFFICIENT_SIZE);
-        mergepid(&running_processes,&merged_num,(nvmlProcessInfo_t1 *)tmp_pids_on_device,pids_on_device);
-        break;
+            CHECK_NVML_API(nvmlDeviceGetHandleByIndex(i, &device));
+            do {
+                res = nvmlDeviceGetComputeRunningProcesses(device, &running_processes, tmp_pids_on_device);
+                if ((res != NVML_SUCCESS) && (res != NVML_ERROR_INSUFFICIENT_SIZE)) {
+                    LOG_ERROR("Device2GetComputeRunningProcesses failed %d\n", res);
+                    return res;
+                }
+            } while(res == NVML_ERROR_INSUFFICIENT_SIZE);
+            mergepid(&running_processes, &merged_num, (nvmlProcessInfo_t1 *)tmp_pids_on_device, pids_on_device);
+            break;
+        }
+        running_processes = merged_num;
+
+        // Try to find the new PID
+        hostpid = getextrapid(previous, running_processes, pre_pids_on_device, pids_on_device);
+
+        if (hostpid != 0) {
+            // Success! Found the new process
+            LOG_INFO("Host PID detected after %d retries (%d ms)", retry, retry * 20);
+            break;
+        }
+
+        // Not found yet, wait a bit for NVML to update
+        if (retry < 9) {  // Don't sleep on last iteration
+            usleep(20000);  // 20ms adaptive delay
+        }
     }
-    running_processes = merged_num;
-    LOG_INFO("current processes num = %u %u",previous,running_processes);
-    for (i=0;i<merged_num;i++){
-        LOG_INFO("current pid in use is %d %d",i,pids_on_device[i].pid);
-        //tmp_pids_on_device[i].pid=0;
+
+    // Log final state for debugging
+    LOG_INFO("current processes num = %u %u", previous, running_processes);
+    for (i=0; i<merged_num; i++){
+        LOG_INFO("current pid in use is %d %d", i, pids_on_device[i].pid);
     }
-    unsigned int hostpid = getextrapid(previous,running_processes,pre_pids_on_device,pids_on_device); 
-    if (hostpid==0) {
-        LOG_ERROR("host pid is error!");
+
+    if (hostpid == 0) {
+        LOG_ERROR("host pid is error! Failed to detect after %d retries (200ms)", retry);
         return NVML_ERROR_DRIVER_NOT_LOADED;
     }
     LOG_INFO("hostPid=%d",hostpid);
