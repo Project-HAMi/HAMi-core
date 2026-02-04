@@ -276,27 +276,40 @@ size_t get_gpu_memory_usage(const int dev) {
         uint64_t proc_usage;
         uint64_t seq1, seq2;
         int retry_count = 0;
-        const int MAX_RETRIES = 100;
 
         // Seqlock read protocol: retry until we get a consistent snapshot
+        // CRITICAL: Memory checks require accurate data, cannot use stale reads
         do {
             // Read sequence number (must be even = no write in progress)
             seq1 = atomic_load_explicit(&slot->seqlock, memory_order_acquire);
 
-            // If odd, writer is in progress, spin briefly
+            // If odd, writer is in progress, back off with exponential delay
             while (seq1 & 1) {
-                // CPU pause instruction to avoid hammering cache
-                #if defined(__x86_64__) || defined(__i386__)
-                __asm__ __volatile__("pause" ::: "memory");
-                #elif defined(__aarch64__)
-                __asm__ __volatile__("yield" ::: "memory");
-                #endif
-                seq1 = atomic_load_explicit(&slot->seqlock, memory_order_acquire);
-
-                if (++retry_count > MAX_RETRIES) {
-                    LOG_WARN("Seqlock retry limit exceeded for slot %d, using best-effort read", i);
-                    goto best_effort_read;
+                // Exponential backoff to reduce contention
+                if (retry_count < 5) {
+                    // First 5 retries: just CPU pause (fast path)
+                    #if defined(__x86_64__) || defined(__i386__)
+                    __asm__ __volatile__("pause" ::: "memory");
+                    #elif defined(__aarch64__)
+                    __asm__ __volatile__("yield" ::: "memory");
+                    #endif
+                } else if (retry_count < 20) {
+                    // Next 15 retries: 1μs delay
+                    usleep(1);
+                } else if (retry_count < 100) {
+                    // Next 80 retries: 10μs delay
+                    usleep(10);
+                } else {
+                    // After 100 retries: 100μs delay
+                    usleep(100);
+                    // Log if we're spinning for a very long time
+                    if (retry_count % 100 == 0) {
+                        LOG_DEBUG("Seqlock spinning for slot %d, retry %d (writer active)", i, retry_count);
+                    }
                 }
+
+                retry_count++;
+                seq1 = atomic_load_explicit(&slot->seqlock, memory_order_acquire);
             }
 
             // Read the data with acquire semantics
@@ -316,15 +329,6 @@ size_t get_gpu_memory_usage(const int dev) {
         int32_t hostpid = atomic_load_explicit(&slot->hostpid, memory_order_relaxed);
 
         LOG_INFO("dev=%d pid=%d host pid=%d i=%lu",dev,pid,hostpid,proc_usage);
-        total+=proc_usage;
-        continue;
-
-best_effort_read:
-        // Fallback: best-effort read if spinning too long
-        proc_usage = atomic_load_explicit(&slot->used[dev].total, memory_order_acquire);
-        pid = atomic_load_explicit(&slot->pid, memory_order_relaxed);
-        hostpid = atomic_load_explicit(&slot->hostpid, memory_order_relaxed);
-        LOG_WARN("dev=%d pid=%d host pid=%d i=%lu (best-effort)",dev,pid,hostpid,proc_usage);
         total+=proc_usage;
     }
 
