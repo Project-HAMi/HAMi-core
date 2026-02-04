@@ -802,22 +802,47 @@ void unlock_postinit() {
 int clear_proc_slot_nolock(int do_clear) {
     int slot = 0;
     int res=0;
+    int cleaned_pid_zero = 0;
+    int cleaned_dead = 0;
     shared_region_t* region = region_info.shared_region;
+
     while (slot < region->proc_num) {
-        int32_t pid = region->procs[slot].pid;
-        if (pid != 0) {
-            if (do_clear > 0 && proc_alive(pid) == PROC_STATE_NONALIVE) {
-                LOG_WARN("Kick dead proc %d", pid);
-            } else {
-                slot++;
-                continue;
-            }
+        int32_t pid = atomic_load_explicit(&region->procs[slot].pid, memory_order_acquire);
+
+        // Skip slots that are already marked as dead (PID=0) by exit cleanup
+        if (pid == 0) {
+            LOG_DEBUG("Removing slot %d with PID=0 (marked dead by exit cleanup)", slot);
+            cleaned_pid_zero++;
             res=1;
             region->proc_num--;
             region->procs[slot] = region->procs[region->proc_num];
             __sync_synchronize();
+            // Don't increment slot - check the moved element
+            continue;
         }
+
+        // Only check proc_alive() if do_clear is enabled and PID is non-zero
+        // Limit to 10 checks per call to avoid holding lock too long
+        if (do_clear > 0 && cleaned_dead < 10 && proc_alive(pid) == PROC_STATE_NONALIVE) {
+            LOG_WARN("Kick dead proc %d (proc_alive check)", pid);
+            cleaned_dead++;
+            res=1;
+            region->proc_num--;
+            region->procs[slot] = region->procs[region->proc_num];
+            __sync_synchronize();
+            // Don't increment slot - check the moved element
+            continue;
+        }
+
+        // Slot is valid, move to next
+        slot++;
     }
+
+    if (cleaned_pid_zero > 0 || cleaned_dead > 0) {
+        LOG_INFO("Cleaned %d PID=0 slots, %d dead proc slots (proc_num now %d)",
+                 cleaned_pid_zero, cleaned_dead, region->proc_num);
+    }
+
     return res;
 }
 
