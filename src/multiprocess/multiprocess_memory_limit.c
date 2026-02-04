@@ -639,46 +639,41 @@ void exit_handler() {
     int32_t my_pid = region_info.pid;
     LOG_MSG("Cleanup on exit for PID %d", my_pid);
 
-    // Check if we're currently holding the lock
-    size_t current_owner = atomic_load_explicit(&region->owner_pid, memory_order_acquire);
-    int already_holding_lock = (current_owner == (size_t)my_pid);
+    // ========================================================================
+    // CRITICAL CLEANUP (Must succeed, no lock needed)
+    // ========================================================================
 
-    if (already_holding_lock) {
-        LOG_WARN("Exit while holding lock - keeping it for cleanup");
-        // Already have the lock, just do cleanup directly
-    } else {
-        // Not holding lock, need to acquire it
-        struct timespec sem_ts;
-        get_timespec(SEM_WAIT_TIME_ON_EXIT, &sem_ts);
-        int status = sem_timedwait(&region->sem, &sem_ts);
-        if (status != 0) {
-            LOG_WARN("Failed to acquire lock on exit: errno=%d (giving up)", errno);
-            return;  // Can't clean up, just exit
+    // 1. If we're holding owner_pid, clear it atomically
+    size_t current_owner = atomic_load_explicit(&region->owner_pid, memory_order_acquire);
+    if (current_owner == (size_t)my_pid) {
+        LOG_WARN("Exit while holding owner_pid, releasing atomically");
+        // Use CAS to ensure we only clear if it's still us
+        size_t expected = (size_t)my_pid;
+        if (atomic_compare_exchange_strong_explicit(&region->owner_pid, &expected, 0,
+                                                    memory_order_release, memory_order_acquire)) {
+            LOG_DEBUG("Released owner_pid and posting semaphore");
+            sem_post(&region->sem);  // Unlock the semaphore
         }
-        atomic_store_explicit(&region->owner_pid, my_pid, memory_order_release);
     }
 
-    // Now we have the lock (either kept it or acquired it)
-    // Remove our process slot
-    int slot = 0;
-    while (slot < region->proc_num) {
-        if (region->procs[slot].pid == my_pid) {
-            LOG_DEBUG("Removing process slot %d", slot);
-            memset(region->procs[slot].used, 0, sizeof(device_memory_t) * CUDA_DEVICE_MAX_COUNT);
-            memset(region->procs[slot].device_util, 0, sizeof(device_util_t) * CUDA_DEVICE_MAX_COUNT);
-            region->proc_num--;
-            region->procs[slot] = region->procs[region->proc_num];
+    // 2. Mark our process slot as exited (atomic, no lock needed)
+    // Set PID to 0 so it's detected as dead by clear_proc_slot_nolock()
+    for (int slot = 0; slot < SHARED_REGION_MAX_PROCESS_NUM; slot++) {
+        int32_t slot_pid = atomic_load_explicit(&region->procs[slot].pid, memory_order_acquire);
+        if (slot_pid == my_pid) {
+            LOG_DEBUG("Marking process slot %d as dead (PID %d)", slot, my_pid);
+            // Atomically set PID to 0 - this marks the slot as available
+            atomic_store_explicit(&region->procs[slot].pid, 0, memory_order_release);
+            // Also set status to 0 (inactive)
+            atomic_store_explicit(&region->procs[slot].status, 0, memory_order_release);
             break;
         }
-        slot++;
     }
 
-    // Release the lock
-    __sync_synchronize();
-    atomic_store_explicit(&region->owner_pid, 0, memory_order_release);
-    sem_post(&region->sem);
+    // That's it! The slot will be physically removed by clear_proc_slot_nolock()
+    // when the next process acquires the lock. This is lazy cleanup.
 
-    LOG_DEBUG("Exit cleanup complete for PID %d", my_pid);
+    LOG_MSG("Exit cleanup complete for PID %d", my_pid);
 }
 
 
@@ -710,38 +705,38 @@ void lock_shrreg() {
                          trials, SEM_WAIT_RETRY_TIMES, current_owner);
             }
 
-            // On first timeout, check if owner is dead (handles SIGKILL case)
-            if (trials == 1 && current_owner != 0) {
-                if (proc_alive((int32_t)current_owner) == PROC_STATE_NONALIVE) {
-                    LOG_WARN("Owner %ld is dead (likely SIGKILL), forcing recovery", current_owner);
+            // SIGKILL RECOVERY: Check if owner is dead (the ONLY case where exit cleanup fails)
+            if (current_owner != 0) {
+                int owner_status = proc_alive((int32_t)current_owner);
+                if (owner_status == PROC_STATE_NONALIVE) {
+                    LOG_WARN("Owner %ld is dead (was SIGKILL'd), cleaning up stale lock", current_owner);
                     // Use CAS so only one process does this
                     size_t expected = current_owner;
                     if (atomic_compare_exchange_strong_explicit(&region->owner_pid, &expected, 0,
                                                                memory_order_release, memory_order_acquire)) {
-                        LOG_WARN("Reset owner_pid, posting semaphore");
-                        sem_post(&region->sem);
+                        LOG_WARN("Cleared dead owner_pid and posting semaphore");
+                        sem_post(&region->sem);  // Unlock
+                        usleep(10000);  // 10ms for semaphore to propagate
                         continue;  // Retry immediately
-                    } else {
-                        LOG_DEBUG("Another process handling recovery");
-                        usleep(100000);  // Wait 100ms for recovery
-                        continue;
                     }
+                    // Another process is handling it, wait a bit
+                    usleep(100000);  // 100ms
+                    continue;
                 }
             }
 
-            // After reasonable retries, give up
-            if (trials > 10) {  // 10 × 10s = 100 seconds
-                LOG_ERROR("Cannot acquire lock after 100 seconds, owner=%ld", current_owner);
+            // If we're still waiting after many tries, something is seriously wrong
+            if (trials > 30) {  // 30 × 10s = 5 minutes
+                LOG_ERROR("Cannot acquire lock after 5 minutes, owner=%ld", current_owner);
                 if (current_owner != 0 && proc_alive((int32_t)current_owner) == PROC_STATE_ALIVE) {
-                    LOG_ERROR("Owner process %ld is still alive - possible deadlock", current_owner);
-                    LOG_ERROR("This suggests a bug in the locking logic");
+                    LOG_ERROR("Owner is still ALIVE - this is a deadlock bug!");
                 } else {
-                    LOG_ERROR("This shouldn't happen - please report this bug");
+                    LOG_ERROR("This should not happen - please report this bug");
                 }
-                LOG_ERROR("Workaround: Delete /tmp/cudevshr.cache and restart");
+                LOG_ERROR("Workaround: Delete /tmp/cudevshr.cache and restart all processes");
                 exit(-1);
             }
-            continue;  // Retry with backoff
+            continue;  // Keep retrying
         } else {
             LOG_ERROR("Failed to lock shrreg: %d", errno);
         }
