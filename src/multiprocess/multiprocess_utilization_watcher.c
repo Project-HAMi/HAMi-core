@@ -128,7 +128,6 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
 
     unsigned int nvmlCounts;
     CHECK_NVML_API(nvmlDeviceGetCount(&nvmlCounts));
-    lock_shrreg();
 
     int devi,cudadev;
     for (devi=0;devi<nvmlCounts;devi++){
@@ -142,8 +141,22 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
       nvmlDevice_t device;
       CHECK_NVML_API(nvmlDeviceGetHandleByIndex(cudadev, &device));
 
+      // OPTIMIZATION: Do slow NVML queries WITHOUT holding lock
+      // This prevents blocking memory allocation operations
+
       //Get Memory for container
       nvmlReturn_t res = nvmlDeviceGetComputeRunningProcesses(device,&infcount,infos);
+
+      // Get SM util for container
+      gettimeofday(&cur,NULL);
+      microsec = (cur.tv_sec - 1) * 1000UL * 1000UL + cur.tv_usec;
+      nvmlProcessUtilizationSample_t processes_sample[SHARED_REGION_MAX_PROCESS_NUM];
+      unsigned int processes_num = SHARED_REGION_MAX_PROCESS_NUM;
+      nvmlReturn_t res2 = nvmlDeviceGetProcessUtilization(device,processes_sample,&processes_num,microsec);
+
+      // Now acquire lock only for the brief period needed to update shared memory
+      lock_shrreg();
+
       if (res == NVML_SUCCESS) {
         for (i=0; i<infcount; i++){
           proc = find_proc_by_hostpid(infos[i].pid);
@@ -152,13 +165,8 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
           }
         }
       }
-      // Get SM util for container
-      gettimeofday(&cur,NULL);
-      microsec = (cur.tv_sec - 1) * 1000UL * 1000UL + cur.tv_usec;
-      nvmlProcessUtilizationSample_t processes_sample[SHARED_REGION_MAX_PROCESS_NUM];
-      unsigned int processes_num = SHARED_REGION_MAX_PROCESS_NUM;
-      res = nvmlDeviceGetProcessUtilization(device,processes_sample,&processes_num,microsec);
-      if (res == NVML_SUCCESS) {
+
+      if (res2 == NVML_SUCCESS) {
         for (i=0; i<processes_num; i++){
           proc = find_proc_by_hostpid(processes_sample[i].pid);
           if (proc != NULL){
@@ -167,11 +175,13 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
           }
         }
       }
+
+      unlock_shrreg();
+
       if (sum < 0)
         sum = 0;
       userutil[cudadev] = sum;
     }
-    unlock_shrreg();
     return 0;
 }
 
