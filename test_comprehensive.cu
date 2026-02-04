@@ -35,6 +35,7 @@
 #include <time.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <pthread.h>
 #include <errno.h>
 #include <atomic>
