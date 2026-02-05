@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <signal.h>
+#include <stdatomic.h>
 
 #include <assert.h>
 #include <cuda.h>
@@ -34,11 +35,20 @@
 #define SEM_WAIT_RETRY_TIMES 30
 #endif
 
+// Longer timeout for postinit since set_task_pid() with adaptive polling can take several seconds
+#ifndef SEM_WAIT_TIME_POSTINIT
+#define SEM_WAIT_TIME_POSTINIT 30
+#endif
+
+#ifndef SEM_WAIT_RETRY_TIMES_POSTINIT
+#define SEM_WAIT_RETRY_TIMES_POSTINIT 10
+#endif
+
 int pidfound;
 
 int ctx_activate[32];
 
-static shared_region_info_t region_info = {0, -1, PTHREAD_ONCE_INIT, NULL, 0};
+static shared_region_info_t region_info = {0, -1, PTHREAD_ONCE_INIT, NULL, 0, NULL};
 //size_t initial_offset=117440512;
 int env_utilization_switch;
 int enable_active_oom_killer;
@@ -54,12 +64,23 @@ void do_init_device_memory_limits(uint64_t*, int);
 void exit_withlock(int exitcode);
 
 void set_current_gpu_status(int status){
+    // Fast path: use cached slot if available
+    if (region_info.my_slot != NULL) {
+        atomic_store_explicit(&region_info.my_slot->status, status, memory_order_release);
+        return;
+    }
+
+    // Slow path: search for our slot
+    int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
     int i;
-    for (i=0;i<region_info.shared_region->proc_num;i++)
-        if (getpid()==region_info.shared_region->procs[i].pid){
-            region_info.shared_region->procs[i].status = status;
+    int32_t my_pid = getpid();
+    for (i=0;i<proc_num;i++) {
+        int32_t slot_pid = atomic_load_explicit(&region_info.shared_region->procs[i].pid, memory_order_acquire);
+        if (my_pid == slot_pid){
+            atomic_store_explicit(&region_info.shared_region->procs[i].status, status, memory_order_release);
             return;
         }
+    }
 }
 
 void sig_restore_stub(int signo){
@@ -240,18 +261,78 @@ size_t get_gpu_memory_monitor(const int dev) {
     return total;
 }
 
+// Lock-free memory usage aggregation with seqlock for consistent snapshots
 size_t get_gpu_memory_usage(const int dev) {
-    LOG_INFO("get_gpu_memory_usage dev=%d",dev);
+    LOG_INFO("get_gpu_memory_usage_lockfree dev=%d",dev);
     ensure_initialized();
     int i=0;
     size_t total=0;
-    lock_shrreg();
-    for (i=0;i<region_info.shared_region->proc_num;i++){
-        LOG_INFO("dev=%d pid=%d host pid=%d i=%lu",dev,region_info.shared_region->procs[i].pid,region_info.shared_region->procs[i].hostpid,region_info.shared_region->procs[i].used[dev].total)
-        total+=region_info.shared_region->procs[i].used[dev].total;
+
+    // Lock-free read with acquire semantics for proc_num
+    int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
+
+    for (i=0;i<proc_num;i++){
+        shrreg_proc_slot_t* slot = &region_info.shared_region->procs[i];
+        uint64_t proc_usage;
+        uint64_t seq1, seq2;
+        int retry_count = 0;
+
+        // Seqlock read protocol: retry until we get a consistent snapshot
+        // CRITICAL: Memory checks require accurate data, cannot use stale reads
+        do {
+            // Read sequence number (must be even = no write in progress)
+            seq1 = atomic_load_explicit(&slot->seqlock, memory_order_acquire);
+
+            // If odd, writer is in progress, back off with exponential delay
+            while (seq1 & 1) {
+                // Exponential backoff to reduce contention
+                if (retry_count < 5) {
+                    // First 5 retries: just CPU pause (fast path)
+                    #if defined(__x86_64__) || defined(__i386__)
+                    __asm__ __volatile__("pause" ::: "memory");
+                    #elif defined(__aarch64__)
+                    __asm__ __volatile__("yield" ::: "memory");
+                    #endif
+                } else if (retry_count < 20) {
+                    // Next 15 retries: 1μs delay
+                    usleep(1);
+                } else if (retry_count < 100) {
+                    // Next 80 retries: 10μs delay
+                    usleep(10);
+                } else {
+                    // After 100 retries: 100μs delay
+                    usleep(100);
+                    // Log if we're spinning for a very long time
+                    if (retry_count % 100 == 0) {
+                        LOG_DEBUG("Seqlock spinning for slot %d, retry %d (writer active)", i, retry_count);
+                    }
+                }
+
+                retry_count++;
+                seq1 = atomic_load_explicit(&slot->seqlock, memory_order_acquire);
+            }
+
+            // Read the data with acquire semantics
+            proc_usage = atomic_load_explicit(&slot->used[dev].total, memory_order_acquire);
+
+            // Memory barrier to prevent reordering
+            atomic_thread_fence(memory_order_acquire);
+
+            // Read sequence number again
+            seq2 = atomic_load_explicit(&slot->seqlock, memory_order_acquire);
+
+            // If sequence numbers match and still even, read was consistent
+        } while (seq1 != seq2);
+
+        // Consistent read obtained
+        int32_t pid = atomic_load_explicit(&slot->pid, memory_order_relaxed);
+        int32_t hostpid = atomic_load_explicit(&slot->hostpid, memory_order_relaxed);
+
+        LOG_INFO("dev=%d pid=%d host pid=%d i=%lu",dev,pid,hostpid,proc_usage);
+        total+=proc_usage;
     }
+
     total+=initial_offset;
-    unlock_shrreg();
     return total;
 }
 
@@ -271,19 +352,22 @@ int set_gpu_device_memory_monitor(int32_t pid,int dev,size_t monitor){
     return 1;
 }
 
-int set_gpu_device_sm_utilization(int32_t pid,int dev, unsigned int smUtil){  // new function
+// Lock-free SM utilization update
+int set_gpu_device_sm_utilization(int32_t pid,int dev, unsigned int smUtil){
     int i;
     ensure_initialized();
-    lock_shrreg();
-    for (i=0;i<region_info.shared_region->proc_num;i++){
-        if (region_info.shared_region->procs[i].hostpid == pid){
-            LOG_INFO("set_gpu_device_sm_utilization:%d %d %lu->%u", pid, dev, region_info.shared_region->procs[i].device_util[dev].sm_util, smUtil);
-            region_info.shared_region->procs[i].device_util[dev].sm_util = smUtil;
-            break;
+
+    int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
+    for (i=0;i<proc_num;i++){
+        int32_t hostpid = atomic_load_explicit(&region_info.shared_region->procs[i].hostpid, memory_order_acquire);
+        if (hostpid == pid){
+            uint64_t old_util = atomic_load_explicit(&region_info.shared_region->procs[i].device_util[dev].sm_util, memory_order_relaxed);
+            LOG_INFO("set_gpu_device_sm_utilization_lockfree:%d %d %lu->%u", pid, dev, old_util, smUtil);
+            atomic_store_explicit(&region_info.shared_region->procs[i].device_util[dev].sm_util, smUtil, memory_order_relaxed);
+            return 1;
         }
     }
-    unlock_shrreg();
-    return 1;
+    return 0;
 }
 
 int init_gpu_device_utilization(){
@@ -333,62 +417,148 @@ uint64_t nvml_get_device_memory_usage(const int dev) {
     return usage;
 }
 
+// Lock-free memory add using atomics with seqlock for consistent reads
 int add_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
-    LOG_INFO("add_gpu_device_memory:%d %d->%d %lu",pid,cudadev,cuda_to_nvml_map(cudadev),usage);
+    LOG_INFO("add_gpu_device_memory_lockfree:%d %d->%d %lu",pid,cudadev,cuda_to_nvml_map(cudadev),usage);
     int dev = cuda_to_nvml_map(cudadev);
     ensure_initialized();
-    lock_shrreg();
+
+    // Fast path: use cached slot pointer for our own process
+    if (pid == getpid() && region_info.my_slot != NULL) {
+        shrreg_proc_slot_t* slot = region_info.my_slot;
+
+        // Seqlock protocol: increment to odd (write in progress)
+        atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
+
+        // Perform updates with release semantics for visibility
+        atomic_fetch_add_explicit(&slot->used[dev].total, usage, memory_order_release);
+        switch (type) {
+            case 0:
+                atomic_fetch_add_explicit(&slot->used[dev].context_size, usage, memory_order_release);
+                break;
+            case 1:
+                atomic_fetch_add_explicit(&slot->used[dev].module_size, usage, memory_order_release);
+                break;
+            case 2:
+                atomic_fetch_add_explicit(&slot->used[dev].data_size, usage, memory_order_release);
+                break;
+        }
+
+        // Seqlock protocol: increment to even (write complete)
+        atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
+
+        LOG_INFO("gpu_device_memory_added_lockfree:%d %d %lu",pid,dev,usage);
+        return 0;
+    }
+
+    // Slow path: find slot for other process (still lock-free)
+    int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
     int i;
-    for (i=0;i<region_info.shared_region->proc_num;i++){
-        if (region_info.shared_region->procs[i].pid == pid){
-            region_info.shared_region->procs[i].used[dev].total+=usage;
+    for (i=0;i<proc_num;i++){
+        int32_t slot_pid = atomic_load_explicit(&region_info.shared_region->procs[i].pid, memory_order_acquire);
+        if (slot_pid == pid){
+            shrreg_proc_slot_t* slot = &region_info.shared_region->procs[i];
+
+            // Seqlock protocol: increment to odd (write in progress)
+            atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
+
+            // Perform updates
+            atomic_fetch_add_explicit(&slot->used[dev].total, usage, memory_order_release);
             switch (type) {
-                case 0:{
-                    region_info.shared_region->procs[i].used[dev].context_size += usage;
+                case 0:
+                    atomic_fetch_add_explicit(&slot->used[dev].context_size, usage, memory_order_release);
                     break;
-                }
-                case 1:{
-                    region_info.shared_region->procs[i].used[dev].module_size += usage;
+                case 1:
+                    atomic_fetch_add_explicit(&slot->used[dev].module_size, usage, memory_order_release);
                     break;
-                }
-                case 2:{
-                    region_info.shared_region->procs[i].used[dev].data_size += usage;
-                }
+                case 2:
+                    atomic_fetch_add_explicit(&slot->used[dev].data_size, usage, memory_order_release);
+                    break;
             }
+
+            // Seqlock protocol: increment to even (write complete)
+            atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
+
+            LOG_INFO("gpu_device_memory_added_lockfree:%d %d %lu",pid,dev,usage);
+            return 0;
         }
     }
-    unlock_shrreg();
-    LOG_INFO("gpu_device_memory_added:%d %d %lu -> %lu",pid,dev,usage,get_gpu_memory_usage(dev));
-    return 0;
+
+    LOG_WARN("Process slot not found for pid %d", pid);
+    return -1;
 }
 
+// Lock-free memory remove using atomics with seqlock for consistent reads
 int rm_gpu_device_memory_usage(int32_t pid,int cudadev,size_t usage,int type){
-    LOG_INFO("rm_gpu_device_memory:%d %d->%d %d:%lu",pid,cudadev,cuda_to_nvml_map(cudadev),type,usage);
+    LOG_INFO("rm_gpu_device_memory_lockfree:%d %d->%d %d:%lu",pid,cudadev,cuda_to_nvml_map(cudadev),type,usage);
     int dev = cuda_to_nvml_map(cudadev);
     ensure_initialized();
-    lock_shrreg();
+
+    // Fast path: use cached slot pointer for our own process
+    if (pid == getpid() && region_info.my_slot != NULL) {
+        shrreg_proc_slot_t* slot = region_info.my_slot;
+
+        // Seqlock protocol: increment to odd (write in progress)
+        atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
+
+        // Perform updates with release semantics
+        atomic_fetch_sub_explicit(&slot->used[dev].total, usage, memory_order_release);
+        switch (type) {
+            case 0:
+                atomic_fetch_sub_explicit(&slot->used[dev].context_size, usage, memory_order_release);
+                break;
+            case 1:
+                atomic_fetch_sub_explicit(&slot->used[dev].module_size, usage, memory_order_release);
+                break;
+            case 2:
+                atomic_fetch_sub_explicit(&slot->used[dev].data_size, usage, memory_order_release);
+                break;
+        }
+
+        // Seqlock protocol: increment to even (write complete)
+        atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
+
+        uint64_t new_total = atomic_load_explicit(&slot->used[dev].total, memory_order_acquire);
+        LOG_INFO("after delete_lockfree:%lu",new_total);
+        return 0;
+    }
+
+    // Slow path: find slot for other process (still lock-free)
+    int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
     int i;
-    for (i=0;i<region_info.shared_region->proc_num;i++){
-        if (region_info.shared_region->procs[i].pid == pid){
-            region_info.shared_region->procs[i].used[dev].total-=usage;
+    for (i=0;i<proc_num;i++){
+        int32_t slot_pid = atomic_load_explicit(&region_info.shared_region->procs[i].pid, memory_order_acquire);
+        if (slot_pid == pid){
+            shrreg_proc_slot_t* slot = &region_info.shared_region->procs[i];
+
+            // Seqlock protocol: increment to odd (write in progress)
+            atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
+
+            // Perform updates
+            atomic_fetch_sub_explicit(&slot->used[dev].total, usage, memory_order_release);
             switch (type) {
-                case 0:{
-                    region_info.shared_region->procs[i].used[dev].context_size -= usage;
+                case 0:
+                    atomic_fetch_sub_explicit(&slot->used[dev].context_size, usage, memory_order_release);
                     break;
-                }
-                case 1:{
-                    region_info.shared_region->procs[i].used[dev].module_size -= usage;
+                case 1:
+                    atomic_fetch_sub_explicit(&slot->used[dev].module_size, usage, memory_order_release);
                     break;
-                }
-                case 2:{
-                    region_info.shared_region->procs[i].used[dev].data_size -= usage;
-                }
+                case 2:
+                    atomic_fetch_sub_explicit(&slot->used[dev].data_size, usage, memory_order_release);
+                    break;
             }
-            LOG_INFO("after delete:%lu",region_info.shared_region->procs[i].used[dev].total);
+
+            // Seqlock protocol: increment to even (write complete)
+            atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
+
+            uint64_t new_total = atomic_load_explicit(&slot->used[dev].total, memory_order_acquire);
+            LOG_INFO("after delete_lockfree:%lu",new_total);
+            return 0;
         }
     }
-    unlock_shrreg();
-    return 0;
+
+    LOG_WARN("Process slot not found for pid %d", pid);
+    return -1;
 }
 
 void get_timespec(int seconds, struct timespec* spec) {
@@ -446,43 +616,80 @@ void exit_withlock(int exitcode) {
 }
 
 
+// Signal handler for cleanup
+void signal_cleanup_handler(int signum) {
+    LOG_WARN("Caught signal %d, cleaning up", signum);
+    exit_handler();
+    // Re-raise signal with default handler to ensure proper exit code
+    signal(signum, SIG_DFL);
+    raise(signum);
+}
+
 void exit_handler() {
+    static int cleanup_done = 0;
+    // Prevent re-entry (exit_handler might be called multiple times)
+    if (__sync_lock_test_and_set(&cleanup_done, 1)) {
+        return;
+    }
+
     if (region_info.init_status == PTHREAD_ONCE_INIT) {
         return;
     }
     shared_region_t* region = region_info.shared_region;
-    int slot = 0;
-    LOG_MSG("Calling exit handler %d",getpid());
-    struct timespec sem_ts;
-    get_timespec(SEM_WAIT_TIME_ON_EXIT, &sem_ts);
-    int status = sem_timedwait(&region->sem, &sem_ts);
-    if (status == 0) {  // just give up on lock failure
-        region->owner_pid = region_info.pid;
-        while (slot < region->proc_num) {
-            if (region->procs[slot].pid == region_info.pid) {
-                memset(region->procs[slot].used,0,sizeof(device_memory_t)*CUDA_DEVICE_MAX_COUNT);
-                memset(region->procs[slot].device_util,0,sizeof(device_util_t)*CUDA_DEVICE_MAX_COUNT);
-                region->proc_num--;
-                region->procs[slot] = region->procs[region->proc_num];
-                break;
-            }
-            slot++;
-        }
-        __sync_synchronize();
-        region->owner_pid = 0;
-        sem_post(&region->sem);
-    } else {
-        LOG_WARN("Failed to take lock on exit: errno=%d", errno);
+    if (region == NULL) {
+        return;
     }
+
+    int32_t my_pid = region_info.pid;
+    LOG_MSG("Cleanup on exit for PID %d", my_pid);
+
+    // ========================================================================
+    // CRITICAL CLEANUP (Must succeed, no lock needed)
+    // ========================================================================
+
+    // 1. If we're holding owner_pid, clear it atomically
+    size_t current_owner = atomic_load_explicit(&region->owner_pid, memory_order_acquire);
+    if (current_owner == (size_t)my_pid) {
+        LOG_WARN("Exit while holding owner_pid, releasing atomically");
+        // Use CAS to ensure we only clear if it's still us
+        size_t expected = (size_t)my_pid;
+        if (atomic_compare_exchange_strong_explicit(&region->owner_pid, &expected, 0,
+                                                    memory_order_release, memory_order_acquire)) {
+            LOG_DEBUG("Released owner_pid and posting semaphore");
+            sem_post(&region->sem);  // Unlock the semaphore
+        }
+    }
+
+    // 2. Mark our process slot as exited (atomic, no lock needed)
+    // Set PID to 0 so it's detected as dead by clear_proc_slot_nolock()
+    for (int slot = 0; slot < SHARED_REGION_MAX_PROCESS_NUM; slot++) {
+        int32_t slot_pid = atomic_load_explicit(&region->procs[slot].pid, memory_order_acquire);
+        if (slot_pid == my_pid) {
+            LOG_DEBUG("Marking process slot %d as dead (PID %d)", slot, my_pid);
+            // Atomically set PID to 0 - this marks the slot as available
+            atomic_store_explicit(&region->procs[slot].pid, 0, memory_order_release);
+            // Also set status to 0 (inactive)
+            atomic_store_explicit(&region->procs[slot].status, 0, memory_order_release);
+            break;
+        }
+    }
+
+    // That's it! The slot will be physically removed by clear_proc_slot_nolock()
+    // when the next process acquires the lock. This is lazy cleanup.
+
+    LOG_MSG("Exit cleanup complete for PID %d", my_pid);
 }
 
 
 void lock_shrreg() {
-    struct timespec sem_ts;
-    get_timespec(SEM_WAIT_TIME, &sem_ts);
     shared_region_t* region = region_info.shared_region;
     int trials = 0;
     while (1) {
+        // CRITICAL: Create fresh timeout for each iteration!
+        // If created outside loop, timestamp becomes stale after first timeout
+        struct timespec sem_ts;
+        get_timespec(SEM_WAIT_TIME, &sem_ts);
+
         int status = sem_timedwait(&region->sem, &sem_ts);
         SEQ_POINT_MARK(SEQ_ACQUIRE_SEMLOCK_OK);
 
@@ -494,29 +701,46 @@ void lock_shrreg() {
             trials = 0;
             break;
         } else if (errno == ETIMEDOUT) {
-            LOG_WARN("Lock shrreg timeout, try fix (%d:%ld)", region_info.pid,region->owner_pid);
-            int32_t current_owner = region->owner_pid;
-            if (current_owner != 0 && (current_owner == region_info.pid ||
-                    proc_alive(current_owner) == PROC_STATE_NONALIVE)) {
-                LOG_WARN("Owner proc dead (%d), try fix", current_owner);
-                if (0 == fix_lock_shrreg()) {
-                    break;
-                }
-            } else {
-                trials++;
-                if (trials > SEM_WAIT_RETRY_TIMES) {
-                    LOG_WARN("Fail to lock shrreg in %d seconds",
-                        SEM_WAIT_RETRY_TIMES * SEM_WAIT_TIME);
-                    if (current_owner == 0) {
-                        LOG_WARN("fix current_owner 0>%d",region_info.pid);
-                        region->owner_pid = region_info.pid;
-                        if (0 == fix_lock_shrreg()) {
-                            break;
-                        } 
-                    }
-                }
-                continue;  // slow wait path
+            trials++;
+            size_t current_owner = atomic_load_explicit(&region->owner_pid, memory_order_acquire);
+
+            if (trials <= 3 || trials % 5 == 0) {  // Log first 3, then every 5th
+                LOG_WARN("Lock shrreg timeout (trial %d/%d), owner=%ld",
+                         trials, SEM_WAIT_RETRY_TIMES, current_owner);
             }
+
+            // SIGKILL RECOVERY: Check if owner is dead (the ONLY case where exit cleanup fails)
+            if (current_owner != 0) {
+                int owner_status = proc_alive((int32_t)current_owner);
+                if (owner_status == PROC_STATE_NONALIVE) {
+                    LOG_WARN("Owner %ld is dead (was SIGKILL'd), cleaning up stale lock", current_owner);
+                    // Use CAS so only one process does this
+                    size_t expected = current_owner;
+                    if (atomic_compare_exchange_strong_explicit(&region->owner_pid, &expected, 0,
+                                                               memory_order_release, memory_order_acquire)) {
+                        LOG_WARN("Cleared dead owner_pid and posting semaphore");
+                        sem_post(&region->sem);  // Unlock
+                        usleep(10000);  // 10ms for semaphore to propagate
+                        continue;  // Retry immediately
+                    }
+                    // Another process is handling it, wait a bit
+                    usleep(100000);  // 100ms
+                    continue;
+                }
+            }
+
+            // If we're still waiting after many tries, something is seriously wrong
+            if (trials > 30) {  // 30 × 10s = 5 minutes
+                LOG_ERROR("Cannot acquire lock after 5 minutes, owner=%ld", current_owner);
+                if (current_owner != 0 && proc_alive((int32_t)current_owner) == PROC_STATE_ALIVE) {
+                    LOG_ERROR("Owner is still ALIVE - this is a deadlock bug!");
+                } else {
+                    LOG_ERROR("This should not happen - please report this bug");
+                }
+                LOG_ERROR("Workaround: Delete /tmp/cudevshr.cache and restart all processes");
+                exit(-1);
+            }
+            continue;  // Keep retrying
         } else {
             LOG_ERROR("Failed to lock shrreg: %d", errno);
         }
@@ -536,56 +760,151 @@ void unlock_shrreg() {
     SEQ_POINT_MARK(SEQ_RELEASE_SEMLOCK_OK);
 }
 
+int lock_postinit() {
+    shared_region_t* region = region_info.shared_region;
+    int trials = 0;
+    while (1) {
+        // CRITICAL: Create fresh timeout for each iteration!
+        // If created outside loop, timestamp becomes stale after first timeout
+        // Use longer timeout for postinit since set_task_pid() can take several seconds
+        struct timespec sem_ts;
+        get_timespec(SEM_WAIT_TIME_POSTINIT, &sem_ts);
+
+        int status = sem_timedwait(&region->sem_postinit, &sem_ts);
+        if (status == 0) {
+            // Lock acquired successfully
+            LOG_DEBUG("Acquired postinit lock after %d waits (PID %d)", trials, getpid());
+            return 1;  // Success
+        } else if (errno == ETIMEDOUT) {
+            trials++;
+            LOG_MSG("Waiting for postinit lock (trial %d/%d, waited %ds, PID %d)",
+                    trials, SEM_WAIT_RETRY_TIMES_POSTINIT, trials * SEM_WAIT_TIME_POSTINIT, getpid());
+
+            // After many retries, give up
+            if (trials > SEM_WAIT_RETRY_TIMES_POSTINIT) {
+                LOG_ERROR("Postinit lock timeout after %d seconds - another process may have crashed",
+                          SEM_WAIT_RETRY_TIMES_POSTINIT * SEM_WAIT_TIME_POSTINIT);
+                LOG_ERROR("Skipping host PID detection for this process (will use container PID)");
+                return 0;  // Timeout - didn't acquire lock
+            }
+            continue;
+        } else {
+            LOG_ERROR("Failed to lock postinit semaphore: errno=%d", errno);
+            // Don't give up - keep retrying
+            trials++;
+            continue;
+        }
+    }
+}
+
+void unlock_postinit() {
+    shared_region_t* region = region_info.shared_region;
+    sem_post(&region->sem_postinit);
+}
+
 
 int clear_proc_slot_nolock(int do_clear) {
     int slot = 0;
     int res=0;
+    int cleaned_pid_zero = 0;
+    int cleaned_dead = 0;
     shared_region_t* region = region_info.shared_region;
+
     while (slot < region->proc_num) {
-        int32_t pid = region->procs[slot].pid;
-        if (pid != 0) {
-            if (do_clear > 0 && proc_alive(pid) == PROC_STATE_NONALIVE) {
-                LOG_WARN("Kick dead proc %d", pid);
-            } else {
-                slot++;
-                continue;
-            }
+        int32_t pid = atomic_load_explicit(&region->procs[slot].pid, memory_order_acquire);
+
+        // Skip slots that are already marked as dead (PID=0) by exit cleanup
+        if (pid == 0) {
+            LOG_DEBUG("Removing slot %d with PID=0 (marked dead by exit cleanup)", slot);
+            cleaned_pid_zero++;
             res=1;
             region->proc_num--;
             region->procs[slot] = region->procs[region->proc_num];
             __sync_synchronize();
+            // Don't increment slot - check the moved element
+            continue;
         }
+
+        // Only check proc_alive() if do_clear is enabled and PID is non-zero
+        // Limit to 10 checks per call to avoid holding lock too long
+        if (do_clear > 0 && cleaned_dead < 10 && proc_alive(pid) == PROC_STATE_NONALIVE) {
+            LOG_WARN("Kick dead proc %d (proc_alive check)", pid);
+            cleaned_dead++;
+            res=1;
+            region->proc_num--;
+            region->procs[slot] = region->procs[region->proc_num];
+            __sync_synchronize();
+            // Don't increment slot - check the moved element
+            continue;
+        }
+
+        // Slot is valid, move to next
+        slot++;
     }
+
+    if (cleaned_pid_zero > 0 || cleaned_dead > 0) {
+        LOG_INFO("Cleaned %d PID=0 slots, %d dead proc slots (proc_num now %d)",
+                 cleaned_pid_zero, cleaned_dead, region->proc_num);
+    }
+
     return res;
 }
 
 void init_proc_slot_withlock() {
     int32_t current_pid = getpid();
-    lock_shrreg();
+    lock_shrreg();  // Still need lock for modifying process slots
     shared_region_t* region = region_info.shared_region;
-    if (region->proc_num >= SHARED_REGION_MAX_PROCESS_NUM) {
+
+    int proc_num = atomic_load_explicit(&region->proc_num, memory_order_acquire);
+    if (proc_num >= SHARED_REGION_MAX_PROCESS_NUM) {
         exit_withlock(-1);
     }
     signal(SIGUSR2,sig_swap_stub);
     signal(SIGUSR1,sig_restore_stub);
+
     // If, by any means a pid of itself is found in region->process, then it is probably caused by crashloop
     // we need to reset it.
     int i,found=0;
-    for (i=0; i<region->proc_num; i++) {
-        if (region->procs[i].pid == current_pid) {
-            region->procs[i].status = 1;
-            memset(region->procs[i].used,0,sizeof(device_memory_t)*CUDA_DEVICE_MAX_COUNT);
-            memset(region->procs[i].device_util,0,sizeof(device_util_t)*CUDA_DEVICE_MAX_COUNT);
+    for (i=0; i<proc_num; i++) {
+        int32_t slot_pid = atomic_load_explicit(&region->procs[i].pid, memory_order_acquire);
+        if (slot_pid == current_pid) {
+            atomic_store_explicit(&region->procs[i].seqlock, 0, memory_order_relaxed);  // Reset seqlock
+            atomic_store_explicit(&region->procs[i].status, 1, memory_order_release);
+
+            // Zero out atomics
+            for (int dev=0; dev<CUDA_DEVICE_MAX_COUNT; dev++) {
+                atomic_store_explicit(&region->procs[i].used[dev].total, 0, memory_order_relaxed);
+                atomic_store_explicit(&region->procs[i].used[dev].context_size, 0, memory_order_relaxed);
+                atomic_store_explicit(&region->procs[i].used[dev].module_size, 0, memory_order_relaxed);
+                atomic_store_explicit(&region->procs[i].used[dev].data_size, 0, memory_order_relaxed);
+                atomic_store_explicit(&region->procs[i].device_util[dev].sm_util, 0, memory_order_relaxed);
+                atomic_store_explicit(&region->procs[i].monitorused[dev], 0, memory_order_relaxed);
+            }
+
+            region_info.my_slot = &region->procs[i];  // Cache our slot pointer
             found = 1;
             break;
         }
     }
+
     if (!found) {
-        region->procs[region->proc_num].pid = current_pid;
-        region->procs[region->proc_num].status = 1;
-        memset(region->procs[region->proc_num].used,0,sizeof(device_memory_t)*CUDA_DEVICE_MAX_COUNT);
-        memset(region->procs[region->proc_num].device_util,0,sizeof(device_util_t)*CUDA_DEVICE_MAX_COUNT);
-        region->proc_num++;
+        // Initialize new slot with atomics
+        atomic_store_explicit(&region->procs[proc_num].seqlock, 0, memory_order_relaxed);  // Start with even (no write)
+        atomic_store_explicit(&region->procs[proc_num].pid, current_pid, memory_order_release);
+        atomic_store_explicit(&region->procs[proc_num].hostpid, 0, memory_order_relaxed);
+        atomic_store_explicit(&region->procs[proc_num].status, 1, memory_order_release);
+
+        for (int dev=0; dev<CUDA_DEVICE_MAX_COUNT; dev++) {
+            atomic_store_explicit(&region->procs[proc_num].used[dev].total, 0, memory_order_relaxed);
+            atomic_store_explicit(&region->procs[proc_num].used[dev].context_size, 0, memory_order_relaxed);
+            atomic_store_explicit(&region->procs[proc_num].used[dev].module_size, 0, memory_order_relaxed);
+            atomic_store_explicit(&region->procs[proc_num].used[dev].data_size, 0, memory_order_relaxed);
+            atomic_store_explicit(&region->procs[proc_num].device_util[dev].sm_util, 0, memory_order_relaxed);
+            atomic_store_explicit(&region->procs[proc_num].monitorused[dev], 0, memory_order_relaxed);
+        }
+
+        region_info.my_slot = &region->procs[proc_num];  // Cache our slot pointer
+        atomic_fetch_add_explicit(&region->proc_num, 1, memory_order_release);
     }
 
     clear_proc_slot_nolock(1);
@@ -648,6 +967,14 @@ void try_create_shrreg() {
         if (0 != atexit(exit_handler)) {
             LOG_ERROR("Register exit handler failed: %d", errno);
         }
+
+        // Register signal handlers for cleanup on crashes
+        signal(SIGTERM, signal_cleanup_handler);
+        signal(SIGINT, signal_cleanup_handler);
+        signal(SIGHUP, signal_cleanup_handler);
+        signal(SIGABRT, signal_cleanup_handler);
+        // Note: SIGKILL and SIGSTOP cannot be caught
+        LOG_DEBUG("Registered cleanup handlers for signals");
     }
 
     enable_active_oom_killer = set_active_oom_killer();
@@ -687,36 +1014,101 @@ void try_create_shrreg() {
         LOG_ERROR("Fail to reseek shrreg %s: errno=%d", shr_reg_file, errno);
     }
     region_info.shared_region = (shared_region_t*) mmap(
-        NULL, SHARED_REGION_SIZE_MAGIC, 
+        NULL, SHARED_REGION_SIZE_MAGIC,
         PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0);
     shared_region_t* region = region_info.shared_region;
     if (region == NULL) {
         LOG_ERROR("Fail to map shrreg %s: errno=%d", shr_reg_file, errno);
     }
-    if (lockf(fd, F_LOCK, SHARED_REGION_SIZE_MAGIC) != 0) {
-        LOG_ERROR("Fail to lock shrreg %s: errno=%d", shr_reg_file, errno);
+
+    // ============================================================================
+    // OPTION C: Atomic Double-Checked Locking (Eliminates File Lock!)
+    // ============================================================================
+    // Fast path: Check if already initialized (no lock needed)
+    int32_t init_flag = atomic_load_explicit(&region->initialized_flag, memory_order_acquire);
+    if (init_flag == INIT_STATE_COMPLETE) {
+        // Already initialized by another process! Skip to validation
+        LOG_DEBUG("Shared region already initialized, skipping init (fast path)");
+        goto validate_limits;
     }
-    //put_device_info();
-    if (region->initialized_flag != 
-          MULTIPROCESS_SHARED_REGION_MAGIC_FLAG) {
-        region->major_version = MAJOR_VERSION;
-        region->minor_version = MINOR_VERSION;
-        do_init_device_memory_limits(
-            region->limit, CUDA_DEVICE_MAX_COUNT);
-        do_init_device_sm_limits(
-            region->sm_limit,CUDA_DEVICE_MAX_COUNT);
+
+    // Slow path: Try to become the initializer using atomic CAS
+    int32_t expected = INIT_STATE_UNINIT;
+    if (atomic_compare_exchange_strong_explicit(
+            &region->initialized_flag,
+            &expected,
+            INIT_STATE_IN_PROGRESS,
+            memory_order_acquire,
+            memory_order_acquire)) {
+
+        // ========================================================================
+        // WE WON THE RACE! This process is the designated initializer
+        // ========================================================================
+        LOG_INFO("Process %d won initializer race, performing initialization", getpid());
+
+        // Initialize semaphores FIRST (needed for process slot and postInit serialization)
         if (sem_init(&region->sem, 1, 1) != 0) {
             LOG_ERROR("Fail to init sem %s: errno=%d", shr_reg_file, errno);
         }
-        __sync_synchronize();
-        region->sm_init_flag = 0;
-        region->utilization_switch = 1;
-        region->recent_kernel = 2;
+        if (sem_init(&region->sem_postinit, 1, 1) != 0) {
+            LOG_ERROR("Fail to init sem_postinit %s: errno=%d", shr_reg_file, errno);
+        }
+
+        // Initialize version and limits for ALL 8 GPUs
+        region->major_version = MAJOR_VERSION;
+        region->minor_version = MINOR_VERSION;
+        do_init_device_memory_limits(region->limit, CUDA_DEVICE_MAX_COUNT);
+        do_init_device_sm_limits(region->sm_limit, CUDA_DEVICE_MAX_COUNT);
+
+        // Initialize atomic fields
+        atomic_store_explicit(&region->sm_init_flag, 0, memory_order_relaxed);
+        atomic_store_explicit(&region->utilization_switch, 1, memory_order_relaxed);
+        atomic_store_explicit(&region->recent_kernel, 2, memory_order_relaxed);
+        atomic_store_explicit(&region->proc_num, 0, memory_order_relaxed);
+
         region->priority = 1;
-        if (getenv(CUDA_TASK_PRIORITY_ENV)!=NULL)
+        if (getenv(CUDA_TASK_PRIORITY_ENV) != NULL)
             region->priority = atoi(getenv(CUDA_TASK_PRIORITY_ENV));
-        region->initialized_flag = MULTIPROCESS_SHARED_REGION_MAGIC_FLAG;
+
+        // Release barrier: ensure all writes are visible before marking complete
+        atomic_thread_fence(memory_order_release);
+
+        // Mark initialization complete (releases waiting processes)
+        atomic_store_explicit(&region->initialized_flag, INIT_STATE_COMPLETE, memory_order_release);
+
+        LOG_INFO("Initialization complete by process %d", getpid());
     } else {
+        // ========================================================================
+        // Another process is initializing or already initialized
+        // ========================================================================
+        LOG_DEBUG("Process %d waiting for initialization by another process...", getpid());
+
+        // Spin-wait for initialization to complete (should be fast, ~2 seconds max)
+        int spin_count = 0;
+        while (1) {
+            init_flag = atomic_load_explicit(&region->initialized_flag, memory_order_acquire);
+            if (init_flag == INIT_STATE_COMPLETE) {
+                LOG_DEBUG("Process %d detected initialization complete after %d spins",
+                         getpid(), spin_count);
+                break;
+            }
+
+            // Avoid busy-waiting: small sleep reduces CPU usage
+            usleep(1000);  // 1ms
+            spin_count++;
+
+            if (spin_count > 10000) {  // 10 seconds timeout
+                LOG_ERROR("Timeout waiting for initialization (current state: %d)", init_flag);
+                break;
+            }
+        }
+    }
+
+validate_limits:
+    // ============================================================================
+    // Validation: All processes check their environment matches shared state
+    // ============================================================================
+    if (region->initialized_flag == INIT_STATE_COMPLETE) {
         if (region->major_version != MAJOR_VERSION || 
                 region->minor_version != MINOR_VERSION) {
             LOG_ERROR("The current version number %d.%d"
@@ -745,9 +1137,8 @@ void try_create_shrreg() {
         }
     }
     region->last_kernel_time = region_info.last_kernel_time;
-    if (lockf(fd, F_ULOCK, SHARED_REGION_SIZE_MAGIC) != 0) {
-        LOG_ERROR("Fail to unlock shrreg %s: errno=%d", shr_reg_file, errno);
-    }
+
+    // No lockf unlock needed - we used atomic CAS instead of file lock!
     LOG_DEBUG("shrreg created");
 }
 
