@@ -493,17 +493,22 @@ CUresult cuMemGetInfo_v2(size_t* free, size_t* total) {
     LOG_DEBUG("cuMemGetInfo_v2");
     ENSURE_INITIALIZED();
     CHECK_DRV_API(cuCtxGetDevice(&dev));
-    size_t usage = get_current_device_memory_usage(cuda_to_nvml_map(dev));
-    size_t limit = get_current_device_memory_limit(cuda_to_nvml_map(dev));
+    // Use real NVML-reported memory usage for accurate free memory calculation
+    size_t usage = get_gpu_memory_real_usage(dev);
+    size_t limit = get_current_device_memory_limit(dev);
     if (limit == 0) {
         CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
         LOG_INFO("orig free=%ld total=%ld", *free, *total);
-        *free = *total - usage;
+        *free = (*total > usage) ? (*total - usage) : 0;
         LOG_INFO("after free=%ld total=%ld", *free, *total);
         return CUDA_SUCCESS;
     } else if (limit < usage) {
         LOG_WARN("limit < usage; usage=%ld, limit=%ld", usage, limit);
-        return CUDA_ERROR_INVALID_VALUE;
+        // Return 0 free memory instead of error when over limit
+        CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
+        *free = 0;
+        *total = limit;
+        return CUDA_SUCCESS;
     } else {
         CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
         LOG_INFO("orig free=%ld total=%ld limit=%ld usage=%ld",

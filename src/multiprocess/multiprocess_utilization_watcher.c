@@ -210,9 +210,72 @@ void* utilization_watcher() {
     }
 }
 
+// update_monitorused queries NVML for per-process GPU memory and writes
+// results into procs[].monitorused[]. This runs unconditionally so that
+// the monitor can always read real NVML memory from the shared region.
+static void update_monitorused() {
+    unsigned int nvmlCounts;
+    nvmlReturn_t ret = nvmlDeviceGetCount(&nvmlCounts);
+    if (ret != NVML_SUCCESS) {
+        LOG_ERROR("update_monitorused: nvmlDeviceGetCount failed: %s", nvmlErrorString(ret));
+        return;
+    }
+    lock_shrreg();
+    int devi, cudadev, i;
+    for (devi = 0; devi < nvmlCounts; devi++) {
+        unsigned int infcount = SHARED_REGION_MAX_PROCESS_NUM;
+        nvmlProcessInfo_v1_t infos[SHARED_REGION_MAX_PROCESS_NUM];
+        shrreg_proc_slot_t *proc;
+        cudadev = nvml_to_cuda_map((unsigned int)(devi));
+        if (cudadev < 0)
+            continue;
+        nvmlDevice_t device;
+        nvmlReturn_t r = nvmlDeviceGetHandleByIndex(cudadev, &device);
+        if (r != NVML_SUCCESS)
+            continue;
+        r = nvmlDeviceGetComputeRunningProcesses(device, &infcount, infos);
+        if (r == NVML_SUCCESS) {
+            for (i = 0; i < infcount; i++) {
+                proc = find_proc_by_hostpid(infos[i].pid);
+                if (proc != NULL) {
+                    proc->monitorused[cudadev] = infos[i].usedGpuMemory;
+                }
+            }
+        }
+    }
+    unlock_shrreg();
+}
+
+// memory_monitor_watcher is a lightweight thread that periodically queries
+// NVML for per-process GPU memory and writes it into monitorused[].
+// It runs every 1 second regardless of whether SM limits are configured.
+static void* memory_monitor_watcher(void *arg) {
+    (void)arg;
+    nvmlInit();
+    ensure_initialized();
+    struct timespec sleep_interval = { .tv_sec = 1, .tv_nsec = 0 };
+    while (1) {
+        nanosleep(&sleep_interval, NULL);
+        if (pidfound == 0) {
+            update_host_pid();
+            if (pidfound == 0)
+                continue;
+        }
+        update_monitorused();
+    }
+    return NULL;
+}
+
 void init_utilization_watcher() {
     LOG_INFO("set core utilization limit to  %d",get_current_device_sm_limit(0));
     setspec();
+
+    // Always start the memory monitor watcher to populate monitorused[]
+    // so the external monitor can read real NVML memory from shared region.
+    pthread_t mem_tid;
+    pthread_create(&mem_tid, NULL, memory_monitor_watcher, NULL);
+    LOG_INFO("Started memory_monitor_watcher thread for NVML memory tracking");
+
     pthread_t tid;
     if ((get_current_device_sm_limit(0)<=100) && (get_current_device_sm_limit(0)>0)){
         pthread_create(&tid, NULL, utilization_watcher, NULL);
