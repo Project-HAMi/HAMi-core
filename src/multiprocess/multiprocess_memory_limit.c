@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <signal.h>
+#include <string.h>
 
 #include <assert.h>
 #include <cuda.h>
@@ -73,12 +74,21 @@ void set_current_gpu_status(int status){
     }
 }
 
+static struct sigaction old_sigusr1_sa;
+static struct sigaction old_sigusr2_sa;
+
 void sig_restore_stub(int signo){
     set_current_gpu_status(1);
+    // Chain to previous handler so JVM (and other runtimes) can process SIGUSR1
+    if (old_sigusr1_sa.sa_handler != SIG_DFL && old_sigusr1_sa.sa_handler != SIG_IGN)
+        old_sigusr1_sa.sa_handler(signo);
 }
 
 void sig_swap_stub(int signo){
     set_current_gpu_status(2);
+    // Chain to previous handler so JVM (and other runtimes) can process SIGUSR2
+    if (old_sigusr2_sa.sa_handler != SIG_DFL && old_sigusr2_sa.sa_handler != SIG_IGN)
+        old_sigusr2_sa.sa_handler(signo);
 }
 
 
@@ -689,8 +699,16 @@ void init_proc_slot_withlock() {
     if (proc_num >= SHARED_REGION_MAX_PROCESS_NUM) {
         exit_withlock(-1);
     }
-    signal(SIGUSR2,sig_swap_stub);
-    signal(SIGUSR1,sig_restore_stub);
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+
+    sa.sa_handler = sig_swap_stub;
+    sigaction(SIGUSR2, &sa, &old_sigusr2_sa);
+
+    sa.sa_handler = sig_restore_stub;
+    sigaction(SIGUSR1, &sa, &old_sigusr1_sa);
 
     // If, by any means a pid of itself is found in region->process, then it is probably caused by crashloop
     // we need to reset it.
