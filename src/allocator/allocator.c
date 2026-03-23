@@ -34,8 +34,6 @@ size_t round_up(size_t size, size_t unit) {
 }
 
 int oom_check(const int dev, size_t addon) {
-    int count1=0;
-    CUDA_OVERRIDE_CALL(cuda_library_entry,cuDeviceGetCount,&count1);
     CUdevice d;
     if (dev==-1)
         cuCtxGetDevice(&d);
