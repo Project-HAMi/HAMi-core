@@ -46,10 +46,10 @@ void rate_limiter(int grids, int blocks) {
   if (cached_util_switch == 0)
       return;
 
-  /* Defensive guard for external orchestration (currently unreachable) */
-  while (get_recent_kernel() < 0) {
-    usleep(1000);
+  while (get_recent_kernel()<0) {
+    sleep(1);
   }
+  set_recent_kernel(2);
 
   LOG_DEBUG("grid: %d, blocks: %d", grids, blocks);
   LOG_DEBUG("launch kernel %ld, curr core: %ld", kernel_size, g_cur_cuda_cores);
@@ -228,10 +228,10 @@ void* utilization_watcher() {
 void init_utilization_watcher() {
     cached_sm_limit = get_current_device_sm_limit(0);
     cached_util_switch = get_utilization_switch();
-    LOG_INFO("set core utilization limit to  %d",cached_sm_limit);
+    LOG_INFO("set core utilization limit to  %d", cached_sm_limit);
     setspec();
     pthread_t tid;
-    if ((cached_sm_limit <= 100) && (cached_sm_limit > 0)){
+    if ((cached_sm_limit <= 100) && (cached_sm_limit > 0)) {
         pthread_create(&tid, NULL, utilization_watcher, NULL);
     }
     return;

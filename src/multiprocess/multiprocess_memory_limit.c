@@ -1251,10 +1251,10 @@ int wait_status_self(int status){
     int i;
     int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
     int32_t my_pid = getpid();
-    for (i=0;i<proc_num;i++){
+    for (i=0; i < proc_num; i++) {
         int32_t slot_pid = atomic_load_explicit(&region_info.shared_region->procs[i].pid, memory_order_acquire);
-        if (slot_pid==my_pid){
-            if (atomic_load_explicit(&region_info.shared_region->procs[i].status, memory_order_acquire)==status)
+        if (slot_pid == my_pid) {
+            if (atomic_load_explicit(&region_info.shared_region->procs[i].status, memory_order_acquire) == status)
                 return 1;
             else
                 return 0;
