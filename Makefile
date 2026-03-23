@@ -14,3 +14,7 @@ build-in-docker:
 		nvidia/cuda:12.2.0-devel-ubuntu20.04 \
 		sh -c "apt-get -y update; apt-get -y install cmake; bash ./build.sh"
 .PHONY: build-in-docker
+
+check-cuda-hook-consistency:
+	python3 hack/check_cuda_hook_consistency.py
+.PHONY: check-cuda-hook-consistency

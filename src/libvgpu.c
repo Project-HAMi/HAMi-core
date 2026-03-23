@@ -200,7 +200,6 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuCtxGetDevice);
     DLSYM_HOOK_FUNC(cuDeviceGetAttribute);
     DLSYM_HOOK_FUNC(cuDeviceGetCount);
-    DLSYM_HOOK_FUNC(cuDeviceGet);
     DLSYM_HOOK_FUNC(cuDeviceGetName);
     DLSYM_HOOK_FUNC(cuDeviceCanAccessPeer);
     DLSYM_HOOK_FUNC(cuDeviceGetP2PAttribute);
@@ -231,7 +230,6 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemcpyAsync);
     DLSYM_HOOK_FUNC(cuMemcpyAtoD_v2);
     DLSYM_HOOK_FUNC(cuMemcpyDtoA_v2);
-    DLSYM_HOOK_FUNC(cuMemcpyDtoDAsync_v2);
     DLSYM_HOOK_FUNC(cuMemcpyDtoD_v2);
     DLSYM_HOOK_FUNC(cuMemcpyDtoDAsync_v2);
     DLSYM_HOOK_FUNC(cuMemcpyDtoH_v2);
@@ -273,6 +271,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemMap);
     DLSYM_HOOK_FUNC(cuMemImportFromShareableHandle);
     DLSYM_HOOK_FUNC(cuMemAllocAsync);
+    DLSYM_HOOK_FUNC(cuMemFreeAsync);
     // cuda 11.7 new memory ops
     DLSYM_HOOK_FUNC(cuMemHostGetDevicePointer_v2);
     DLSYM_HOOK_FUNC(cuMemHostGetFlags);
