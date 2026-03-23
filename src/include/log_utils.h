@@ -10,33 +10,39 @@
 
 extern FILE *fp1;
 
-#ifdef FILEDEBUG 
+/*
+ * Cached log level — initialized once by log_utils_init().
+ * Default is 2 (WARN/MSG/ERROR) to match original behavior when
+ * LIBCUDA_LOG_LEVEL is unset.
+ *
+ * Levels: 0=off, 1=error-only, 2=warn(default), 3=info, 4=debug
+ */
+extern int g_log_level;
+
+/* Call once during early initialization to cache LIBCUDA_LOG_LEVEL. */
+void log_utils_init(void);
+
+#ifdef FILEDEBUG
 #define LOG_DEBUG(msg, ...) { \
-    if ((getenv("LIBCUDA_LOG_LEVEL")!=NULL) && (atoi(getenv("LIBCUDA_LOG_LEVEL"))>=4)) {\
+    if (g_log_level >= 4) {\
         if (fp1==NULL) fp1 = fopen ("/tmp/vgpulog", "a"); \
         fprintf(fp1, "[HAMI-core Debug(%d:%ld:%s:%d)]: "msg"\n",getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
         }\
     }
 #define LOG_INFO(msg, ...) { \
-    if ( \
-         /*(getenv("LIBCUDA_LOG_LEVEL")==NULL) || */\
-         (getenv("LIBCUDA_LOG_LEVEL")!=NULL) && (atoi(getenv("LIBCUDA_LOG_LEVEL"))>=3)) {\
+    if (g_log_level >= 3) {\
         if (fp1==NULL) fp1 = fopen ("/tmp/vgpulog", "a"); \
         fprintf(fp1, "[HAMI-core Info(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
          }\
     }
 #define LOG_WARN(msg, ...) { \
-    if ( \
-        (getenv("LIBCUDA_LOG_LEVEL")==NULL) || \
-        ((getenv("LIBCUDA_LOG_LEVEL")!=NULL) && (atoi(getenv("LIBCUDA_LOG_LEVEL"))>=2))) {\
+    if (g_log_level >= 2) {\
         if (fp1==NULL) fp1 = fopen ("/tmp/vgpulog", "a"); \
         fprintf(fp1, "[HAMI-core Warn(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
         }\
     }
 #define LOG_MSG(msg, ...) { \
-    if ( \
-        (getenv("LIBCUDA_LOG_LEVEL")==NULL) || \
-        ((getenv("LIBCUDA_LOG_LEVEL")!=NULL) && (atoi(getenv("LIBCUDA_LOG_LEVEL"))>=2))) {\
+    if (g_log_level >= 2) {\
         if (fp1==NULL) fp1 = fopen ("/tmp/vgpulog", "a"); \
         fprintf(fp1, "[HAMI-core Msg(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
          }\
@@ -47,27 +53,22 @@ extern FILE *fp1;
 }
 #else
 #define LOG_DEBUG(msg, ...) { \
-    if ((getenv("LIBCUDA_LOG_LEVEL")!=NULL) && (atoi(getenv("LIBCUDA_LOG_LEVEL"))>=4)) {\
+    if (g_log_level >= 4) {\
         fprintf(stderr, "[HAMI-core Debug(%d:%ld:%s:%d)]: "msg"\n",getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
          }\
     }
 #define LOG_INFO(msg, ...) { \
-    if ( \
-        (getenv("LIBCUDA_LOG_LEVEL")!=NULL) && (atoi(getenv("LIBCUDA_LOG_LEVEL"))>=3)) {\
+    if (g_log_level >= 3) {\
         fprintf(stderr, "[HAMI-core Info(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
         }\
     }
 #define LOG_WARN(msg, ...) { \
-    if ( \
-        (getenv("LIBCUDA_LOG_LEVEL")==NULL) || \
-        ((getenv("LIBCUDA_LOG_LEVEL")!=NULL) && (atoi(getenv("LIBCUDA_LOG_LEVEL"))>=2))) {\
+    if (g_log_level >= 2) {\
         fprintf(stderr, "[HAMI-core Warn(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
         }\
     }
 #define LOG_MSG(msg, ...) { \
-    if ( \
-        (getenv("LIBCUDA_LOG_LEVEL")==NULL) || \
-        ((getenv("LIBCUDA_LOG_LEVEL")!=NULL) && (atoi(getenv("LIBCUDA_LOG_LEVEL"))>=2))) {\
+    if (g_log_level >= 2) {\
         fprintf(stderr, "[HAMI-core Msg(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
          }\
     }
@@ -107,7 +108,7 @@ extern FILE *fp1;
 #define IF_CHECK_OOM(res) {                   \
     if (res < 0)                              \
         return CUDA_ERROR_OUT_OF_MEMORY;      \
-}     
+}
 
 
 #endif
