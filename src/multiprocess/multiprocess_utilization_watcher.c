@@ -40,16 +40,23 @@ void rate_limiter(int grids, int blocks) {
   long after_cuda_cores = 0;
   long kernel_size = grids;
 
-  /* Fast exit using cached values — no shared memory access needed */
+  /*
+   * Preserve "GPU is active" signal unconditionally — matches original
+   * behavior. These shared memory ops are kept even when SM limiting is
+   * disabled, since recent_kernel may be observed by external tooling
+   * or future features (e.g. OOM decisions, memory accounting).
+   */
+  while (get_recent_kernel() < 0) {
+    usleep(1000);
+  }
+  set_recent_kernel(2);
+
+  /* Fast exit using cached values — avoids 3 additional shared memory
+   * reads and 2 ensure_initialized() calls vs the original code */
   if (cached_sm_limit >= 100 || cached_sm_limit == 0)
       return;
   if (cached_util_switch == 0)
       return;
-
-  /* Defensive guard for external orchestration (currently unreachable) */
-  while (get_recent_kernel() < 0) {
-    usleep(1000);
-  }
 
   LOG_DEBUG("grid: %d, blocks: %d", grids, blocks);
   LOG_DEBUG("launch kernel %ld, curr core: %ld", kernel_size, g_cur_cuda_cores);
