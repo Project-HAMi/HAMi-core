@@ -853,6 +853,7 @@ void* __dlsym_hook_section_nvml(void* handle, const char* symbol) {
 }
 
 void preInit(){
+    log_utils_init();
     LOG_MSG("Initializing.....");
     if (real_dlsym == NULL) {
         real_dlsym = dlvsym(RTLD_NEXT,"dlsym","GLIBC_2.2.5");
