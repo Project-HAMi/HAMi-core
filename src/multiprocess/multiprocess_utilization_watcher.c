@@ -50,6 +50,7 @@ void rate_limiter(int grids, int blocks) {
   while (get_recent_kernel() < 0) {
     usleep(1000);
   }
+  set_recent_kernel(2);
 
   LOG_DEBUG("grid: %d, blocks: %d", grids, blocks);
   LOG_DEBUG("launch kernel %ld, curr core: %ld", kernel_size, g_cur_cuda_cores);
