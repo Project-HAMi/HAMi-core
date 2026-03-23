@@ -31,23 +31,29 @@ static volatile long g_total_cuda_cores = 0;
 extern int pidfound;
 int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 
+/* Cached at init — these values do not change at runtime */
+static int cached_sm_limit = 0;
+static int cached_util_switch = 0;
+
 void rate_limiter(int grids, int blocks) {
   long before_cuda_cores = 0;
   long after_cuda_cores = 0;
   long kernel_size = grids;
 
-  while (get_recent_kernel()<0) {
-    sleep(1);
-  }
-  set_recent_kernel(2);
-  if ((get_current_device_sm_limit(0)>=100) || (get_current_device_sm_limit(0)==0))
-    	return;
-  if (get_utilization_switch()==0)
+  /* Fast exit using cached values — no shared memory access needed */
+  if (cached_sm_limit >= 100 || cached_sm_limit == 0)
       return;
+  if (cached_util_switch == 0)
+      return;
+
+  /* Defensive guard for external orchestration (currently unreachable) */
+  while (get_recent_kernel() < 0) {
+    usleep(1000);
+  }
+
   LOG_DEBUG("grid: %d, blocks: %d", grids, blocks);
   LOG_DEBUG("launch kernel %ld, curr core: %ld", kernel_size, g_cur_cuda_cores);
-  //if (g_vcuda_config.enable) {
-    do {
+  do {
 CHECK:
       before_cuda_cores = g_cur_cuda_cores;
       LOG_DEBUG("current core: %ld", g_cur_cuda_cores);
@@ -56,8 +62,7 @@ CHECK:
         goto CHECK;
       }
       after_cuda_cores = before_cuda_cores - kernel_size;
-    } while (!CAS(&g_cur_cuda_cores, before_cuda_cores, after_cuda_cores));
-  //}
+  } while (!CAS(&g_cur_cuda_cores, before_cuda_cores, after_cuda_cores));
 }
 
 static void change_token(long delta) {
@@ -211,10 +216,12 @@ void* utilization_watcher() {
 }
 
 void init_utilization_watcher() {
-    LOG_INFO("set core utilization limit to  %d",get_current_device_sm_limit(0));
+    cached_sm_limit = get_current_device_sm_limit(0);
+    cached_util_switch = get_utilization_switch();
+    LOG_INFO("set core utilization limit to  %d",cached_sm_limit);
     setspec();
     pthread_t tid;
-    if ((get_current_device_sm_limit(0)<=100) && (get_current_device_sm_limit(0)>0)){
+    if ((cached_sm_limit <= 100) && (cached_sm_limit > 0)){
         pthread_create(&tid, NULL, utilization_watcher, NULL);
     }
     return;
