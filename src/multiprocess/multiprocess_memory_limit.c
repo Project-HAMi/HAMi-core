@@ -1231,10 +1231,20 @@ void resume_all(){
 }
 
 int wait_status_self(int status){
+    // Fast path: use cached slot pointer (set during init_proc_slot_withlock)
+    if (region_info.my_slot != NULL) {
+        int32_t cur = atomic_load_explicit(&region_info.my_slot->status, memory_order_acquire);
+        return (cur == status) ? 1 : 0;
+    }
+
+    // Slow path: linear scan (only if my_slot not yet cached)
     int i;
-    for (i=0;i<region_info.shared_region->proc_num;i++){
-        if (region_info.shared_region->procs[i].pid==getpid()){
-            if (region_info.shared_region->procs[i].status==status)
+    int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
+    int32_t my_pid = getpid();
+    for (i=0;i<proc_num;i++){
+        int32_t slot_pid = atomic_load_explicit(&region_info.shared_region->procs[i].pid, memory_order_acquire);
+        if (slot_pid==my_pid){
+            if (atomic_load_explicit(&region_info.shared_region->procs[i].status, memory_order_acquire)==status)
                 return 1;
             else
                 return 0;
