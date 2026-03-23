@@ -11,22 +11,6 @@
 #include "include/libcuda_hook.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
-FILE *fp1 = NULL;
-
-/*
- * Cached log level, read once from LIBCUDA_LOG_LEVEL by log_utils_init().
- * Default 2 = warn/msg/error (matches original behavior when env is unset).
- */
-int g_log_level = 2;
-
-void log_utils_init(void) {
-    const char *env = getenv("LIBCUDA_LOG_LEVEL");
-    if (env != NULL) {
-        g_log_level = atoi(env);
-    }
-    /* else: keep default of 2 (warn level) */
-}
-
 const char* unified_lock="/tmp/vgpulock/lock";
 static int lock_fd = -1;
 extern size_t context_size;
