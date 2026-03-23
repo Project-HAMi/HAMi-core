@@ -212,14 +212,24 @@ int active_oom_killer() {
 }
 
 void pre_launch_kernel() {
-    uint64_t now = time(NULL);
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME_COARSE, &ts);
+    uint64_t now = (uint64_t)ts.tv_sec;
+
+    // Fast path: skip mutex if within recording interval (double-checked)
+    if (now - region_info.last_kernel_time < _record_kernel_interval) {
+        return;
+    }
+
     pthread_mutex_lock(&_kernel_mutex);
+    // Re-check under lock — another thread may have updated
     if (now - region_info.last_kernel_time < _record_kernel_interval) {
         pthread_mutex_unlock(&_kernel_mutex);
         return;
     }
     region_info.last_kernel_time = now;
     pthread_mutex_unlock(&_kernel_mutex);
+
     LOG_INFO("write last kernel time: %ld", now)
     // Lock-free update using atomic compare-exchange
     uint64_t expected = atomic_load_explicit(&region_info.shared_region->last_kernel_time, memory_order_acquire);
