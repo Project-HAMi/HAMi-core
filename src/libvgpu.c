@@ -894,16 +894,8 @@ void postInit(){
         LOG_WARN("SET_TASK_PID FAILED - using container PID for accounting");
         pidfound=0;
     } else {
-        nvmlReturn_t res = set_task_pid();
-        try_unlock_unified_lock();
-        if (res != NVML_SUCCESS) {
-            LOG_WARN("SET_TASK_PID FAILED.");
-            pidfound = 0;
-        } else {
-            pidfound = 1;
-        }
+        pidfound = 1;
     }
-    LOG_MSG("Initialized");
 
     //add_gpu_device_memory_usage(getpid(),0,context_size,0);
     env_utilization_switch = set_env_utilization_switch();

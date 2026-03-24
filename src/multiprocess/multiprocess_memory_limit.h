@@ -95,6 +95,7 @@ typedef struct {
     _Atomic int32_t sm_init_flag;
     _Atomic size_t owner_pid;
     sem_t sem;  // Only for process slot add/remove
+    sem_t sem_postinit;  // For serializing postInit() host PID detection
     uint64_t device_num;
     uuid uuids[CUDA_DEVICE_MAX_COUNT];
     uint64_t limit[CUDA_DEVICE_MAX_COUNT];
