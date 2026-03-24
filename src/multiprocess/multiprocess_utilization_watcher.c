@@ -148,11 +148,11 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
       nvmlReturn_t res = nvmlDeviceGetComputeRunningProcesses(device,&infcount,infos);
 
       // Get SM util for container
-      gettimeofday(&cur,NULL);
+      gettimeofday(&cur, NULL);
       microsec = (cur.tv_sec - 1) * 1000UL * 1000UL + cur.tv_usec;
       nvmlProcessUtilizationSample_t processes_sample[SHARED_REGION_MAX_PROCESS_NUM];
       unsigned int processes_num = SHARED_REGION_MAX_PROCESS_NUM;
-      nvmlReturn_t res2 = nvmlDeviceGetProcessUtilization(device,processes_sample,&processes_num,microsec);
+      nvmlReturn_t res2 = nvmlDeviceGetProcessUtilization(device, processes_sample, &processes_num, microsec);
 
       // Now acquire lock only for the brief period needed to update shared memory
       lock_shrreg();
