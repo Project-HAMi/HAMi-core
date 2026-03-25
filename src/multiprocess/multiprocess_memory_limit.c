@@ -221,14 +221,24 @@ int active_oom_killer() {
 }
 
 void pre_launch_kernel() {
-    uint64_t now = time(NULL);
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME_COARSE, &ts);
+    uint64_t now = (uint64_t)ts.tv_sec;
+
+    // Fast path: skip mutex if within recording interval (double-checked)
+    if (now - region_info.last_kernel_time < _record_kernel_interval) {
+        return;
+    }
+
     pthread_mutex_lock(&_kernel_mutex);
+    // Re-check under lock — another thread may have updated
     if (now - region_info.last_kernel_time < _record_kernel_interval) {
         pthread_mutex_unlock(&_kernel_mutex);
         return;
     }
     region_info.last_kernel_time = now;
     pthread_mutex_unlock(&_kernel_mutex);
+
     LOG_INFO("write last kernel time: %ld", now)
     // Lock-free update using atomic compare-exchange
     uint64_t expected = atomic_load_explicit(&region_info.shared_region->last_kernel_time, memory_order_acquire);
@@ -1231,10 +1241,20 @@ void resume_all(){
 }
 
 int wait_status_self(int status){
+    // Fast path: use cached slot pointer (set during init_proc_slot_withlock)
+    if (region_info.my_slot != NULL) {
+        int32_t cur = atomic_load_explicit(&region_info.my_slot->status, memory_order_acquire);
+        return (cur == status) ? 1 : 0;
+    }
+
+    // Slow path: linear scan (only if my_slot not yet cached)
     int i;
-    for (i=0;i<region_info.shared_region->proc_num;i++){
-        if (region_info.shared_region->procs[i].pid==getpid()){
-            if (region_info.shared_region->procs[i].status==status)
+    int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
+    int32_t my_pid = getpid();
+    for (i=0;i<proc_num;i++){
+        int32_t slot_pid = atomic_load_explicit(&region_info.shared_region->procs[i].pid, memory_order_acquire);
+        if (slot_pid==my_pid){
+            if (atomic_load_explicit(&region_info.shared_region->procs[i].status, memory_order_acquire)==status)
                 return 1;
             else
                 return 0;
