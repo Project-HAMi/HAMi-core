@@ -255,7 +255,8 @@ entry_t nvml_library_entry[] = {
 };
 
 pthread_once_t init_virtual_map_pre_flag = PTHREAD_ONCE_INIT;
-pthread_once_t init_virtual_map_post_flag = PTHREAD_ONCE_INIT;
+static pthread_mutex_t post_init_mutex = PTHREAD_MUTEX_INITIALIZER;
+static volatile int post_init_done = 0;
 
 typedef void* (*fp_dlsym)(void*, const char*);
 extern fp_dlsym real_dlsym;
@@ -435,8 +436,15 @@ nvmlReturn_t nvmlDeviceGetCount_v2 ( unsigned int* deviceCount ) {
 nvmlReturn_t nvmlInitWithFlags( unsigned int  flags ) {
     LOG_DEBUG("nvmlInitWithFlags")
     pthread_once(&init_virtual_map_pre_flag, (void(*) (void))nvml_preInit);
-    nvmlReturn_t res =  NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInitWithFlags,flags);
-    pthread_once(&init_virtual_map_post_flag,(void (*)(void))nvml_postInit);
+    nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInitWithFlags,flags);
+    if (res == NVML_SUCCESS) {
+        pthread_mutex_lock(&post_init_mutex);
+        if (!post_init_done) {
+            nvml_postInit();
+            post_init_done = 1;
+        }
+        pthread_mutex_unlock(&post_init_mutex);
+    }
     return res;
 }
 
@@ -444,7 +452,14 @@ nvmlReturn_t nvmlInit(void) {
     LOG_DEBUG("nvmlInit")
     pthread_once(&init_virtual_map_pre_flag,(void (*)(void))nvml_preInit);
     nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInit_v2);
-    pthread_once(&init_virtual_map_post_flag,(void (*)(void))nvml_postInit);
+    if (res == NVML_SUCCESS) {
+        pthread_mutex_lock(&post_init_mutex);
+        if (!post_init_done) {
+            nvml_postInit();
+            post_init_done = 1;
+        }
+        pthread_mutex_unlock(&post_init_mutex);
+    }
     return res;
 }
 
@@ -452,7 +467,14 @@ nvmlReturn_t nvmlInit_v2(void) {
     LOG_DEBUG("nvmlInit_v2");
     pthread_once(&init_virtual_map_pre_flag,(void (*)(void))nvml_preInit);
     nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInit_v2);
-    pthread_once(&init_virtual_map_post_flag,(void (*)(void))nvml_postInit);
+    if (res == NVML_SUCCESS) {
+        pthread_mutex_lock(&post_init_mutex);
+        if (!post_init_done) {
+            nvml_postInit();
+            post_init_done = 1;
+        }
+        pthread_mutex_unlock(&post_init_mutex);
+    }
     return res;
 }
 
