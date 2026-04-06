@@ -24,66 +24,71 @@
 #include "include/nvml_override.h"
 
 
-static int g_sm_num;
-static int g_max_thread_per_sm;
-static volatile long g_cur_cuda_cores = 0;
-static volatile long g_total_cuda_cores = 0;
+static int g_sm_num[CUDA_DEVICE_MAX_COUNT];
+static int g_max_thread_per_sm[CUDA_DEVICE_MAX_COUNT];
+static volatile long g_cur_cuda_cores[CUDA_DEVICE_MAX_COUNT] = {0};
+static volatile long g_total_cuda_cores[CUDA_DEVICE_MAX_COUNT] = {0};
 extern int pidfound;
 int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 
 /* Cached at init — these values do not change at runtime */
-static int cached_sm_limit = 0;
+static int cached_sm_limit[CUDA_DEVICE_MAX_COUNT] = {0};
 static int cached_util_switch = 0;
 
 void rate_limiter(int grids, int blocks) {
+  CUdevice current_device;
+  CUresult res = cuCtxGetDevice(&current_device);
+  int device_id = (res == CUDA_SUCCESS) ? (int)current_device : 0;
+
   long before_cuda_cores = 0;
   long after_cuda_cores = 0;
   long kernel_size = grids;
 
   /* Fast exit using cached values — no shared memory access needed */
-  if (cached_sm_limit >= 100 || cached_sm_limit == 0)
+  if (cached_sm_limit[device_id] >= 100 || cached_sm_limit[device_id] == 0) {
       return;
-  if (cached_util_switch == 0)
+  }
+  if (cached_util_switch == 0) {
       return;
+  }
 
   while (get_recent_kernel()<0) {
     sleep(1);
   }
   set_recent_kernel(2);
 
-  LOG_DEBUG("grid: %d, blocks: %d", grids, blocks);
-  LOG_DEBUG("launch kernel %ld, curr core: %ld", kernel_size, g_cur_cuda_cores);
   do {
 CHECK:
-      before_cuda_cores = g_cur_cuda_cores;
-      LOG_DEBUG("current core: %ld", g_cur_cuda_cores);
+      before_cuda_cores = g_cur_cuda_cores[device_id];
       if (before_cuda_cores < 0) {
         nanosleep(&g_cycle, NULL);
         goto CHECK;
       }
       after_cuda_cores = before_cuda_cores - kernel_size;
-  } while (!CAS(&g_cur_cuda_cores, before_cuda_cores, after_cuda_cores));
+  } while (!CAS(&g_cur_cuda_cores[device_id], before_cuda_cores, after_cuda_cores));
+
 }
 
-static void change_token(long delta) {
-  int cuda_cores_before = 0, cuda_cores_after = 0;
+static void change_token(long delta, int device_id) {
+  long cuda_cores_before = 0, cuda_cores_after = 0;
 
-  LOG_DEBUG("delta: %ld, curr: %ld", delta, g_cur_cuda_cores);
+  LOG_DEBUG("device %d: delta: %ld, curr: %ld", device_id, delta, g_cur_cuda_cores[device_id]);
   do {
-    cuda_cores_before = g_cur_cuda_cores;
+    cuda_cores_before = g_cur_cuda_cores[device_id];
     cuda_cores_after = cuda_cores_before + delta;
 
-    if (cuda_cores_after > g_total_cuda_cores) {
-      cuda_cores_after = g_total_cuda_cores;
+    if (cuda_cores_after > g_total_cuda_cores[device_id]) {
+      cuda_cores_after = g_total_cuda_cores[device_id];
     }
-  } while (!CAS(&g_cur_cuda_cores, cuda_cores_before, cuda_cores_after));
+  } while (!CAS(&g_cur_cuda_cores[device_id], cuda_cores_before, cuda_cores_after));
 }
 
-long delta(int up_limit, int user_current, long share) {
+static long delta(int up_limit, int user_current, long share, int device_id) {
   int utilization_diff =
       abs(up_limit - user_current) < 5 ? 5 : abs(up_limit - user_current);
   long increment =
-      (long)g_sm_num * (long)g_sm_num * (long)g_max_thread_per_sm * (long)utilization_diff / 2560;
+      (long)g_sm_num[device_id] * (long)g_sm_num[device_id] *
+      (long)g_max_thread_per_sm[device_id] * (long)utilization_diff / 2560;
 
   /* Accelerate cuda cores allocation when utilization vary widely */
   if (utilization_diff > up_limit / 2) {
@@ -91,8 +96,9 @@ long delta(int up_limit, int user_current, long share) {
   }
 
   if (user_current <= up_limit) {
-    share = (share + increment) > g_total_cuda_cores ? g_total_cuda_cores
-                                                   : (share + increment);
+    share = (share + increment) > g_total_cuda_cores[device_id]
+            ? g_total_cuda_cores[device_id]
+            : (share + increment);
   } else {
     share = (share - increment) < 0 ? 0 : (share - increment);
   }
@@ -116,10 +122,22 @@ unsigned int cuda_to_nvml_map(unsigned int cudadev){
 }
 
 int setspec() {
+    unsigned int device_count;
+
     CHECK_NVML_API(nvmlInit());
-    CHECK_CU_RESULT(cuDeviceGetAttribute(&g_sm_num,CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT,0));
-    CHECK_CU_RESULT(cuDeviceGetAttribute(&g_max_thread_per_sm,CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_MULTIPROCESSOR,0));
-    g_total_cuda_cores = g_max_thread_per_sm * g_sm_num * FACTOR;
+    CHECK_NVML_API(nvmlDeviceGetCount(&device_count));
+
+    for (unsigned int dev = 0; dev < device_count && dev < CUDA_DEVICE_MAX_COUNT; dev++) {
+        CUdevice cu_dev;
+        CHECK_CU_RESULT(cuDeviceGet(&cu_dev, dev));
+        CHECK_CU_RESULT(cuDeviceGetAttribute(&g_sm_num[dev],
+            CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, cu_dev));
+        CHECK_CU_RESULT(cuDeviceGetAttribute(&g_max_thread_per_sm[dev],
+            CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_MULTIPROCESSOR, cu_dev));
+        g_total_cuda_cores[dev] = g_max_thread_per_sm[dev] * g_sm_num[dev] * FACTOR;
+        LOG_INFO("setspec: device %d sm_num=%d max_threads_per_sm=%d total_cores=%ld FACTOR=%d",
+                 dev, g_sm_num[dev], g_max_thread_per_sm[dev], g_total_cuda_cores[dev], FACTOR);
+    }
     return 0;
 }
 
@@ -194,10 +212,16 @@ void* utilization_watcher() {
     nvmlInit();
     int userutil[CUDA_DEVICE_MAX_COUNT];
     int sysprocnum;
-    long share = 0;
-    int upper_limit = get_current_device_sm_limit(0);
+
+    unsigned int device_count;
+    if (nvmlDeviceGetCount(&device_count) != NVML_SUCCESS) {
+        return;
+    }
+
+    long share[CUDA_DEVICE_MAX_COUNT] = {0};
+
     ensure_initialized();
-    LOG_DEBUG("upper_limit=%d\n",upper_limit);
+
     while (1){
         nanosleep(&g_wait, NULL);
         if (pidfound==0) {
@@ -207,31 +231,54 @@ void* utilization_watcher() {
         }
         init_gpu_device_utilization();
         get_used_gpu_utilization(userutil,&sysprocnum);
-        //if (sysprocnum == 1 &&
-        //    userutil < upper_limit / 10) {
-        //    g_cur_cuda_cores =
-        //        delta(upper_limit, userutil, share);
-        //    continue;
-        //}
-        if ((share==g_total_cuda_cores) && (g_cur_cuda_cores<0)) {
-          g_total_cuda_cores *= 2;
-          share = g_total_cuda_cores;
+
+        // Calculate independently for each device
+        for (unsigned int dev = 0; dev < device_count && dev < CUDA_DEVICE_MAX_COUNT; dev++) {
+            if (cached_sm_limit[dev] <= 0 || cached_sm_limit[dev] >= 100) {
+                continue;
+            }
+
+            if ((share[dev]==g_total_cuda_cores[dev]) && (g_cur_cuda_cores[dev]<0)) {
+              g_total_cuda_cores[dev] *= 2;
+              share[dev] = g_total_cuda_cores[dev];
+            }
+
+            if ((userutil[dev]<=100) && (userutil[dev]>=0)){
+              share[dev] = delta(cached_sm_limit[dev], userutil[dev], share[dev], dev);
+              change_token(share[dev], dev);
+            }
+
+            LOG_INFO("device %d: userutil=%d currentcores=%ld total=%ld limit=%d share=%ld\n",
+                     dev, userutil[dev], g_cur_cuda_cores[dev], g_total_cuda_cores[dev],
+                     cached_sm_limit[dev], share[dev]);
         }
-        if ((userutil[0]<=100) && (userutil[0]>=0)){
-          share = delta(upper_limit, userutil[0], share);
-          change_token(share);
-        }
-        LOG_INFO("userutil1=%d currentcores=%ld total=%ld limit=%d share=%ld\n",userutil[0],g_cur_cuda_cores,g_total_cuda_cores,upper_limit,share);
     }
 }
 
 void init_utilization_watcher() {
-    cached_sm_limit = get_current_device_sm_limit(0);
     cached_util_switch = get_utilization_switch();
-    LOG_INFO("set core utilization limit to  %d", cached_sm_limit);
+    LOG_INFO("init_utilization_watcher: util_switch=%d", cached_util_switch);
+
+    unsigned int device_count;
+    if (nvmlDeviceGetCount(&device_count) != NVML_SUCCESS) {
+        LOG_WARN("nvmlDeviceGetCount failed");
+        return;
+    }
+
     setspec();
+
+    // Initialize cached_sm_limit for each device
+    int has_limit = 0;
+    for (unsigned int dev = 0; dev < device_count && dev < CUDA_DEVICE_MAX_COUNT; dev++) {
+        cached_sm_limit[dev] = get_current_device_sm_limit(dev);
+        LOG_INFO("device %d: core utilization limit = %d", dev, cached_sm_limit[dev]);
+        if (cached_sm_limit[dev] > 0 && cached_sm_limit[dev] <= 100) {
+            has_limit = 1;
+        }
+    }
+
     pthread_t tid;
-    if ((cached_sm_limit <= 100) && (cached_sm_limit > 0)) {
+    if (has_limit && cached_util_switch == 1) {
         pthread_create(&tid, NULL, utilization_watcher, NULL);
     }
     return;
