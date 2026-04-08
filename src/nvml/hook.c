@@ -432,6 +432,7 @@ nvmlReturn_t nvmlDeviceGetCount_v2 ( unsigned int* deviceCount ) {
     return NVML_OVERRIDE_CALL(nvml_library_entry,nvmlDeviceGetCount_v2,deviceCount);
 }
 nvmlReturn_t nvmlInitWithFlags(unsigned int flags) {
+    LOG_DEBUG("nvmlInitWithFlags")
     pthread_once(&init_virtual_map_pre_flag, (void(*) (void))nvml_preInit);
     nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInitWithFlags, flags);
 
@@ -442,6 +443,7 @@ nvmlReturn_t nvmlInitWithFlags(unsigned int flags) {
 }
 
 nvmlReturn_t nvmlInit(void) {
+    LOG_DEBUG("nvmlInit")
     pthread_once(&init_virtual_map_pre_flag, (void (*)(void))nvml_preInit);
     nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInit_v2);
     
@@ -452,6 +454,7 @@ nvmlReturn_t nvmlInit(void) {
 }
 
 nvmlReturn_t nvmlInit_v2(void) {
+    LOG_DEBUG("nvmlInit_v2");
     pthread_once(&init_virtual_map_pre_flag, (void (*)(void))nvml_preInit);
     nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInit_v2);
     
