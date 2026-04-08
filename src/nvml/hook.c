@@ -255,8 +255,7 @@ entry_t nvml_library_entry[] = {
 };
 
 pthread_once_t init_virtual_map_pre_flag = PTHREAD_ONCE_INIT;
-static pthread_mutex_t post_init_mutex = PTHREAD_MUTEX_INITIALIZER;
-static volatile int post_init_done = 0;
+pthread_once_t init_virtual_map_post_flag = PTHREAD_ONCE_INIT;
 
 typedef void* (*fp_dlsym)(void*, const char*);
 extern fp_dlsym real_dlsym;
@@ -432,52 +431,35 @@ nvmlReturn_t nvmlDeviceGetCount ( unsigned int* deviceCount ) {
 nvmlReturn_t nvmlDeviceGetCount_v2 ( unsigned int* deviceCount ) {
     return NVML_OVERRIDE_CALL(nvml_library_entry,nvmlDeviceGetCount_v2,deviceCount);
 }
-
-nvmlReturn_t nvmlInitWithFlags( unsigned int  flags ) {
-    LOG_DEBUG("nvmlInitWithFlags")
+nvmlReturn_t nvmlInitWithFlags(unsigned int flags) {
     pthread_once(&init_virtual_map_pre_flag, (void(*) (void))nvml_preInit);
-    nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInitWithFlags,flags);
+    nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInitWithFlags, flags);
+
     if (res == NVML_SUCCESS) {
-        pthread_mutex_lock(&post_init_mutex);
-        if (!post_init_done) {
-            nvml_postInit();
-            post_init_done = 1;
-        }
-        pthread_mutex_unlock(&post_init_mutex);
+        pthread_once(&init_virtual_map_post_flag, (void (*)(void))nvml_postInit);
     }
     return res;
 }
 
 nvmlReturn_t nvmlInit(void) {
-    LOG_DEBUG("nvmlInit")
-    pthread_once(&init_virtual_map_pre_flag,(void (*)(void))nvml_preInit);
+    pthread_once(&init_virtual_map_pre_flag, (void (*)(void))nvml_preInit);
     nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInit_v2);
+    
     if (res == NVML_SUCCESS) {
-        pthread_mutex_lock(&post_init_mutex);
-        if (!post_init_done) {
-            nvml_postInit();
-            post_init_done = 1;
-        }
-        pthread_mutex_unlock(&post_init_mutex);
+        pthread_once(&init_virtual_map_post_flag, (void (*)(void))nvml_postInit);
     }
     return res;
 }
 
 nvmlReturn_t nvmlInit_v2(void) {
-    LOG_DEBUG("nvmlInit_v2");
-    pthread_once(&init_virtual_map_pre_flag,(void (*)(void))nvml_preInit);
+    pthread_once(&init_virtual_map_pre_flag, (void (*)(void))nvml_preInit);
     nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInit_v2);
+    
     if (res == NVML_SUCCESS) {
-        pthread_mutex_lock(&post_init_mutex);
-        if (!post_init_done) {
-            nvml_postInit();
-            post_init_done = 1;
-        }
-        pthread_mutex_unlock(&post_init_mutex);
+        pthread_once(&init_virtual_map_post_flag, (void (*)(void))nvml_postInit);
     }
     return res;
 }
-
 nvmlReturn_t nvmlDeviceGetPciInfo_v3(nvmlDevice_t device, nvmlPciInfo_t *pci) {
   nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetPciInfo_v3, device,
                          pci);
