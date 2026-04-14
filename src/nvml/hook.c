@@ -286,7 +286,7 @@ void load_nvml_libraries() {
 
     table = dlopen(driver_filename, RTLD_NOW | RTLD_NODELETE);
     if (!table) {
-        LOG_WARN("can't find library %s", driver_filename);  
+        LOG_WARN("can't find library %s", driver_filename);
     }
     int i;
     for (i = 0; i < NVML_ENTRY_END; i++) {
@@ -307,7 +307,7 @@ void nvml_preInit() {
     load_nvml_libraries();
     for (int i = 0; i < CUDA_DEVICE_MAX_COUNT; i++) {
         cuda_to_nvml_map_array[i] = i;
-    }   
+    }
 }
 
 void nvml_postInit() {
@@ -363,13 +363,13 @@ nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,void* memory,int versi
             ((nvmlMemory_v2_t *)memory)->total = limit;
             ((nvmlMemory_v2_t *)memory)->used = usage;
             return NVML_SUCCESS;
-        } 
+        }
     }
     return NVML_SUCCESS;
 }
 
 nvmlReturn_t nvmlDeviceGetMemoryInfo(nvmlDevice_t device, nvmlMemory_t* memory) {
-    return _nvmlDeviceGetMemoryInfo(device,memory,1); 
+    return _nvmlDeviceGetMemoryInfo(device,memory,1);
 }
 
 nvmlReturn_t nvmlDeviceGetMemoryInfo_v2(nvmlDevice_t device, nvmlMemory_v2_t* memory) {
@@ -389,14 +389,14 @@ nvmlReturn_t nvmlDeviceGetNvLinkRemotePciInfo ( nvmlDevice_t device, unsigned in
 
 nvmlReturn_t nvmlDeviceGetHandleByIndex ( unsigned int  index, nvmlDevice_t* device ){
     nvmlReturn_t res;
-    LOG_DEBUG("nvmlDeviceGetHandleByIndex index=%u",index); 
+    LOG_DEBUG("nvmlDeviceGetHandleByIndex index=%u",index);
     res = NVML_OVERRIDE_CALL_NO_LOG(nvml_library_entry,nvmlDeviceGetHandleByIndex,index,device);
     return res;
 }
 
 nvmlReturn_t nvmlDeviceGetHandleByIndex_v2 ( unsigned int  index, nvmlDevice_t* device ){
     nvmlReturn_t res;
-    LOG_DEBUG("nvmlDeviceGetHandleByIndex_v2 index=%u",index); 
+    LOG_DEBUG("nvmlDeviceGetHandleByIndex_v2 index=%u",index);
     res = NVML_OVERRIDE_CALL_NO_LOG(nvml_library_entry,nvmlDeviceGetHandleByIndex_v2,index,device);
     return res;
 }
@@ -446,7 +446,7 @@ nvmlReturn_t nvmlInit(void) {
     LOG_DEBUG("nvmlInit")
     pthread_once(&init_virtual_map_pre_flag, (void (*)(void))nvml_preInit);
     nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInit_v2);
-    
+
     if (res == NVML_SUCCESS) {
         pthread_once(&init_virtual_map_post_flag, (void (*)(void))nvml_postInit);
     }
@@ -457,7 +457,7 @@ nvmlReturn_t nvmlInit_v2(void) {
     LOG_DEBUG("nvmlInit_v2");
     pthread_once(&init_virtual_map_pre_flag, (void (*)(void))nvml_preInit);
     nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInit_v2);
-    
+
     if (res == NVML_SUCCESS) {
         pthread_once(&init_virtual_map_post_flag, (void (*)(void))nvml_postInit);
     }
