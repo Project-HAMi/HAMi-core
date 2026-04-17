@@ -160,7 +160,7 @@ CUresult cuMemAllocManaged(CUdeviceptr* dptr, size_t bytesize, unsigned int flag
     LOG_DEBUG("cuMemAllocManaged dptr=%p bytesize=%ld",dptr,bytesize);
     ENSURE_RUNNING();
     CUdevice dev;
-    CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxGetDevice,&dev);
+    CHECK_DRV_API(cuCtxGetDevice(&dev));
     if (oom_check(dev,bytesize)){
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
@@ -178,7 +178,7 @@ CUresult cuMemAllocPitch_v2(CUdeviceptr* dptr, size_t* pPitch, size_t WidthInByt
     size_t bytesize = guess_pitch * Height;
     ENSURE_RUNNING();
     CUdevice dev;
-    CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxGetDevice,&dev);
+    CHECK_DRV_API(cuCtxGetDevice(&dev));
     if (oom_check(dev,bytesize)){
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
@@ -588,8 +588,11 @@ CUresult cuMemCreate ( CUmemGenericAllocationHandle* handle, size_t size, const 
     LOG_INFO("cuMemCreate:%lld:%d", size, prop->location.id);
     ENSURE_RUNNING();
     CUdevice dev;
-    CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxGetDevice, &dev);
-    if (oom_check(dev, size)) {
+    int do_oom_check = (prop->location.type == CU_MEM_LOCATION_TYPE_DEVICE);
+    if (do_oom_check && cuCtxGetDevice(&dev) != CUDA_SUCCESS) {
+        dev = prop->location.id;
+    }
+    if (do_oom_check && oom_check(dev, size)) {
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,
