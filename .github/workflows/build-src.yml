@@ -6,7 +6,18 @@ on: [push, pull_request, workflow_dispatch]
 concurrency: ci-${{ github.ref }}
 
 jobs:
+  hook-registry-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    name: Hook static consistency check
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Run CUDA hook static consistency check
+        run: python3 hack/check_cuda_hook_consistency.py
+
   BuildHamiCoreLib:
+    needs: [hook-registry-check]
     runs-on: ubuntu-latest
     timeout-minutes: 1440
     strategy:
