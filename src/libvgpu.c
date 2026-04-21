@@ -152,8 +152,11 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuGetProcAddress_v2);
     //Context
     //DLSYM_HOOK_FUNC(cuCtxGetDevice);
+#if CUDA_VERSION < 13000
     DLSYM_HOOK_FUNC(cuCtxCreate_v2);
     DLSYM_HOOK_FUNC(cuCtxCreate_v3);
+#endif
+    DLSYM_HOOK_FUNC(cuCtxCreate_v4);
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxGetState);
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxRetain);
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxSetFlags_v2);
@@ -208,6 +211,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuDeviceGetDefaultMemPool);
     DLSYM_HOOK_FUNC(cuDeviceGetLuid);
     DLSYM_HOOK_FUNC(cuDeviceGetUuid);
+    DLSYM_HOOK_FUNC(cuDeviceGetUuid_v2);
     DLSYM_HOOK_FUNC(cuDeviceGetMemPool);
     DLSYM_HOOK_FUNC(cuDeviceTotalMem_v2);
     DLSYM_HOOK_FUNC(cuPointerGetAttributes);
@@ -249,6 +253,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemsetD8_v2);
     DLSYM_HOOK_FUNC(cuMemsetD8Async);
     DLSYM_HOOK_FUNC(cuMemAdvise);
+    DLSYM_HOOK_FUNC(cuMemAdvise_v2);
     DLSYM_HOOK_FUNC(cuEventCreate);
     DLSYM_HOOK_FUNC(cuEventDestroy_v2);
     DLSYM_HOOK_FUNC(cuModuleLoad);
@@ -295,6 +300,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemcpy3DPeer);
     DLSYM_HOOK_FUNC(cuMemcpy3DPeerAsync);
     DLSYM_HOOK_FUNC(cuMemPrefetchAsync);
+    DLSYM_HOOK_FUNC(cuMemPrefetchAsync_v2);
     DLSYM_HOOK_FUNC(cuMemRangeGetAttribute);
     DLSYM_HOOK_FUNC(cuMemRangeGetAttributes);
     // cuda 11.7 external resource interoperability
@@ -343,10 +349,15 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuGraphGetNodes);
     DLSYM_HOOK_FUNC(cuGraphGetRootNodes);
     DLSYM_HOOK_FUNC(cuGraphGetEdges);
+    DLSYM_HOOK_FUNC(cuGraphGetEdges_v2);
     DLSYM_HOOK_FUNC(cuGraphNodeGetDependencies);
+    DLSYM_HOOK_FUNC(cuGraphNodeGetDependencies_v2);
     DLSYM_HOOK_FUNC(cuGraphNodeGetDependentNodes);
+    DLSYM_HOOK_FUNC(cuGraphNodeGetDependentNodes_v2);
     DLSYM_HOOK_FUNC(cuGraphAddDependencies);
+    DLSYM_HOOK_FUNC(cuGraphAddDependencies_v2);
     DLSYM_HOOK_FUNC(cuGraphRemoveDependencies);
+    DLSYM_HOOK_FUNC(cuGraphRemoveDependencies_v2);
     DLSYM_HOOK_FUNC(cuGraphDestroyNode);
     DLSYM_HOOK_FUNC(cuGraphInstantiate);
     DLSYM_HOOK_FUNC(cuGraphInstantiateWithFlags);
