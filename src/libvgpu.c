@@ -99,9 +99,12 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
         }
         if (real_dlsym == NULL) {
             LOG_ERROR("real dlsym not found");
-            real_dlsym = _dl_sym(RTLD_NEXT, "dlsym", dlsym);
+            void *libc_handle = dlopen("libc.so.6", RTLD_LAZY);
+            if (libc_handle) {
+                real_dlsym = dlsym(libc_handle, "dlsym");
+            }
             if (real_dlsym == NULL)
-                LOG_ERROR("real dlsym not found");
+                LOG_ERROR("real dlsym not found after trying libc.so.6");
         }
     }
     if (handle == RTLD_NEXT) {
@@ -858,9 +861,12 @@ void preInit(){
         real_dlsym = dlvsym(RTLD_NEXT,"dlsym","GLIBC_2.2.5");
         if (real_dlsym == NULL) {
             LOG_ERROR("real dlsym not found");
-            real_dlsym = _dl_sym(RTLD_NEXT, "dlsym", dlsym);
-            if (real_dlsym == NULL)
+            void *libc_handle = dlopen("libc.so.6", RTLD_LAZY);
+            if (libc_handle) {
+                real_dlsym = dlsym(libc_handle, "dlsym");
+            } else {
                 LOG_ERROR("real dlsym not found");
+            }
         }
     }
     real_realpath = NULL;
