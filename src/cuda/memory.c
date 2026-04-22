@@ -194,9 +194,19 @@ CUresult cuMemFree_v2(CUdeviceptr dptr) {
     if (dptr == 0) {  // NULL
         return CUDA_SUCCESS;
     }
-    CUresult res = free_raw(dptr);
-    LOG_INFO("after free_raw dptr=%p res=%d",(void *)dptr,res);
-    return res;
+    /* free_raw returns 0 when the pointer was tracked by HAMi (it calls the
+     * real cuMemFree_v2 internally), -1 when unknown. Pointers can be
+     * unknown when: (a) allocated via paths that bypass HAMi's add_chunk
+     * (e.g., cuMemAllocManaged, cuMemCreate/cuMemMap VMM flow, or CUDA
+     * runtime cudaMalloc called before HAMi's preload took effect) or
+     * (b) already freed. Casting -1 to CUresult yields 0xFFFFFFFF which
+     * downstream plugins like Isaac Sim's carb.cudainterop flag as
+     * "unrecognized error code -1". Fall through to the real driver so
+     * the actual behaviour matches an un-hooked runtime. */
+    int rc = free_raw(dptr);
+    LOG_INFO("after free_raw dptr=%p rc=%d",(void *)dptr,rc);
+    if (rc == 0) return CUDA_SUCCESS;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFree_v2, dptr);
 }
 
 
@@ -647,10 +657,13 @@ CUresult cuMemFreeAsync(CUdeviceptr dptr, CUstream hStream) {
     if (dptr == 0) {  // NULL
         return CUDA_SUCCESS;
     }
-    CUresult res = free_raw_async(dptr,hStream);
-    //CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemFreeAsync,dptr,hStream); 
-    LOG_DEBUG("after free_raw_async dptr=%p res=%d",(void *)dptr,res);
-    return res;
+    /* Same unknown-pointer fallback as cuMemFree_v2: return CUDA_SUCCESS
+     * when tracked (free_raw_async already called the real driver), else
+     * forward to driver instead of leaking a bogus -1 CUresult. */
+    int rc = free_raw_async(dptr, hStream);
+    LOG_DEBUG("after free_raw_async dptr=%p rc=%d",(void *)dptr, rc);
+    if (rc == 0) return CUDA_SUCCESS;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFreeAsync, dptr, hStream);
 }
 
 CUresult cuMemHostGetDevicePointer_v2(CUdeviceptr *pdptr, void *p, unsigned int Flags){
