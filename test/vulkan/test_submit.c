@@ -20,6 +20,9 @@ size_t hami_budget_of(int dev) { (void)dev; return 0; }
 int    hami_budget_reserve(int dev, size_t size) { (void)dev;(void)size; return 1; }
 void   hami_budget_release(int dev, size_t size) { (void)dev;(void)size; }
 
+/* NVML-based physdev resolver stub. */
+int hami_vk_physdev_index(VkPhysicalDevice p) { (void)p; return 0; }
+
 extern VKAPI_ATTR VkResult VKAPI_CALL
 hami_vkQueueSubmit(VkQueue, uint32_t, const VkSubmitInfo*, VkFence);
 extern void hami_vk_register_queue(VkQueue q, VkDevice d);
