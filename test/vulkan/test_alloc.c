@@ -17,6 +17,10 @@ int    hami_budget_reserve(int dev, size_t size) {
 }
 void   hami_budget_release(int dev, size_t size) { (void)dev; g_used -= size; }
 
+/* Throttle stub — hooks_submit.c references it, but this test does not
+ * exercise the submit path. */
+void hami_vulkan_throttle(void) {}
+
 static VkResult VKAPI_CALL fake_alloc(VkDevice d, const VkMemoryAllocateInfo *i,
                                       const VkAllocationCallbacks *a, VkDeviceMemory *m) {
     (void)d;(void)a; *m = (VkDeviceMemory)(uintptr_t)(i->allocationSize);

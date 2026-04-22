@@ -87,6 +87,26 @@ hami_vkDestroyDevice(VkDevice device, const VkAllocationCallbacks *pAllocator) {
     hami_device_unregister(device);
 }
 
+extern void hami_vk_register_queue(VkQueue q, VkDevice d);
+
+static VKAPI_ATTR void VKAPI_CALL
+hami_vkGetDeviceQueue(VkDevice device, uint32_t family, uint32_t index, VkQueue *pQueue) {
+    hami_device_dispatch_t *d = hami_device_lookup(device);
+    if (!d) { *pQueue = VK_NULL_HANDLE; return; }
+    PFN_vkGetDeviceQueue next = (PFN_vkGetDeviceQueue)d->next_gdpa(device, "vkGetDeviceQueue");
+    next(device, family, index, pQueue);
+    if (*pQueue) hami_vk_register_queue(*pQueue, device);
+}
+
+static VKAPI_ATTR void VKAPI_CALL
+hami_vkGetDeviceQueue2(VkDevice device, const VkDeviceQueueInfo2 *pInfo, VkQueue *pQueue) {
+    hami_device_dispatch_t *d = hami_device_lookup(device);
+    if (!d) { *pQueue = VK_NULL_HANDLE; return; }
+    PFN_vkGetDeviceQueue2 next = (PFN_vkGetDeviceQueue2)d->next_gdpa(device, "vkGetDeviceQueue2");
+    next(device, pInfo, pQueue);
+    if (*pQueue) hami_vk_register_queue(*pQueue, device);
+}
+
 /* GIPA / GDPA: return our wrappers for hooked names, next-layer for the rest. */
 
 /* Hooked functions implemented in other TUs; declarations here. */
@@ -121,6 +141,8 @@ hami_vkGetDeviceProcAddr(VkDevice device, const char *pName) {
     HAMI_HOOK(FreeMemory);
     HAMI_HOOK(QueueSubmit);
     HAMI_HOOK(QueueSubmit2);
+    HAMI_HOOK(GetDeviceQueue);
+    HAMI_HOOK(GetDeviceQueue2);
 
     hami_device_dispatch_t *d = hami_device_lookup(device);
     if (!d) return NULL;
@@ -140,11 +162,3 @@ vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface *pVersionStruct
     pVersionStruct->pfnGetPhysicalDeviceProcAddr = NULL;
     return VK_SUCCESS;
 }
-
-/* Placeholders — real bodies live in hooks_memory.c / hooks_alloc.c / hooks_submit.c.
-   Stubs here keep layer.c linkable while the remaining hook TU
-   lands over Task 1.5 (submit). */
-#ifndef HAMI_VK_HOOKS_PRESENT
-VKAPI_ATTR VkResult VKAPI_CALL hami_vkQueueSubmit(VkQueue q, uint32_t n, const VkSubmitInfo *s, VkFence f) { (void)q;(void)n;(void)s;(void)f; return VK_SUCCESS; }
-VKAPI_ATTR VkResult VKAPI_CALL hami_vkQueueSubmit2(VkQueue q, uint32_t n, const VkSubmitInfo2 *s, VkFence f) { (void)q;(void)n;(void)s;(void)f; return VK_SUCCESS; }
-#endif
