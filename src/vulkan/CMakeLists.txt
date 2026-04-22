@@ -14,6 +14,7 @@ add_library(vulkan_mod OBJECT
     hooks_submit.c
     throttle_adapter.c
     budget.c
+    physdev_index.c
 )
 
 target_include_directories(vulkan_mod PRIVATE

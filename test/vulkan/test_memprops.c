@@ -14,6 +14,10 @@ void   hami_budget_release(int dev, size_t size) { (void)dev; (void)size; }
  * exercise the submit path. */
 void hami_vulkan_throttle(void) {}
 
+/* Stub the NVML UUID resolver — the real version calls into NVML/Vulkan
+ * which aren't available in this unit test harness. Always report device 0. */
+int hami_vk_physdev_index(VkPhysicalDevice p) { (void)p; return 0; }
+
 static void VKAPI_CALL fake_next(VkPhysicalDevice p, VkPhysicalDeviceMemoryProperties *out) {
     (void)p;
     memset(out, 0, sizeof(*out));

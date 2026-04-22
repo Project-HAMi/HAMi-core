@@ -21,6 +21,9 @@ void   hami_budget_release(int dev, size_t size) { (void)dev; g_used -= size; }
  * exercise the submit path. */
 void hami_vulkan_throttle(void) {}
 
+/* Stub the NVML UUID resolver — always report device 0. */
+int hami_vk_physdev_index(VkPhysicalDevice p) { (void)p; return 0; }
+
 static VkResult VKAPI_CALL fake_alloc(VkDevice d, const VkMemoryAllocateInfo *i,
                                       const VkAllocationCallbacks *a, VkDeviceMemory *m) {
     (void)d;(void)a; *m = (VkDeviceMemory)(uintptr_t)(i->allocationSize);

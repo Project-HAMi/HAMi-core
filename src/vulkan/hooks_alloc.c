@@ -1,5 +1,6 @@
 #include "dispatch.h"
 #include "budget.h"
+#include "physdev_index.h"
 #include <pthread.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -15,7 +16,9 @@ static mem_entry_t *g_mem_head = NULL;
 static pthread_mutex_t g_mem_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static int device_to_index(VkDevice d) {
-    return (int)(((uintptr_t)d >> 4) & 0xff);
+    hami_device_dispatch_t *dd = hami_device_lookup(d);
+    if (!dd) return -1;
+    return hami_vk_physdev_index(dd->physical);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL
@@ -25,12 +28,12 @@ hami_vkAllocateMemory(VkDevice device, const VkMemoryAllocateInfo *pInfo,
     if (!d || !d->AllocateMemory) return VK_ERROR_INITIALIZATION_FAILED;
 
     int idx = device_to_index(device);
-    if (!hami_budget_reserve(idx, pInfo->allocationSize))
+    if (idx >= 0 && !hami_budget_reserve(idx, pInfo->allocationSize))
         return VK_ERROR_OUT_OF_DEVICE_MEMORY;
 
     VkResult r = d->AllocateMemory(device, pInfo, pAlloc, pMem);
     if (r != VK_SUCCESS) {
-        hami_budget_release(idx, pInfo->allocationSize);
+        if (idx >= 0) hami_budget_release(idx, pInfo->allocationSize);
         return r;
     }
 
@@ -58,7 +61,7 @@ hami_vkFreeMemory(VkDevice device, VkDeviceMemory mem, const VkAllocationCallbac
         mem_entry_t *victim = *pp;
         *pp = victim->next;
         pthread_mutex_unlock(&g_mem_lock);
-        hami_budget_release(victim->dev_idx, victim->size);
+        if (victim->dev_idx >= 0) hami_budget_release(victim->dev_idx, victim->size);
         free(victim);
         return;
     }
