@@ -142,15 +142,10 @@ vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface *pVersionStruct
 }
 
 /* Placeholders — real bodies live in hooks_memory.c / hooks_submit.c.
-   Define weak stubs here so layer.c alone compiles during TDD of Task 1.1. */
+   Stubs here keep layer.c linkable while the remaining hook TUs
+   land over Task 1.3 (allocate/free) and Task 1.5 (submit). */
 #ifndef HAMI_VK_HOOKS_PRESENT
-void hami_vk_hook_instance(hami_instance_dispatch_t *d) { (void)d; }
 void hami_vk_hook_device(hami_device_dispatch_t *d)     { (void)d; }
-VKAPI_ATTR void VKAPI_CALL hami_vkGetPhysicalDeviceMemoryProperties(VkPhysicalDevice p, VkPhysicalDeviceMemoryProperties *o) {
-    extern hami_instance_dispatch_t *g_inst_head;
-    hami_instance_dispatch_t *d = g_inst_head; (void)d; (void)p; (void)o;
-}
-VKAPI_ATTR void VKAPI_CALL hami_vkGetPhysicalDeviceMemoryProperties2(VkPhysicalDevice p, VkPhysicalDeviceMemoryProperties2 *o) { (void)p; (void)o; }
 VKAPI_ATTR VkResult VKAPI_CALL hami_vkAllocateMemory(VkDevice d, const VkMemoryAllocateInfo *i, const VkAllocationCallbacks *a, VkDeviceMemory *m) { (void)d;(void)i;(void)a;(void)m; return VK_ERROR_OUT_OF_DEVICE_MEMORY; }
 VKAPI_ATTR void     VKAPI_CALL hami_vkFreeMemory(VkDevice d, VkDeviceMemory m, const VkAllocationCallbacks *a) { (void)d;(void)m;(void)a; }
 VKAPI_ATTR VkResult VKAPI_CALL hami_vkQueueSubmit(VkQueue q, uint32_t n, const VkSubmitInfo *s, VkFence f) { (void)q;(void)n;(void)s;(void)f; return VK_SUCCESS; }

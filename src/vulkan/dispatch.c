@@ -8,6 +8,7 @@ hami_device_dispatch_t   *g_dev_head  = NULL;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void *resolve(PFN_vkGetInstanceProcAddr gipa, VkInstance inst, const char *name) {
+    if (!gipa) return NULL;  /* unit-test path: caller fills fn pointers manually */
     return (void *)gipa(inst, name);
 }
 
@@ -44,6 +45,7 @@ void hami_instance_unregister(VkInstance inst) {
 }
 
 static void *resolve_dev(PFN_vkGetDeviceProcAddr gdpa, VkDevice dev, const char *name) {
+    if (!gdpa) return NULL;  /* unit-test path: caller fills fn pointers manually */
     return (void *)gdpa(dev, name);
 }
 
