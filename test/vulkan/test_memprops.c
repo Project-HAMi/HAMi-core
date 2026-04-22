@@ -5,8 +5,10 @@
 #include <vulkan/vulkan.h>
 #include "../../src/vulkan/dispatch.h"
 
-/* Budget-adapter stub — real impl in Task 1.6 (src/vulkan/budget.c). */
+/* Budget-adapter stubs — real impl in Task 1.6 (src/vulkan/budget.c). */
 size_t hami_budget_of(int dev) { (void)dev; return 1ull << 30; /* 1 GiB */ }
+int    hami_budget_reserve(int dev, size_t size) { (void)dev; (void)size; return 1; }
+void   hami_budget_release(int dev, size_t size) { (void)dev; (void)size; }
 
 static void VKAPI_CALL fake_next(VkPhysicalDevice p, VkPhysicalDeviceMemoryProperties *out) {
     (void)p;
