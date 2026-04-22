@@ -38,7 +38,7 @@
                     __FILE__, __LINE__, cudaGetErrorString(err)); \
             exit(1); \
         } \
-    } while(0)
+    } while (0)
 
 // Busy kernel that consumes GPU resources
 __global__ void busyKernel(double* data, int N, int iterations) {

@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <semaphore.h>
 #include <unistd.h>
 #include <time.h>
@@ -26,8 +27,8 @@
 
 static int g_sm_num[CUDA_DEVICE_MAX_COUNT];
 static int g_max_thread_per_sm[CUDA_DEVICE_MAX_COUNT];
-static volatile long g_cur_cuda_cores[CUDA_DEVICE_MAX_COUNT] = {0};
-static volatile long g_total_cuda_cores[CUDA_DEVICE_MAX_COUNT] = {0};
+static volatile int64_t g_cur_cuda_cores[CUDA_DEVICE_MAX_COUNT] = {0};
+static volatile int64_t g_total_cuda_cores[CUDA_DEVICE_MAX_COUNT] = {0};
 extern int pidfound;
 int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 
@@ -40,9 +41,9 @@ void rate_limiter(int grids, int blocks) {
   CUresult res = cuCtxGetDevice(&current_device);
   int device_id = (res == CUDA_SUCCESS) ? (int)current_device : 0;
 
-  long before_cuda_cores = 0;
-  long after_cuda_cores = 0;
-  long kernel_size = grids;
+  int64_t before_cuda_cores = 0;
+  int64_t after_cuda_cores = 0;
+  int64_t kernel_size = grids;
 
   /* Fast exit using cached values — no shared memory access needed */
   if (cached_sm_limit[device_id] >= 100 || cached_sm_limit[device_id] == 0) {
@@ -66,11 +67,10 @@ CHECK:
       }
       after_cuda_cores = before_cuda_cores - kernel_size;
   } while (!CAS(&g_cur_cuda_cores[device_id], before_cuda_cores, after_cuda_cores));
-
 }
 
-static void change_token(long delta, int device_id) {
-  long cuda_cores_before = 0, cuda_cores_after = 0;
+static void change_token(int64_t delta, int device_id) {
+  int64_t cuda_cores_before = 0, cuda_cores_after = 0;
 
   LOG_DEBUG("device %d: delta: %ld, curr: %ld", device_id, delta, g_cur_cuda_cores[device_id]);
   do {
@@ -83,12 +83,12 @@ static void change_token(long delta, int device_id) {
   } while (!CAS(&g_cur_cuda_cores[device_id], cuda_cores_before, cuda_cores_after));
 }
 
-static long delta(int up_limit, int user_current, long share, int device_id) {
+static int64_t delta(int up_limit, int user_current, int64_t share, int device_id) {
   int utilization_diff =
       abs(up_limit - user_current) < 5 ? 5 : abs(up_limit - user_current);
-  long increment =
-      (long)g_sm_num[device_id] * (long)g_sm_num[device_id] *
-      (long)g_max_thread_per_sm[device_id] * (long)utilization_diff / 2560;
+  int64_t increment =
+      (int64_t)g_sm_num[device_id] * (int64_t)g_sm_num[device_id] *
+      (int64_t)g_max_thread_per_sm[device_id] * (int64_t)utilization_diff / 2560;
 
   /* Accelerate cuda cores allocation when utilization vary widely */
   if (utilization_diff > up_limit / 2) {
@@ -218,7 +218,7 @@ void* utilization_watcher() {
         return;
     }
 
-    long share[CUDA_DEVICE_MAX_COUNT] = {0};
+    int64_t share[CUDA_DEVICE_MAX_COUNT] = {0};
 
     ensure_initialized();
 
@@ -238,12 +238,12 @@ void* utilization_watcher() {
                 continue;
             }
 
-            if ((share[dev]==g_total_cuda_cores[dev]) && (g_cur_cuda_cores[dev]<0)) {
+            if ((share[dev] == g_total_cuda_cores[dev]) && (g_cur_cuda_cores[dev] < 0)) {
               g_total_cuda_cores[dev] *= 2;
               share[dev] = g_total_cuda_cores[dev];
             }
 
-            if ((userutil[dev]<=100) && (userutil[dev]>=0)){
+            if ((userutil[dev] <= 100) && (userutil[dev] >= 0)) {
               share[dev] = delta(cached_sm_limit[dev], userutil[dev], share[dev], dev);
               change_token(share[dev], dev);
             }
