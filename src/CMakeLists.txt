@@ -12,9 +12,10 @@ add_subdirectory(multiprocess)
 add_subdirectory(allocator)
 add_subdirectory(cuda)
 add_subdirectory(nvml)
+add_subdirectory(vulkan)
 
 set(LIBVGPU vgpu)
-add_library(${LIBVGPU} SHARED libvgpu.c utils.c log_utils.c $<TARGET_OBJECTS:nvml_mod> $<TARGET_OBJECTS:cuda_mod> $<TARGET_OBJECTS:allocator_mod> $<TARGET_OBJECTS:multiprocess_mod>)
+add_library(${LIBVGPU} SHARED libvgpu.c utils.c log_utils.c $<TARGET_OBJECTS:nvml_mod> $<TARGET_OBJECTS:cuda_mod> $<TARGET_OBJECTS:allocator_mod> $<TARGET_OBJECTS:multiprocess_mod> $<TARGET_OBJECTS:vulkan_mod>)
 target_compile_options(${LIBVGPU} PUBLIC ${LIBRARY_COMPILE_FLAGS})
 target_link_libraries(${LIBVGPU} PUBLIC -lcuda -lnvidia-ml)
 
