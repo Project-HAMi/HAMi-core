@@ -22,7 +22,9 @@ typedef struct hami_device_dispatch {
     PFN_vkAllocateMemory AllocateMemory;
     PFN_vkFreeMemory FreeMemory;
     PFN_vkQueueSubmit QueueSubmit;
+#if defined(VK_VERSION_1_3)
     PFN_vkQueueSubmit2 QueueSubmit2;
+#endif
     struct hami_device_dispatch *next;
 } hami_device_dispatch_t;
 

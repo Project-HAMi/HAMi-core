@@ -35,6 +35,7 @@ hami_vkQueueSubmit(VkQueue queue, uint32_t n, const VkSubmitInfo *p, VkFence f) 
     return dd->QueueSubmit(queue, n, p, f);
 }
 
+#if defined(VK_VERSION_1_3)
 VKAPI_ATTR VkResult VKAPI_CALL
 hami_vkQueueSubmit2(VkQueue queue, uint32_t n, const VkSubmitInfo2 *p, VkFence f) {
     VkDevice d = device_for_queue(queue);
@@ -43,3 +44,4 @@ hami_vkQueueSubmit2(VkQueue queue, uint32_t n, const VkSubmitInfo2 *p, VkFence f
     hami_vulkan_throttle();
     return dd->QueueSubmit2(queue, n, p, f);
 }
+#endif

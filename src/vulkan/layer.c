@@ -115,7 +115,9 @@ VKAPI_ATTR void VKAPI_CALL hami_vkGetPhysicalDeviceMemoryProperties2(VkPhysicalD
 VKAPI_ATTR VkResult VKAPI_CALL hami_vkAllocateMemory(VkDevice, const VkMemoryAllocateInfo*, const VkAllocationCallbacks*, VkDeviceMemory*);
 VKAPI_ATTR void     VKAPI_CALL hami_vkFreeMemory(VkDevice, VkDeviceMemory, const VkAllocationCallbacks*);
 VKAPI_ATTR VkResult VKAPI_CALL hami_vkQueueSubmit(VkQueue, uint32_t, const VkSubmitInfo*, VkFence);
+#if defined(VK_VERSION_1_3)
 VKAPI_ATTR VkResult VKAPI_CALL hami_vkQueueSubmit2(VkQueue, uint32_t, const VkSubmitInfo2*, VkFence);
+#endif
 
 #define HAMI_HOOK(name) do { if (strcmp(pName, "vk" #name) == 0) return (PFN_vkVoidFunction)hami_vk##name; } while (0)
 
@@ -140,7 +142,9 @@ hami_vkGetDeviceProcAddr(VkDevice device, const char *pName) {
     HAMI_HOOK(AllocateMemory);
     HAMI_HOOK(FreeMemory);
     HAMI_HOOK(QueueSubmit);
+#if defined(VK_VERSION_1_3)
     HAMI_HOOK(QueueSubmit2);
+#endif
     HAMI_HOOK(GetDeviceQueue);
     HAMI_HOOK(GetDeviceQueue2);
 

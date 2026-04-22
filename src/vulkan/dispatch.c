@@ -58,7 +58,9 @@ hami_device_dispatch_t *hami_device_register(VkDevice dev, VkPhysicalDevice phys
     d->AllocateMemory  = (PFN_vkAllocateMemory)  resolve_dev(gdpa, dev, "vkAllocateMemory");
     d->FreeMemory      = (PFN_vkFreeMemory)      resolve_dev(gdpa, dev, "vkFreeMemory");
     d->QueueSubmit     = (PFN_vkQueueSubmit)     resolve_dev(gdpa, dev, "vkQueueSubmit");
+#if defined(VK_VERSION_1_3)
     d->QueueSubmit2    = (PFN_vkQueueSubmit2)    resolve_dev(gdpa, dev, "vkQueueSubmit2");
+#endif
 
     pthread_mutex_lock(&g_lock);
     d->next = g_dev_head;
