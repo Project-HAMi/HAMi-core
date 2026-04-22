@@ -64,6 +64,9 @@ static int nvml_index_for_uuid(const uint8_t vk_uuid[16]) {
     return -1;
 }
 
+/* Defined in dispatch.c (non-static, exported to sibling TUs). */
+extern hami_instance_dispatch_t *g_inst_head;
+
 static int resolve_via_vulkan_props(VkPhysicalDevice p, uint8_t out_uuid[16]) {
     /* Walk registered instance dispatches and use whichever next-layer
      * GetPhysicalDeviceProperties2 is available to read the deviceUUID. */
