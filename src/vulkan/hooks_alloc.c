@@ -1,11 +1,8 @@
 #include "dispatch.h"
+#include "budget.h"
 #include <pthread.h>
 #include <stdlib.h>
 #include <stdint.h>
-
-/* Implemented by src/vulkan/budget.c (Task 1.6); unit tests provide stubs. */
-int    hami_budget_reserve(int dev, size_t size);
-void   hami_budget_release(int dev, size_t size);
 
 typedef struct mem_entry {
     VkDeviceMemory handle;

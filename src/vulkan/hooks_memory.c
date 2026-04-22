@@ -1,9 +1,7 @@
 #include "dispatch.h"
+#include "budget.h"
 #include <stdint.h>
 #include <string.h>
-
-/* Provided by src/vulkan/budget.c (Task 1.6) or by unit test stubs. */
-size_t hami_budget_of(int dev);
 
 /* Provisional device-index heuristic. The plan calls out replacing this
  * with an NVML UUID lookup once the adapter in Task 1.6 lands — for
