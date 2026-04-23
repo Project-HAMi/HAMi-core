@@ -71,7 +71,6 @@ int main() {
         return 1;
     }
 
-    CHECK_NVML_API(nvmlShutdown());
     CHECK_DRV_API(cuCtxDestroy(ctx));
     return 0;
 }

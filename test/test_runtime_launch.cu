@@ -46,7 +46,6 @@ int main() {
 
     cudaFree(d_data);
 
-    sleep(100);
-    printf("completed");
+    printf("completed\n");
     return 0;
 }
