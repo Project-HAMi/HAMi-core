@@ -51,13 +51,13 @@
 #define SEQ_AFTER_DEC 9
 
 #ifndef SEQ_POINT_MARK
-    #define SEQ_POINT_MARK(s) 
+    #define SEQ_POINT_MARK(s)
 #endif
 
 #define FACTOR 32
 
 #define MAJOR_VERSION 1
-#define MINOR_VERSION 1
+#define MINOR_VERSION 2
 
 typedef struct {
     _Atomic uint64_t context_size;
@@ -78,11 +78,11 @@ typedef struct {
 typedef struct {
     _Atomic int32_t pid;           // Atomic to detect slot allocation
     _Atomic int32_t hostpid;
-    _Atomic uint64_t seqlock;      // Sequence lock for consistent snapshots
     device_memory_t used[CUDA_DEVICE_MAX_COUNT];
     _Atomic uint64_t monitorused[CUDA_DEVICE_MAX_COUNT];
     device_util_t device_util[CUDA_DEVICE_MAX_COUNT];
     _Atomic int32_t status;
+    _Atomic uint64_t seqlock;      // Sequence lock for consistent snapshots
     uint64_t unused[2];
 } shrreg_proc_slot_t;
 
@@ -95,7 +95,6 @@ typedef struct {
     _Atomic int32_t sm_init_flag;
     _Atomic size_t owner_pid;
     sem_t sem;  // Only for process slot add/remove
-    sem_t sem_postinit;  // For serializing postInit() host PID detection
     uint64_t device_num;
     uuid uuids[CUDA_DEVICE_MAX_COUNT];
     uint64_t limit[CUDA_DEVICE_MAX_COUNT];
@@ -106,7 +105,7 @@ typedef struct {
     _Atomic int recent_kernel;
     int priority;
     _Atomic uint64_t last_kernel_time;
-    uint64_t unused[4];
+    sem_t sem_postinit;  // For serializing postInit() host PID detection
 } shared_region_t;
 
 typedef struct {
