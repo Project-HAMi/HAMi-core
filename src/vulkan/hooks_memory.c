@@ -23,11 +23,19 @@ static int hami_vk_trace_enabled_local(void) {
 } while (0)
 
 static void clamp_heaps(VkPhysicalDevice p, uint32_t *count, VkMemoryHeap *heaps) {
+    HAMI_TRACE("clamp_heaps ENTER physDev=%p count=%u", (void *)p, (unsigned)*count);
     int dev = hami_vk_physdev_index(p);
-    if (dev < 0) return;          /* unresolved (e.g. software rasterizer) */
+    HAMI_TRACE("clamp_heaps physdev_index -> dev=%d", dev);
+    if (dev < 0) {
+        HAMI_TRACE("clamp_heaps EARLY RETURN (dev<0, unresolved physical device)");
+        return;
+    }
     size_t budget = hami_budget_of(dev);
     HAMI_TRACE("clamp_heaps dev=%d budget=%zu count=%u", dev, budget, (unsigned)*count);
-    if (budget == 0) return;      /* unlimited — preserve reported heap size */
+    if (budget == 0) {
+        HAMI_TRACE("clamp_heaps EARLY RETURN (budget=0, unlimited)");
+        return;
+    }
     for (uint32_t i = 0; i < *count; ++i) {
         if ((heaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) == 0) continue;
         if (heaps[i].size > budget) {

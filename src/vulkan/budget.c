@@ -2,7 +2,24 @@
 
 #include <pthread.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>   /* getpid */
+
+static int hami_vk_trace_enabled_local(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        const char *e = getenv("HAMI_VK_TRACE");
+        cached = (e && e[0] == '1') ? 1 : 0;
+    }
+    return cached;
+}
+#define HAMI_TRACE(fmt, ...) do {                                              \
+    if (hami_vk_trace_enabled_local()) {                                        \
+        fprintf(stderr, "HAMI_VK_TRACE: " fmt "\n", ##__VA_ARGS__);             \
+        fflush(stderr);                                                         \
+    }                                                                           \
+} while (0)
 
 /* HAMi-core internal symbols — linked from the same libvgpu.so.
  * See docs/superpowers/plans/notes/hami-core-layout.md for semantics. */
@@ -32,14 +49,23 @@ static void hami_core_init_once(void) { (void)cuInit(0); }
 
 int hami_budget_reserve(int dev, size_t size) {
     pthread_once(&g_hami_core_init, hami_core_init_once);
-    if (get_current_device_memory_limit(dev) == 0) {
+    uint64_t limit = get_current_device_memory_limit(dev);
+    HAMI_TRACE("budget_reserve dev=%d size=%zu limit=%llu", dev, size, (unsigned long long)limit);
+    if (limit == 0) {
         /* Unlimited — skip check, but still bump the counter so metrics
          * remain accurate. add_gpu_device_memory_usage returns 0 on
          * success; treat any failure as OOM (shared region saturated). */
-        return add_gpu_device_memory_usage(getpid(), dev, size, HAMI_MEM_TYPE_DEVICE) == 0;
+        int rc = add_gpu_device_memory_usage(getpid(), dev, size, HAMI_MEM_TYPE_DEVICE);
+        HAMI_TRACE("budget_reserve (unlimited path) add_usage rc=%d -> reserve %s",
+                   rc, rc == 0 ? "OK" : "FAIL");
+        return rc == 0;
     }
-    if (oom_check(dev, size)) return 0;   /* would exceed budget */
-    return add_gpu_device_memory_usage(getpid(), dev, size, HAMI_MEM_TYPE_DEVICE) == 0;
+    int oom = oom_check(dev, size);
+    HAMI_TRACE("budget_reserve oom_check dev=%d size=%zu -> %d", dev, size, oom);
+    if (oom) return 0;
+    int rc = add_gpu_device_memory_usage(getpid(), dev, size, HAMI_MEM_TYPE_DEVICE);
+    HAMI_TRACE("budget_reserve add_usage rc=%d -> reserve %s", rc, rc == 0 ? "OK" : "FAIL");
+    return rc == 0;
 }
 
 void hami_budget_release(int dev, size_t size) {
@@ -48,5 +74,7 @@ void hami_budget_release(int dev, size_t size) {
 
 size_t hami_budget_of(int dev) {
     pthread_once(&g_hami_core_init, hami_core_init_once);
-    return (size_t)get_current_device_memory_limit(dev);
+    uint64_t v = get_current_device_memory_limit(dev);
+    HAMI_TRACE("budget_of dev=%d -> limit=%llu", dev, (unsigned long long)v);
+    return (size_t)v;
 }

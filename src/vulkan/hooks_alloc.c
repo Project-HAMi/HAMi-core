@@ -50,10 +50,14 @@ hami_vkAllocateMemory(VkDevice device, const VkMemoryAllocateInfo *pInfo,
     }
 
     int idx = device_to_index(device);
+    HAMI_TRACE("hami_vkAllocateMemory: device_to_index -> idx=%d", idx);
     if (idx >= 0 && !hami_budget_reserve(idx, pInfo->allocationSize)) {
         HAMI_TRACE("hami_vkAllocateMemory: budget reserve REJECTED idx=%d size=%llu",
                    idx, (unsigned long long)pInfo->allocationSize);
         return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    }
+    if (idx < 0) {
+        HAMI_TRACE("hami_vkAllocateMemory: idx<0 -> SKIP budget enforcement");
     }
 
     VkResult r = d->AllocateMemory(device, pInfo, pAlloc, pMem);
