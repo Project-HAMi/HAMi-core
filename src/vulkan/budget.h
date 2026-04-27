@@ -1,5 +1,5 @@
-#ifndef HAMI_VK_BUDGET_H
-#define HAMI_VK_BUDGET_H
+#ifndef SRC_VULKAN_BUDGET_H_
+#define SRC_VULKAN_BUDGET_H_
 #include <stddef.h>
 
 /* Reserve `size` bytes on device `dev` for a Vulkan allocation.
@@ -15,4 +15,4 @@ void hami_budget_release(int dev, size_t size);
 /* Current per-device budget in bytes. Returns 0 when unlimited. */
 size_t hami_budget_of(int dev);
 
-#endif
+#endif  // SRC_VULKAN_BUDGET_H_

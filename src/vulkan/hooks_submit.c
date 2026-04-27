@@ -1,7 +1,8 @@
-#include "dispatch.h"
-#include "throttle_adapter.h"
 #include <pthread.h>
 #include <stdlib.h>
+
+#include "vulkan/dispatch.h"
+#include "vulkan/throttle_adapter.h"
 
 /* Queue → Device registry populated by layer.c's vkGetDeviceQueue[2]
  * wrappers (and by unit tests). */

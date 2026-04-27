@@ -1,10 +1,12 @@
-#include "physdev_index.h"
-#include "dispatch.h"
+#include "vulkan/physdev_index.h"
+
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+
+#include "vulkan/dispatch.h"
 
 /* Minimal NVML shim — only the symbols we need, resolved from the NVML
  * library already linked into libvgpu.so. Keeping this file independent of

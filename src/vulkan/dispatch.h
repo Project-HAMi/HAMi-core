@@ -1,5 +1,5 @@
-#ifndef HAMI_VULKAN_DISPATCH_H
-#define HAMI_VULKAN_DISPATCH_H
+#ifndef SRC_VULKAN_DISPATCH_H_
+#define SRC_VULKAN_DISPATCH_H_
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_layer.h>
@@ -36,4 +36,4 @@ hami_device_dispatch_t *hami_device_lookup(VkDevice dev);
 hami_device_dispatch_t *hami_device_register(VkDevice dev, VkPhysicalDevice phys, PFN_vkGetDeviceProcAddr gdpa);
 void hami_device_unregister(VkDevice dev);
 
-#endif /* HAMI_VULKAN_DISPATCH_H */
+#endif  // SRC_VULKAN_DISPATCH_H_

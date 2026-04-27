@@ -204,7 +204,7 @@ CUresult cuMemFree_v2(CUdeviceptr dptr) {
      * "unrecognized error code -1". Fall through to the real driver so
      * the actual behaviour matches an un-hooked runtime. */
     int rc = free_raw(dptr);
-    LOG_INFO("after free_raw dptr=%p rc=%d",(void *)dptr,rc);
+    LOG_INFO("after free_raw dptr=%p rc=%d", (void *)dptr, rc);
     if (rc == 0) return CUDA_SUCCESS;
     return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFree_v2, dptr);
 }
@@ -661,7 +661,7 @@ CUresult cuMemFreeAsync(CUdeviceptr dptr, CUstream hStream) {
      * when tracked (free_raw_async already called the real driver), else
      * forward to driver instead of leaking a bogus -1 CUresult. */
     int rc = free_raw_async(dptr, hStream);
-    LOG_DEBUG("after free_raw_async dptr=%p rc=%d",(void *)dptr, rc);
+    LOG_DEBUG("after free_raw_async dptr=%p rc=%d", (void *)dptr, rc);
     if (rc == 0) return CUDA_SUCCESS;
     return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFreeAsync, dptr, hStream);
 }

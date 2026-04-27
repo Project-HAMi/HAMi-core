@@ -1,5 +1,5 @@
-#ifndef HAMI_VULKAN_LAYER_H
-#define HAMI_VULKAN_LAYER_H
+#ifndef SRC_VULKAN_LAYER_H_
+#define SRC_VULKAN_LAYER_H_
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_layer.h>
@@ -31,4 +31,4 @@ hami_vkGetDeviceProcAddr(VkDevice device, const char *pName);
 }
 #endif
 
-#endif /* HAMI_VULKAN_LAYER_H */
+#endif  // SRC_VULKAN_LAYER_H_

@@ -1,4 +1,5 @@
-#include "budget.h"
+#include "vulkan/budget.h"
+
 #include <pthread.h>
 #include <stdint.h>
 #include <unistd.h>   /* getpid */

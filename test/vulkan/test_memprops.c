@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <vulkan/vulkan.h>
+
 #include "../../src/vulkan/dispatch.h"
 
 /* Budget-adapter stubs — real impl in Task 1.6 (src/vulkan/budget.c). */

@@ -1,4 +1,4 @@
-#include "throttle_adapter.h"
+#include "vulkan/throttle_adapter.h"
 
 /* Defined in libvgpu/src/multiprocess/multiprocess_utilization_watcher.c
  * (linked into the same libvgpu.so at final link time). */

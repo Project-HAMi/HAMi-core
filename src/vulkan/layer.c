@@ -1,7 +1,9 @@
-#include "layer.h"
-#include "dispatch.h"
+#include "vulkan/layer.h"
+
 #include <string.h>
 #include <stdlib.h>
+
+#include "vulkan/dispatch.h"
 
 /* forward declarations for hooks implemented in sibling files */
 extern void hami_vk_hook_instance(hami_instance_dispatch_t *d);
@@ -92,34 +94,54 @@ extern void hami_vk_register_queue(VkQueue q, VkDevice d);
 static VKAPI_ATTR void VKAPI_CALL
 hami_vkGetDeviceQueue(VkDevice device, uint32_t family, uint32_t index, VkQueue *pQueue) {
     hami_device_dispatch_t *d = hami_device_lookup(device);
-    if (!d) { *pQueue = VK_NULL_HANDLE; return; }
+    if (!d) {
+        *pQueue = VK_NULL_HANDLE;
+        return;
+    }
     PFN_vkGetDeviceQueue next = (PFN_vkGetDeviceQueue)d->next_gdpa(device, "vkGetDeviceQueue");
     next(device, family, index, pQueue);
-    if (*pQueue) hami_vk_register_queue(*pQueue, device);
+    if (*pQueue) {
+        hami_vk_register_queue(*pQueue, device);
+    }
 }
 
 static VKAPI_ATTR void VKAPI_CALL
 hami_vkGetDeviceQueue2(VkDevice device, const VkDeviceQueueInfo2 *pInfo, VkQueue *pQueue) {
     hami_device_dispatch_t *d = hami_device_lookup(device);
-    if (!d) { *pQueue = VK_NULL_HANDLE; return; }
+    if (!d) {
+        *pQueue = VK_NULL_HANDLE;
+        return;
+    }
     PFN_vkGetDeviceQueue2 next = (PFN_vkGetDeviceQueue2)d->next_gdpa(device, "vkGetDeviceQueue2");
     next(device, pInfo, pQueue);
-    if (*pQueue) hami_vk_register_queue(*pQueue, device);
+    if (*pQueue) {
+        hami_vk_register_queue(*pQueue, device);
+    }
 }
 
 /* GIPA / GDPA: return our wrappers for hooked names, next-layer for the rest. */
 
 /* Hooked functions implemented in other TUs; declarations here. */
-VKAPI_ATTR void VKAPI_CALL hami_vkGetPhysicalDeviceMemoryProperties(VkPhysicalDevice, VkPhysicalDeviceMemoryProperties*);
-VKAPI_ATTR void VKAPI_CALL hami_vkGetPhysicalDeviceMemoryProperties2(VkPhysicalDevice, VkPhysicalDeviceMemoryProperties2*);
-VKAPI_ATTR VkResult VKAPI_CALL hami_vkAllocateMemory(VkDevice, const VkMemoryAllocateInfo*, const VkAllocationCallbacks*, VkDeviceMemory*);
-VKAPI_ATTR void     VKAPI_CALL hami_vkFreeMemory(VkDevice, VkDeviceMemory, const VkAllocationCallbacks*);
-VKAPI_ATTR VkResult VKAPI_CALL hami_vkQueueSubmit(VkQueue, uint32_t, const VkSubmitInfo*, VkFence);
+VKAPI_ATTR void VKAPI_CALL hami_vkGetPhysicalDeviceMemoryProperties(
+    VkPhysicalDevice, VkPhysicalDeviceMemoryProperties*);
+VKAPI_ATTR void VKAPI_CALL hami_vkGetPhysicalDeviceMemoryProperties2(
+    VkPhysicalDevice, VkPhysicalDeviceMemoryProperties2*);
+VKAPI_ATTR VkResult VKAPI_CALL hami_vkAllocateMemory(
+    VkDevice, const VkMemoryAllocateInfo*, const VkAllocationCallbacks*, VkDeviceMemory*);
+VKAPI_ATTR void VKAPI_CALL hami_vkFreeMemory(
+    VkDevice, VkDeviceMemory, const VkAllocationCallbacks*);
+VKAPI_ATTR VkResult VKAPI_CALL hami_vkQueueSubmit(
+    VkQueue, uint32_t, const VkSubmitInfo*, VkFence);
 #if defined(VK_VERSION_1_3)
-VKAPI_ATTR VkResult VKAPI_CALL hami_vkQueueSubmit2(VkQueue, uint32_t, const VkSubmitInfo2*, VkFence);
+VKAPI_ATTR VkResult VKAPI_CALL hami_vkQueueSubmit2(
+    VkQueue, uint32_t, const VkSubmitInfo2*, VkFence);
 #endif
 
-#define HAMI_HOOK(name) do { if (strcmp(pName, "vk" #name) == 0) return (PFN_vkVoidFunction)hami_vk##name; } while (0)
+#define HAMI_HOOK(name) do {                                                       \
+    if (strcmp(pName, "vk" #name) == 0) {                                          \
+        return (PFN_vkVoidFunction)hami_vk##name;                                  \
+    }                                                                              \
+} while (0)
 
 PFN_vkVoidFunction VKAPI_CALL
 hami_vkGetInstanceProcAddr(VkInstance instance, const char *pName) {

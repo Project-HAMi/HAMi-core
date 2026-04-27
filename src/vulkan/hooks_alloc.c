@@ -1,9 +1,10 @@
-#include "dispatch.h"
-#include "budget.h"
-#include "physdev_index.h"
 #include <pthread.h>
 #include <stdlib.h>
 #include <stdint.h>
+
+#include "vulkan/dispatch.h"
+#include "vulkan/budget.h"
+#include "vulkan/physdev_index.h"
 
 typedef struct mem_entry {
     VkDeviceMemory handle;

@@ -1,5 +1,5 @@
-#ifndef HAMI_VK_PHYSDEV_INDEX_H
-#define HAMI_VK_PHYSDEV_INDEX_H
+#ifndef SRC_VULKAN_PHYSDEV_INDEX_H_
+#define SRC_VULKAN_PHYSDEV_INDEX_H_
 
 #include <vulkan/vulkan.h>
 
@@ -11,4 +11,4 @@
  * for this device". */
 int hami_vk_physdev_index(VkPhysicalDevice p);
 
-#endif
+#endif  // SRC_VULKAN_PHYSDEV_INDEX_H_
