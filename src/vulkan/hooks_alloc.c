@@ -1,10 +1,26 @@
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 
 #include "vulkan/dispatch.h"
 #include "vulkan/budget.h"
 #include "vulkan/physdev_index.h"
+
+static int hami_vk_trace_enabled_local(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        const char *e = getenv("HAMI_VK_TRACE");
+        cached = (e && e[0] == '1') ? 1 : 0;
+    }
+    return cached;
+}
+#define HAMI_TRACE(fmt, ...) do {                                              \
+    if (hami_vk_trace_enabled_local()) {                                        \
+        fprintf(stderr, "HAMI_VK_TRACE: " fmt "\n", ##__VA_ARGS__);             \
+        fflush(stderr);                                                         \
+    }                                                                           \
+} while (0)
 
 typedef struct mem_entry {
     VkDeviceMemory handle;
@@ -25,12 +41,20 @@ static int device_to_index(VkDevice d) {
 VKAPI_ATTR VkResult VKAPI_CALL
 hami_vkAllocateMemory(VkDevice device, const VkMemoryAllocateInfo *pInfo,
                       const VkAllocationCallbacks *pAlloc, VkDeviceMemory *pMem) {
+    HAMI_TRACE("hami_vkAllocateMemory device=%p size=%llu",
+               (void *)device, (unsigned long long)pInfo->allocationSize);
     hami_device_dispatch_t *d = hami_device_lookup(device);
-    if (!d || !d->AllocateMemory) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!d || !d->AllocateMemory) {
+        HAMI_TRACE("hami_vkAllocateMemory: device dispatch missing -> VK_ERROR_INITIALIZATION_FAILED");
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
 
     int idx = device_to_index(device);
-    if (idx >= 0 && !hami_budget_reserve(idx, pInfo->allocationSize))
+    if (idx >= 0 && !hami_budget_reserve(idx, pInfo->allocationSize)) {
+        HAMI_TRACE("hami_vkAllocateMemory: budget reserve REJECTED idx=%d size=%llu",
+                   idx, (unsigned long long)pInfo->allocationSize);
         return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    }
 
     VkResult r = d->AllocateMemory(device, pInfo, pAlloc, pMem);
     if (r != VK_SUCCESS) {

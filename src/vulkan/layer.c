@@ -1,9 +1,29 @@
 #include "vulkan/layer.h"
 
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
 #include "vulkan/dispatch.h"
+
+/* Debug trace gated by HAMI_VK_TRACE=1.
+ * Used to localize where the dispatch chain breaks; safe to leave in
+ * because it's behind a runtime flag. */
+#define HAMI_VK_TRACE_ENV "HAMI_VK_TRACE"
+static int hami_vk_trace_enabled(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        const char *e = getenv(HAMI_VK_TRACE_ENV);
+        cached = (e && e[0] == '1') ? 1 : 0;
+    }
+    return cached;
+}
+#define HAMI_TRACE(fmt, ...) do {                                              \
+    if (hami_vk_trace_enabled()) {                                              \
+        fprintf(stderr, "HAMI_VK_TRACE: " fmt "\n", ##__VA_ARGS__);             \
+        fflush(stderr);                                                         \
+    }                                                                           \
+} while (0)
 
 /* forward declarations for hooks implemented in sibling files */
 extern void hami_vk_hook_instance(hami_instance_dispatch_t *d);
@@ -37,19 +57,29 @@ static VKAPI_ATTR VkResult VKAPI_CALL
 hami_vkCreateInstance(const VkInstanceCreateInfo *pCreateInfo,
                       const VkAllocationCallbacks *pAllocator,
                       VkInstance *pInstance) {
+    HAMI_TRACE("hami_vkCreateInstance entered");
     VkLayerInstanceCreateInfo *chain = find_chain_info(pCreateInfo, VK_LAYER_LINK_INFO);
-    if (!chain || !chain->u.pLayerInfo) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!chain || !chain->u.pLayerInfo) {
+        HAMI_TRACE("hami_vkCreateInstance: no VK_LAYER_LINK_INFO chain -> returning VK_ERROR_INITIALIZATION_FAILED");
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
 
     PFN_vkGetInstanceProcAddr next_gipa = chain->u.pLayerInfo->pfnNextGetInstanceProcAddr;
     chain->u.pLayerInfo = chain->u.pLayerInfo->pNext;
 
     PFN_vkCreateInstance next_create =
         (PFN_vkCreateInstance)next_gipa(VK_NULL_HANDLE, "vkCreateInstance");
+    HAMI_TRACE("hami_vkCreateInstance: next_create=%p", (void *)next_create);
     VkResult r = next_create(pCreateInfo, pAllocator, pInstance);
-    if (r != VK_SUCCESS) return r;
+    if (r != VK_SUCCESS) {
+        HAMI_TRACE("hami_vkCreateInstance: next_create failed r=%d", r);
+        return r;
+    }
 
     hami_instance_dispatch_t *d = hami_instance_register(*pInstance, next_gipa);
     hami_vk_hook_instance(d);
+    HAMI_TRACE("hami_vkCreateInstance: registered instance=%p dispatch=%p",
+               (void *)*pInstance, (void *)d);
     return VK_SUCCESS;
 }
 
@@ -145,6 +175,7 @@ VKAPI_ATTR VkResult VKAPI_CALL hami_vkQueueSubmit2(
 
 PFN_vkVoidFunction VKAPI_CALL
 hami_vkGetInstanceProcAddr(VkInstance instance, const char *pName) {
+    HAMI_TRACE("hami_vkGetInstanceProcAddr instance=%p name=%s", (void *)instance, pName);
     HAMI_HOOK(CreateInstance);
     HAMI_HOOK(DestroyInstance);
     HAMI_HOOK(CreateDevice);
@@ -153,7 +184,10 @@ hami_vkGetInstanceProcAddr(VkInstance instance, const char *pName) {
     HAMI_HOOK(GetPhysicalDeviceMemoryProperties2);
 
     hami_instance_dispatch_t *d = hami_instance_lookup(instance);
-    if (!d) return NULL;
+    if (!d) {
+        HAMI_TRACE("hami_vkGetInstanceProcAddr: instance %p not registered, returning NULL", (void *)instance);
+        return NULL;
+    }
     return d->next_gipa(instance, pName);
 }
 
@@ -185,7 +219,10 @@ hami_vkGetDeviceProcAddr(VkDevice device, const char *pName) {
 
 HAMI_LAYER_EXPORT VkResult VKAPI_CALL
 vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface *pVersionStruct) {
+    HAMI_TRACE("vkNegotiateLoaderLayerInterfaceVersion entered (version=%u)",
+               pVersionStruct ? pVersionStruct->loaderLayerInterfaceVersion : 0);
     if (pVersionStruct->sType != LAYER_NEGOTIATE_INTERFACE_STRUCT) {
+        HAMI_TRACE("vkNegotiate: sType mismatch -> VK_ERROR_INITIALIZATION_FAILED");
         return VK_ERROR_INITIALIZATION_FAILED;
     }
 
@@ -196,6 +233,8 @@ vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface *pVersionStruct
     pVersionStruct->pfnGetInstanceProcAddr = hami_vkGetInstanceProcAddr;
     pVersionStruct->pfnGetDeviceProcAddr   = hami_vkGetDeviceProcAddr;
     pVersionStruct->pfnGetPhysicalDeviceProcAddr = NULL;
+    HAMI_TRACE("vkNegotiate: success (version=%u)",
+               pVersionStruct->loaderLayerInterfaceVersion);
     return VK_SUCCESS;
 }
 
