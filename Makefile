@@ -13,7 +13,7 @@ build-in-docker:
 		-e DEBIAN_FRONTEND=noninteractive \
 		nvidia/cuda:12.9.1-cudnn-devel-ubuntu20.04 \
 		sh -c "apt-get -y update && \
-           apt-get -y install cmake git && \
+           apt-get -y install cmake git libvulkan-dev && \
            git config --global --add safe.directory /libvgpu && \
            bash ./build.sh"
 .PHONY: build-in-docker
