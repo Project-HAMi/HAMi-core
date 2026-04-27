@@ -175,16 +175,40 @@ hami_vkGetDeviceProcAddr(VkDevice device, const char *pName) {
     return d->next_gdpa(device, pName);
 }
 
-VK_LAYER_EXPORT VkResult VKAPI_CALL
-vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface *pVersionStruct) {
-    if (pVersionStruct->sType != LAYER_NEGOTIATE_INTERFACE_STRUCT)
-        return VK_ERROR_INITIALIZATION_FAILED;
+/* The Vulkan loader looks up these three entry points by their canonical
+ * (un-prefixed) names. Some build environments compile this TU with
+ * -fvisibility=hidden, in which case the upstream VK_LAYER_EXPORT macro
+ * (which can fall back to empty on older Vulkan-Headers) does not produce
+ * an exported symbol. Force default visibility here regardless of the
+ * compile flags so that dlsym from the loader sees them. */
+#define HAMI_LAYER_EXPORT __attribute__((visibility("default")))
 
-    if (pVersionStruct->loaderLayerInterfaceVersion > 2)
+HAMI_LAYER_EXPORT VkResult VKAPI_CALL
+vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface *pVersionStruct) {
+    if (pVersionStruct->sType != LAYER_NEGOTIATE_INTERFACE_STRUCT) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    if (pVersionStruct->loaderLayerInterfaceVersion > 2) {
         pVersionStruct->loaderLayerInterfaceVersion = 2;
+    }
 
     pVersionStruct->pfnGetInstanceProcAddr = hami_vkGetInstanceProcAddr;
     pVersionStruct->pfnGetDeviceProcAddr   = hami_vkGetDeviceProcAddr;
     pVersionStruct->pfnGetPhysicalDeviceProcAddr = NULL;
     return VK_SUCCESS;
+}
+
+/* Fallback wrappers for loader interface version 1: the loader resolves the
+ * canonical names directly when the manifest does not advertise interface v2.
+ * Both forms must coexist so the layer works regardless of which path the
+ * loader picks. */
+HAMI_LAYER_EXPORT PFN_vkVoidFunction VKAPI_CALL
+vkGetInstanceProcAddr(VkInstance instance, const char *pName) {
+    return hami_vkGetInstanceProcAddr(instance, pName);
+}
+
+HAMI_LAYER_EXPORT PFN_vkVoidFunction VKAPI_CALL
+vkGetDeviceProcAddr(VkDevice device, const char *pName) {
+    return hami_vkGetDeviceProcAddr(device, pName);
 }
