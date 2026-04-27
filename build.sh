@@ -28,10 +28,7 @@ if [ -z "$CI_COMMIT_BRANCH" ]; then
     CI_COMMIT_BRANCH=${BRANCH_NAME:-"unknown"}
 fi
 if [ -z "$CI_COMMIT_SHA" ]; then
-    CI_COMMIT_SHA=$(git describe --abbrev=100 --always)
-    if [ $? -ne 0 ]; then
-        CI_COMMIT_SHA="unknown"
-    fi
+    CI_COMMIT_SHA=$(git describe --abbrev=100 --always 2>/dev/null || echo "unknown")
 fi
 
 echo "CI_COMMIT_BRANCH:${CI_COMMIT_BRANCH}"
