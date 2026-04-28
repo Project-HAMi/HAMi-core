@@ -11,8 +11,6 @@ typedef struct hami_instance_dispatch {
     PFN_vkEnumeratePhysicalDevices EnumeratePhysicalDevices;
     PFN_vkGetPhysicalDeviceMemoryProperties GetPhysicalDeviceMemoryProperties;
     PFN_vkGetPhysicalDeviceMemoryProperties2 GetPhysicalDeviceMemoryProperties2;
-    PFN_vkEnumerateDeviceExtensionProperties EnumerateDeviceExtensionProperties;
-    PFN_vkEnumerateDeviceLayerProperties EnumerateDeviceLayerProperties;
     struct hami_instance_dispatch *next;
 } hami_instance_dispatch_t;
 
@@ -33,11 +31,6 @@ typedef struct hami_device_dispatch {
 hami_instance_dispatch_t *hami_instance_lookup(VkInstance inst);
 hami_instance_dispatch_t *hami_instance_register(VkInstance inst, PFN_vkGetInstanceProcAddr gipa);
 void hami_instance_unregister(VkInstance inst);
-
-/* Helper for layer Enumerate hooks: returns the first registered instance
- * dispatch (suitable for forwarding NULL-pLayerName Enumerate* queries to
- * the next layer/ICD). NULL when no instance is registered yet. */
-hami_instance_dispatch_t *hami_instance_first(void);
 
 hami_device_dispatch_t *hami_device_lookup(VkDevice dev);
 hami_device_dispatch_t *hami_device_register(VkDevice dev, VkPhysicalDevice phys, PFN_vkGetDeviceProcAddr gdpa);

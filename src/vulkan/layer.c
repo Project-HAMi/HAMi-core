@@ -29,14 +29,6 @@ static int hami_vk_trace_enabled(void) {
 extern void hami_vk_hook_instance(hami_instance_dispatch_t *d);
 extern void hami_vk_hook_device(hami_device_dispatch_t *d);
 
-/* Cached next-layer GetInstanceProcAddr from the first vkCreateInstance
- * call. Used as a fallback when GIPA is invoked with an unknown instance
- * handle (loader probes during init, or instance handles wrapped by an
- * upper layer that we haven't seen): we still need to return a valid
- * pointer so the loader/driver doesn't dereference NULL. */
-static PFN_vkGetInstanceProcAddr g_first_next_gipa = NULL;
-static PFN_vkGetDeviceProcAddr   g_first_next_gdpa = NULL;
-
 static VkLayerInstanceCreateInfo *find_chain_info(const VkInstanceCreateInfo *pCreateInfo,
                                                   VkLayerFunction func) {
     const VkLayerInstanceCreateInfo *ci = pCreateInfo->pNext;
@@ -75,13 +67,6 @@ hami_vkCreateInstance(const VkInstanceCreateInfo *pCreateInfo,
     PFN_vkGetInstanceProcAddr next_gipa = chain->u.pLayerInfo->pfnNextGetInstanceProcAddr;
     chain->u.pLayerInfo = chain->u.pLayerInfo->pNext;
 
-    /* Cache the next-layer gipa before calling next_create: some drivers
-     * (NVIDIA) trigger our GIPA from within next_create() to look up
-     * vkGetPhysicalDevice* entry points on a fresh, not-yet-registered
-     * instance, and we need to forward those lookups instead of returning
-     * NULL. */
-    if (!g_first_next_gipa) g_first_next_gipa = next_gipa;
-
     PFN_vkCreateInstance next_create =
         (PFN_vkCreateInstance)next_gipa(VK_NULL_HANDLE, "vkCreateInstance");
     HAMI_TRACE("hami_vkCreateInstance: next_create=%p", (void *)next_create);
@@ -116,9 +101,6 @@ hami_vkCreateDevice(VkPhysicalDevice physicalDevice,
     PFN_vkGetInstanceProcAddr next_gipa = chain->u.pLayerInfo->pfnNextGetInstanceProcAddr;
     PFN_vkGetDeviceProcAddr   next_gdpa = chain->u.pLayerInfo->pfnNextGetDeviceProcAddr;
     chain->u.pLayerInfo = chain->u.pLayerInfo->pNext;
-
-    if (!g_first_next_gipa) g_first_next_gipa = next_gipa;
-    if (!g_first_next_gdpa) g_first_next_gdpa = next_gdpa;
 
     PFN_vkCreateDevice next_create =
         (PFN_vkCreateDevice)next_gipa(VK_NULL_HANDLE, "vkCreateDevice");
@@ -204,43 +186,33 @@ VKAPI_ATTR VkResult VKAPI_CALL hami_vkQueueSubmit2(
  * answer with results from the next layer/ICD (Vulkan 1.0 spec
  * "Layered Implementations" §38.3.1). Returning anything else (or a NULL
  * function pointer through GIPA) breaks the chain. */
-/* Vulkan 1.3 §38.3.1 / Layer Documentation:
- *   - Querying with our own layer name returns our zero own-extensions.
- *   - Querying with another layer name -> VK_ERROR_LAYER_NOT_PRESENT.
- *   - Querying with NULL pLayerName -> forward to the next layer/ICD so
- *     the caller (NVIDIA driver during vkCreateDevice extension
- *     validation, Carbonite during instance setup) sees the real list.
- *
- * The original layer omitted these hooks, so the GIPA returned NULL and
- * the loader/Carbonite SegFaulted while assembling enabled extensions.
- * An earlier draft of this fix returned LAYER_NOT_PRESENT for NULL
- * pLayerName, which caused vkCreateDevice to fail because the driver
- * could no longer enumerate device extensions through the layer chain. */
-
 static VKAPI_ATTR VkResult VKAPI_CALL
 hami_vkEnumerateInstanceExtensionProperties(const char *pLayerName,
                                             uint32_t *pPropertyCount,
                                             VkExtensionProperties *pProperties) {
+    /* Vulkan 1.3 §38.3.1: a layer reports its own extensions only when
+     * queried with its layer name. For NULL pLayerName ("give me ICD +
+     * implicit layers" union) or any other layer's name we MUST return
+     * VK_ERROR_LAYER_NOT_PRESENT so the loader falls through to the
+     * underlying ICD's extension list. Returning VK_SUCCESS with count=0
+     * here makes the loader treat our zero-count as authoritative and
+     * hides the ICD's instance extensions, which then breaks
+     * vkCreateInstance for callers that request driver extensions
+     * (Carbonite, Isaac Sim Kit). */
+    (void)pProperties;
     if (pLayerName != NULL && strcmp(pLayerName, HAMI_LAYER_NAME) == 0) {
         if (pPropertyCount) *pPropertyCount = 0;
-        (void)pProperties;
         return VK_SUCCESS;
     }
-    /* For NULL pLayerName the loader will already aggregate every layer
-     * + ICD on its own; we just claim no contribution. For other layer
-     * names this layer has nothing to say. Both safely map to "0
-     * properties, success" so the chain keeps going. */
-    if (pPropertyCount) *pPropertyCount = 0;
-    (void)pProperties;
-    return VK_SUCCESS;
+    return VK_ERROR_LAYER_NOT_PRESENT;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL
 hami_vkEnumerateInstanceLayerProperties(uint32_t *pPropertyCount,
                                         VkLayerProperties *pProperties) {
     /* Loader assembles the layer list itself from manifests; the layer
-     * just reports its own count (0 is accepted because the manifest is
-     * authoritative for our presence). */
+     * just reports its own count (1 for spec compliance, 0 is also
+     * accepted by the loader since the manifest is the source of truth). */
     (void)pProperties;
     if (pPropertyCount) *pPropertyCount = 0;
     return VK_SUCCESS;
@@ -251,36 +223,28 @@ hami_vkEnumerateDeviceExtensionProperties(VkPhysicalDevice physicalDevice,
                                           const char *pLayerName,
                                           uint32_t *pPropertyCount,
                                           VkExtensionProperties *pProperties) {
-    /* Own-name: zero own device extensions. */
+    /* Same spec rule as the instance variant: own-name query returns our
+     * zero own-extensions; any other name (including NULL) must signal
+     * VK_ERROR_LAYER_NOT_PRESENT so the loader continues down the chain
+     * to the next layer/ICD. Returning a NULL function pointer through
+     * GIPA was the original SegFault trigger; returning VK_SUCCESS with
+     * count=0 here was the previous attempt and silently hid driver
+     * device extensions, breaking vkCreateDevice. */
+    (void)physicalDevice;
+    (void)pProperties;
     if (pLayerName != NULL && strcmp(pLayerName, HAMI_LAYER_NAME) == 0) {
         if (pPropertyCount) *pPropertyCount = 0;
-        (void)pProperties;
         return VK_SUCCESS;
     }
-    /* For NULL or other names we MUST forward to the next layer/ICD,
-     * otherwise the NVIDIA driver's vkCreateDevice fails extension
-     * validation ("ERROR_LAYER_NOT_PRESENT" propagated up the chain). */
-    hami_instance_dispatch_t *d = hami_instance_first();
-    if (d && d->EnumerateDeviceExtensionProperties) {
-        return d->EnumerateDeviceExtensionProperties(
-            physicalDevice, pLayerName, pPropertyCount, pProperties);
-    }
-    /* Loader probing before any instance was created: spec allows zero. */
-    if (pPropertyCount) *pPropertyCount = 0;
-    (void)pProperties;
-    return VK_SUCCESS;
+    return VK_ERROR_LAYER_NOT_PRESENT;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL
 hami_vkEnumerateDeviceLayerProperties(VkPhysicalDevice physicalDevice,
                                       uint32_t *pPropertyCount,
                                       VkLayerProperties *pProperties) {
-    /* Deprecated since Vulkan 1.0.13; forward when possible, else 0. */
-    hami_instance_dispatch_t *d = hami_instance_first();
-    if (d && d->EnumerateDeviceLayerProperties) {
-        return d->EnumerateDeviceLayerProperties(
-            physicalDevice, pPropertyCount, pProperties);
-    }
+    /* Deprecated since Vulkan 1.0.13; loader handles it. Reporting 0
+     * keeps spec-conformant callers happy. */
     (void)physicalDevice;
     (void)pProperties;
     if (pPropertyCount) *pPropertyCount = 0;
