@@ -27,12 +27,23 @@ hami_instance_dispatch_t *hami_instance_register(VkInstance inst, PFN_vkGetInsta
         (PFN_vkGetPhysicalDeviceMemoryProperties)resolve(gipa, inst, "vkGetPhysicalDeviceMemoryProperties");
     d->GetPhysicalDeviceMemoryProperties2 =
         (PFN_vkGetPhysicalDeviceMemoryProperties2)resolve(gipa, inst, "vkGetPhysicalDeviceMemoryProperties2");
+    d->EnumerateDeviceExtensionProperties =
+        (PFN_vkEnumerateDeviceExtensionProperties)resolve(gipa, inst, "vkEnumerateDeviceExtensionProperties");
+    d->EnumerateDeviceLayerProperties =
+        (PFN_vkEnumerateDeviceLayerProperties)resolve(gipa, inst, "vkEnumerateDeviceLayerProperties");
 
     pthread_mutex_lock(&g_lock);
     d->next = g_inst_head;
     g_inst_head = d;
     pthread_mutex_unlock(&g_lock);
     return d;
+}
+
+hami_instance_dispatch_t *hami_instance_first(void) {
+    pthread_mutex_lock(&g_lock);
+    hami_instance_dispatch_t *p = g_inst_head;
+    pthread_mutex_unlock(&g_lock);
+    return p;
 }
 
 hami_instance_dispatch_t *hami_instance_lookup(VkInstance inst) {
