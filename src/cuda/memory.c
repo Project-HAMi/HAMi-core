@@ -185,9 +185,18 @@ CUresult cuMemAllocManaged(CUdeviceptr* dptr, size_t bytesize, unsigned int flag
     return res;
 }
 
-CUresult cuMemAllocPitch_v2(CUdeviceptr* dptr, size_t* pPitch, size_t WidthInBytes, 
+CUresult cuMemAllocPitch_v2(CUdeviceptr* dptr, size_t* pPitch, size_t WidthInBytes,
                                       size_t Height, unsigned int ElementSizeBytes) {
     LOG_DEBUG("cuMemAllocPitch_v2 dptr=%p (%ld,%ld)",dptr,WidthInBytes,Height);
+    /* Forward NULL dptr/pPitch to the real driver so callers see
+     * CUDA_ERROR_INVALID_VALUE instead of HAMi's CUDA_ERROR_OUT_OF_MEMORY
+     * when oom_check would trip. Also avoids dereferencing *dptr in
+     * add_chunk_only on the success path. Pattern matches cuMemAlloc_v2
+     * (commit 88143ab) and cuMemAllocManaged (commit 275ba3d). */
+    if (dptr == NULL || pPitch == NULL) {
+        return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAllocPitch_v2,
+                                   dptr, pPitch, WidthInBytes, Height, ElementSizeBytes);
+    }
     size_t guess_pitch = (((WidthInBytes - 1) / ElementSizeBytes) + 1) * ElementSizeBytes;
     size_t bytesize = guess_pitch * Height;
     ENSURE_RUNNING();

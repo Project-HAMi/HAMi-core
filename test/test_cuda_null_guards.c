@@ -17,6 +17,9 @@
 extern CUresult cuMemAlloc_v2(CUdeviceptr* dptr, size_t bytesize);
 extern CUresult cuMemAllocHost_v2(void** hptr, size_t bytesize);
 extern CUresult cuMemAllocManaged(CUdeviceptr* dptr, size_t bytesize, unsigned int flags);
+extern CUresult cuMemAllocPitch_v2(CUdeviceptr* dptr, size_t* pPitch,
+                                    size_t WidthInBytes, size_t Height,
+                                    unsigned int ElementSizeBytes);
 
 static void test_cuMemAlloc_v2_null_dptr(void) {
     CUresult r = cuMemAlloc_v2(NULL, 4096);
@@ -42,6 +45,20 @@ static void test_cuMemAllocManaged_null_dptr(void) {
     printf("[OK] cuMemAllocManaged(NULL, 4096) returned %d\n", r);
 }
 
+static void test_cuMemAllocPitch_v2_null_dptr(void) {
+    size_t pitch = 0;
+    CUresult r = cuMemAllocPitch_v2(NULL, &pitch, 1024, 1024, 4);
+    assert(r != CUDA_SUCCESS);
+    printf("[OK] cuMemAllocPitch_v2(NULL, ...) returned %d\n", r);
+}
+
+static void test_cuMemAllocPitch_v2_null_pitch(void) {
+    CUdeviceptr dptr = 0;
+    CUresult r = cuMemAllocPitch_v2(&dptr, NULL, 1024, 1024, 4);
+    assert(r != CUDA_SUCCESS);
+    printf("[OK] cuMemAllocPitch_v2(&dptr, NULL, ...) returned %d\n", r);
+}
+
 int main(void) {
     CUresult r = cuInit(0);
     if (r != CUDA_SUCCESS) {
@@ -57,6 +74,8 @@ int main(void) {
     test_cuMemAlloc_v2_zero_size();
     test_cuMemAllocHost_v2_null_hptr();
     test_cuMemAllocManaged_null_dptr();
+    test_cuMemAllocPitch_v2_null_dptr();
+    test_cuMemAllocPitch_v2_null_pitch();
 
     cuCtxDestroy_v2(ctx);
     return 0;
