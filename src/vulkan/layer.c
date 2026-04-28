@@ -167,6 +167,90 @@ VKAPI_ATTR VkResult VKAPI_CALL hami_vkQueueSubmit2(
     VkQueue, uint32_t, const VkSubmitInfo2*, VkFence);
 #endif
 
+/* Vulkan layer name advertised in /etc/vulkan/implicit_layer.d/hami.json. */
+#define HAMI_LAYER_NAME "VK_LAYER_HAMI_vgpu"
+
+/* Spec-required Enumerate hooks. The Vulkan loader queries layers for
+ * own-extension and own-layer info via these entry points (often with a
+ * NULL VkInstance during initialization). The previous implementation only
+ * exposed CreateInstance/CreateDevice/GIPA via GIPA, so a NULL-instance
+ * lookup for vkEnumerate*ExtensionProperties / vkEnumerate*LayerProperties
+ * fell through to `hami_instance_lookup(NULL)` -> NULL and the loader
+ * dereferenced a NULL function pointer while assembling the enabled
+ * extension list. That manifested as a SegFault deep in
+ * libcarb.graphics-vulkan during Carbonite Vulkan plugin startup.
+ *
+ * The layer doesn't add any instance/device extensions, so own-name
+ * queries return zero entries. For non-own queries we MUST return
+ * VK_SUCCESS with count=0 rather than NULL: the loader will combine our
+ * answer with results from the next layer/ICD (Vulkan 1.0 spec
+ * "Layered Implementations" §38.3.1). Returning anything else (or a NULL
+ * function pointer through GIPA) breaks the chain. */
+static VKAPI_ATTR VkResult VKAPI_CALL
+hami_vkEnumerateInstanceExtensionProperties(const char *pLayerName,
+                                            uint32_t *pPropertyCount,
+                                            VkExtensionProperties *pProperties) {
+    /* Vulkan 1.3 §38.3.1: a layer reports its own extensions only when
+     * queried with its layer name. For NULL pLayerName ("give me ICD +
+     * implicit layers" union) or any other layer's name we MUST return
+     * VK_ERROR_LAYER_NOT_PRESENT so the loader falls through to the
+     * underlying ICD's extension list. Returning VK_SUCCESS with count=0
+     * here makes the loader treat our zero-count as authoritative and
+     * hides the ICD's instance extensions, which then breaks
+     * vkCreateInstance for callers that request driver extensions
+     * (Carbonite, Isaac Sim Kit). */
+    (void)pProperties;
+    if (pLayerName != NULL && strcmp(pLayerName, HAMI_LAYER_NAME) == 0) {
+        if (pPropertyCount) *pPropertyCount = 0;
+        return VK_SUCCESS;
+    }
+    return VK_ERROR_LAYER_NOT_PRESENT;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL
+hami_vkEnumerateInstanceLayerProperties(uint32_t *pPropertyCount,
+                                        VkLayerProperties *pProperties) {
+    /* Loader assembles the layer list itself from manifests; the layer
+     * just reports its own count (1 for spec compliance, 0 is also
+     * accepted by the loader since the manifest is the source of truth). */
+    (void)pProperties;
+    if (pPropertyCount) *pPropertyCount = 0;
+    return VK_SUCCESS;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL
+hami_vkEnumerateDeviceExtensionProperties(VkPhysicalDevice physicalDevice,
+                                          const char *pLayerName,
+                                          uint32_t *pPropertyCount,
+                                          VkExtensionProperties *pProperties) {
+    /* Same spec rule as the instance variant: own-name query returns our
+     * zero own-extensions; any other name (including NULL) must signal
+     * VK_ERROR_LAYER_NOT_PRESENT so the loader continues down the chain
+     * to the next layer/ICD. Returning a NULL function pointer through
+     * GIPA was the original SegFault trigger; returning VK_SUCCESS with
+     * count=0 here was the previous attempt and silently hid driver
+     * device extensions, breaking vkCreateDevice. */
+    (void)physicalDevice;
+    (void)pProperties;
+    if (pLayerName != NULL && strcmp(pLayerName, HAMI_LAYER_NAME) == 0) {
+        if (pPropertyCount) *pPropertyCount = 0;
+        return VK_SUCCESS;
+    }
+    return VK_ERROR_LAYER_NOT_PRESENT;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL
+hami_vkEnumerateDeviceLayerProperties(VkPhysicalDevice physicalDevice,
+                                      uint32_t *pPropertyCount,
+                                      VkLayerProperties *pProperties) {
+    /* Deprecated since Vulkan 1.0.13; loader handles it. Reporting 0
+     * keeps spec-conformant callers happy. */
+    (void)physicalDevice;
+    (void)pProperties;
+    if (pPropertyCount) *pPropertyCount = 0;
+    return VK_SUCCESS;
+}
+
 #define HAMI_HOOK(name) do {                                                       \
     if (strcmp(pName, "vk" #name) == 0) {                                          \
         return (PFN_vkVoidFunction)hami_vk##name;                                  \
@@ -182,6 +266,14 @@ hami_vkGetInstanceProcAddr(VkInstance instance, const char *pName) {
     HAMI_HOOK(GetInstanceProcAddr);
     HAMI_HOOK(GetPhysicalDeviceMemoryProperties);
     HAMI_HOOK(GetPhysicalDeviceMemoryProperties2);
+    /* Spec-required global entry points that the loader queries with
+     * instance=NULL during layer initialization. Returning NULL here
+     * caused libcarb.graphics-vulkan to SegFault while assembling the
+     * enabled extension list. */
+    HAMI_HOOK(EnumerateInstanceExtensionProperties);
+    HAMI_HOOK(EnumerateInstanceLayerProperties);
+    HAMI_HOOK(EnumerateDeviceExtensionProperties);
+    HAMI_HOOK(EnumerateDeviceLayerProperties);
 
     hami_instance_dispatch_t *d = hami_instance_lookup(instance);
     if (!d) {
