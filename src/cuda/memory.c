@@ -135,6 +135,12 @@ CUresult cuMemoryAllocate(CUdeviceptr* dptr, size_t bytesize, void* data) {
 CUresult cuMemAlloc_v2(CUdeviceptr* dptr, size_t bytesize) {
     LOG_INFO("into cuMemAllocing_v2 dptr=%p bytesize=%ld",dptr,bytesize);
     ENSURE_RUNNING();
+    /* Forward NULL/invalid args to the real driver so error codes match
+     * non-HAMi behavior. NVIDIA OptiX/Aftermath internals can call us with
+     * NULL during early init paths; dereferencing would SegFault. */
+    if (dptr == NULL) {
+        return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAlloc_v2, dptr, bytesize);
+    }
     CUresult res = allocate_raw(dptr,bytesize);
     if (res!=CUDA_SUCCESS)
         return res;
