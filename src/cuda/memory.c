@@ -165,6 +165,14 @@ CUresult cuMemAllocHost_v2(void** hptr, size_t bytesize) {
 CUresult cuMemAllocManaged(CUdeviceptr* dptr, size_t bytesize, unsigned int flags) {
     LOG_DEBUG("cuMemAllocManaged dptr=%p bytesize=%ld",dptr,bytesize);
     ENSURE_RUNNING();
+    /* Forward NULL dptr to the real driver so callers see the driver's
+     * defined CUDA_ERROR_INVALID_VALUE instead of HAMi's
+     * CUDA_ERROR_OUT_OF_MEMORY when oom_check would trip first. Pattern
+     * matches cuMemAlloc_v2 (commit 88143ab) and cuMemGetInfo_v2
+     * (commit 03f99d7). */
+    if (dptr == NULL) {
+        return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAllocManaged, dptr, bytesize, flags);
+    }
     CUdevice dev;
     CHECK_DRV_API(cuCtxGetDevice(&dev));
     if (oom_check(dev,bytesize)){

@@ -15,6 +15,8 @@
 #include <cuda.h>
 
 extern CUresult cuMemAlloc_v2(CUdeviceptr* dptr, size_t bytesize);
+extern CUresult cuMemAllocHost_v2(void** hptr, size_t bytesize);
+extern CUresult cuMemAllocManaged(CUdeviceptr* dptr, size_t bytesize, unsigned int flags);
 
 static void test_cuMemAlloc_v2_null_dptr(void) {
     CUresult r = cuMemAlloc_v2(NULL, 4096);
@@ -26,6 +28,18 @@ static void test_cuMemAlloc_v2_zero_size(void) {
     CUdeviceptr dptr = 0;
     CUresult r = cuMemAlloc_v2(&dptr, 0);
     printf("[OK] cuMemAlloc_v2(&dptr, 0) returned %d\n", r);
+}
+
+static void test_cuMemAllocHost_v2_null_hptr(void) {
+    CUresult r = cuMemAllocHost_v2(NULL, 4096);
+    assert(r != CUDA_SUCCESS);
+    printf("[OK] cuMemAllocHost_v2(NULL, 4096) returned %d\n", r);
+}
+
+static void test_cuMemAllocManaged_null_dptr(void) {
+    CUresult r = cuMemAllocManaged(NULL, 4096, CU_MEM_ATTACH_GLOBAL);
+    assert(r != CUDA_SUCCESS);
+    printf("[OK] cuMemAllocManaged(NULL, 4096) returned %d\n", r);
 }
 
 int main(void) {
@@ -41,6 +55,8 @@ int main(void) {
 
     test_cuMemAlloc_v2_null_dptr();
     test_cuMemAlloc_v2_zero_size();
+    test_cuMemAllocHost_v2_null_hptr();
+    test_cuMemAllocManaged_null_dptr();
 
     cuCtxDestroy_v2(ctx);
     return 0;
