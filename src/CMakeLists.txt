@@ -15,7 +15,7 @@ add_subdirectory(nvml)
 add_subdirectory(vulkan)
 
 set(LIBVGPU vgpu)
-add_library(${LIBVGPU} SHARED libvgpu.c utils.c log_utils.c $<TARGET_OBJECTS:nvml_mod> $<TARGET_OBJECTS:cuda_mod> $<TARGET_OBJECTS:allocator_mod> $<TARGET_OBJECTS:multiprocess_mod> $<TARGET_OBJECTS:vulkan_mod>)
+add_library(${LIBVGPU} SHARED libvgpu.c utils.c log_utils.c hami_core_export.c $<TARGET_OBJECTS:nvml_mod> $<TARGET_OBJECTS:cuda_mod> $<TARGET_OBJECTS:allocator_mod> $<TARGET_OBJECTS:multiprocess_mod> $<TARGET_OBJECTS:vulkan_mod>)
 target_compile_options(${LIBVGPU} PUBLIC ${LIBRARY_COMPILE_FLAGS})
 # Activate NVML dlsym redirect (libvgpu.c:#ifdef HOOK_NVML_ENABLE).
 # Without this define the dispatcher in dlsym() falls through to the real
