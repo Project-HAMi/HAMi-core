@@ -312,24 +312,11 @@ hami_vkGetInstanceProcAddr(VkInstance instance, const char *pName) {
     HAMI_HOOK(EnumerateDeviceLayerProperties);
 
     hami_instance_dispatch_t *d = hami_instance_lookup(instance);
-    if (d) return d->next_gipa(instance, pName);
-    /* Unknown VkInstance handle: NVIDIA driver and Carbonite occasionally
-     * probe through our GIPA with handles we haven't registered (e.g.,
-     * during vkCreateInstance before our register call returns, or with
-     * an upper-layer-wrapped handle). Returning NULL would SegFault the
-     * caller. Forward to the first cached next-layer gipa instead — it
-     * was set the first time vkCreateInstance ran and is a valid pointer
-     * into the next layer / driver. */
-    if (g_first_next_gipa) {
-        HAMI_TRACE("hami_vkGetInstanceProcAddr: instance %p not registered, forwarding via cached gipa", (void *)instance);
-        return g_first_next_gipa(instance, pName);
+    if (!d) {
+        HAMI_TRACE("hami_vkGetInstanceProcAddr: instance %p not registered, returning NULL", (void *)instance);
+        return NULL;
     }
-    /* Pre-CreateInstance loader bootstrap: the only case where the spec
-     * allows us to return NULL for instance entry points (the loader
-     * still resolves the global Enumerate* hooks via the same GIPA, but
-     * those are matched above by HAMI_HOOK before this fall-through). */
-    HAMI_TRACE("hami_vkGetInstanceProcAddr: instance %p not registered AND no cached gipa, returning NULL", (void *)instance);
-    return NULL;
+    return d->next_gipa(instance, pName);
 }
 
 PFN_vkVoidFunction VKAPI_CALL
@@ -346,11 +333,8 @@ hami_vkGetDeviceProcAddr(VkDevice device, const char *pName) {
     HAMI_HOOK(GetDeviceQueue2);
 
     hami_device_dispatch_t *d = hami_device_lookup(device);
-    if (d) return d->next_gdpa(device, pName);
-    if (g_first_next_gdpa) {
-        return g_first_next_gdpa(device, pName);
-    }
-    return NULL;
+    if (!d) return NULL;
+    return d->next_gdpa(device, pName);
 }
 
 /* The Vulkan loader looks up these three entry points by their canonical
