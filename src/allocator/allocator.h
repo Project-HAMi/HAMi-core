@@ -14,6 +14,7 @@ struct allocated_device_memory_struct{
     CUdeviceptr address;
     size_t length;
     CUcontext ctx;
+    CUdevice dev;
     CUmemGenericAllocationHandle *allocHandle;
 };
 typedef struct allocated_device_memory_struct allocated_device_memory;
@@ -90,7 +91,7 @@ extern pthread_mutex_t mutex;
     list->length--;                         \
 }   
 
-#define INIT_ALLOCATED_LIST_ENTRY(__list_entry,__address,__size) {             \
+#define INIT_ALLOCATED_LIST_ENTRY(__list_entry, __address, __size, __dev) {             \
     CUcontext __ctx;                                                           \
     CUresult __res=cuCtxGetCurrent(&__ctx);                                    \
     if (__res!=CUDA_SUCCESS) QUIT_WITH_ERROR("cuCtxGetCurrent failed");        \
@@ -100,6 +101,7 @@ extern pthread_mutex_t mutex;
     if (__list_entry->entry == NULL) QUIT_WITH_ERROR("malloc failed");         \
     __list_entry->entry->address=__address;                                    \
     __list_entry->entry->length=__size;                                        \
+    __list_entry->entry->dev = __dev;                                            \
     __list_entry->entry->allocHandle=malloc(sizeof(CUmemGenericAllocationHandle)); \
     __list_entry->entry->ctx=__ctx;                                            \
     __list_entry->next=NULL;                                                   \
@@ -157,7 +159,7 @@ int oom_check(const int dev,size_t addon);
 // Allocate and free device memory
 int allocate_raw(CUdeviceptr *dptr, size_t size);
 int free_raw(CUdeviceptr dptr);
-int add_chunk_only(CUdeviceptr address,size_t size);
+int add_chunk_only(CUdeviceptr address, size_t size, CUdevice dev);
 int remove_chunk_only(CUdeviceptr address);
 int allocate_async_raw(CUdeviceptr *dptr, size_t size, CUstream hStream);
 int free_raw_async(CUdeviceptr dptr, CUstream hStream);

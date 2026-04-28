@@ -650,6 +650,45 @@ void exit_withlock(int exitcode) {
     exit(exitcode);
 }
 
+/**
+ * Atomically copy proc slot members from src to dst.
+ * Direct struct assignment on a struct with _Atomic members is non-atomic
+ * and can lead to torn reads/data corruption. This function copies each
+ * member individually using atomic loads and stores.
+ */
+static inline void copy_proc_slot_atomic(shrreg_proc_slot_t* dst, shrreg_proc_slot_t* src) {
+    atomic_store_explicit(&dst->pid,
+        atomic_load_explicit(&src->pid, memory_order_relaxed), memory_order_relaxed);
+    atomic_store_explicit(&dst->hostpid,
+        atomic_load_explicit(&src->hostpid, memory_order_relaxed), memory_order_relaxed);
+    atomic_store_explicit(&dst->seqlock,
+        atomic_load_explicit(&src->seqlock, memory_order_relaxed), memory_order_relaxed);
+    atomic_store_explicit(&dst->status,
+        atomic_load_explicit(&src->status, memory_order_relaxed), memory_order_relaxed);
+
+    for (int dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
+        atomic_store_explicit(&dst->used[dev].total,
+            atomic_load_explicit(&src->used[dev].total, memory_order_relaxed), memory_order_relaxed);
+        atomic_store_explicit(&dst->used[dev].context_size,
+            atomic_load_explicit(&src->used[dev].context_size, memory_order_relaxed), memory_order_relaxed);
+        atomic_store_explicit(&dst->used[dev].module_size,
+            atomic_load_explicit(&src->used[dev].module_size, memory_order_relaxed), memory_order_relaxed);
+        atomic_store_explicit(&dst->used[dev].data_size,
+            atomic_load_explicit(&src->used[dev].data_size, memory_order_relaxed), memory_order_relaxed);
+        atomic_store_explicit(&dst->used[dev].offset,
+            atomic_load_explicit(&src->used[dev].offset, memory_order_relaxed), memory_order_relaxed);
+
+        atomic_store_explicit(&dst->monitorused[dev],
+            atomic_load_explicit(&src->monitorused[dev], memory_order_relaxed), memory_order_relaxed);
+
+        atomic_store_explicit(&dst->device_util[dev].dec_util,
+            atomic_load_explicit(&src->device_util[dev].dec_util, memory_order_relaxed), memory_order_relaxed);
+        atomic_store_explicit(&dst->device_util[dev].enc_util,
+            atomic_load_explicit(&src->device_util[dev].enc_util, memory_order_relaxed), memory_order_relaxed);
+        atomic_store_explicit(&dst->device_util[dev].sm_util,
+            atomic_load_explicit(&src->device_util[dev].sm_util, memory_order_relaxed), memory_order_relaxed);
+    }
+}
 
 void exit_handler() {
     if (region_info.init_status == PTHREAD_ONCE_INIT) {
@@ -839,7 +878,27 @@ int clear_proc_slot_nolock(int do_clear) {
             cleaned_pid_zero++;
             res=1;
             region->proc_num--;
-            region->procs[slot] = region->procs[region->proc_num];
+            copy_proc_slot_atomic(&region->procs[slot], &region->procs[region->proc_num]);
+            if (region_info.my_slot != NULL && region_info.my_slot == &region->procs[region->proc_num]) {
+                region_info.my_slot = &region->procs[slot];
+                atomic_store_explicit(&region->procs[region->proc_num].seqlock, 0, memory_order_relaxed);
+                atomic_store_explicit(&region->procs[region->proc_num].pid, 0, memory_order_release);
+                atomic_store_explicit(&region->procs[region->proc_num].hostpid, 0, memory_order_relaxed);
+                atomic_store_explicit(&region->procs[region->proc_num].status, 0, memory_order_release);
+
+                for (int dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
+                    atomic_store_explicit(&region->procs[region->proc_num].used[dev].total, 0, memory_order_relaxed);
+                    atomic_store_explicit(
+                        &region->procs[region->proc_num].used[dev].context_size, 0, memory_order_relaxed);
+                    atomic_store_explicit(
+                        &region->procs[region->proc_num].used[dev].module_size, 0, memory_order_relaxed);
+                    atomic_store_explicit(
+                        &region->procs[region->proc_num].used[dev].data_size, 0, memory_order_relaxed);
+                    atomic_store_explicit(
+                        &region->procs[region->proc_num].device_util[dev].sm_util, 0, memory_order_relaxed);
+                    atomic_store_explicit(&region->procs[region->proc_num].monitorused[dev], 0, memory_order_relaxed);
+                }
+            }
             __sync_synchronize();
 
             // Don't increment slot - check the moved element
@@ -853,7 +912,27 @@ int clear_proc_slot_nolock(int do_clear) {
             cleaned_dead++;
             res = 1;
             region->proc_num--;
-            region->procs[slot] = region->procs[region->proc_num];
+            copy_proc_slot_atomic(&region->procs[slot], &region->procs[region->proc_num]);
+            if (region_info.my_slot != NULL && region_info.my_slot == &region->procs[region->proc_num]) {
+                region_info.my_slot = &region->procs[slot];
+                atomic_store_explicit(&region->procs[region->proc_num].seqlock, 0, memory_order_relaxed);
+                atomic_store_explicit(&region->procs[region->proc_num].pid, 0, memory_order_release);
+                atomic_store_explicit(&region->procs[region->proc_num].hostpid, 0, memory_order_relaxed);
+                atomic_store_explicit(&region->procs[region->proc_num].status, 0, memory_order_release);
+
+                for (int dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
+                    atomic_store_explicit(&region->procs[region->proc_num].used[dev].total, 0, memory_order_relaxed);
+                    atomic_store_explicit(
+                        &region->procs[region->proc_num].used[dev].context_size, 0, memory_order_relaxed);
+                    atomic_store_explicit(
+                        &region->procs[region->proc_num].used[dev].module_size, 0, memory_order_relaxed);
+                    atomic_store_explicit(
+                        &region->procs[region->proc_num].used[dev].data_size, 0, memory_order_relaxed);
+                    atomic_store_explicit(
+                        &region->procs[region->proc_num].device_util[dev].sm_util, 0, memory_order_relaxed);
+                    atomic_store_explicit(&region->procs[region->proc_num].monitorused[dev], 0, memory_order_relaxed);
+                }
+            }
             __sync_synchronize();
             // Don't increment slot - check the moved element
             continue;

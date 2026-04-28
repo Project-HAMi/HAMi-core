@@ -166,7 +166,7 @@ CUresult cuMemAllocManaged(CUdeviceptr* dptr, size_t bytesize, unsigned int flag
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemAllocManaged, dptr, bytesize, flags);
     if (res == CUDA_SUCCESS) {
-        add_chunk_only(*dptr,bytesize);
+        add_chunk_only(*dptr, bytesize, dev);
     }
     return res;
 }
@@ -184,7 +184,7 @@ CUresult cuMemAllocPitch_v2(CUdeviceptr* dptr, size_t* pPitch, size_t WidthInByt
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemAllocPitch_v2, dptr, pPitch, WidthInBytes, Height, ElementSizeBytes);
     if (res == CUDA_SUCCESS) {
-        add_chunk_only(*dptr,bytesize);
+        add_chunk_only(*dptr, bytesize, dev);
     }
     return res;
 }
@@ -598,7 +598,7 @@ CUresult cuMemCreate ( CUmemGenericAllocationHandle* handle, size_t size, const 
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,
         cuMemCreate, handle, size, prop, flags);
     if (res == CUDA_SUCCESS) {
-        add_chunk_only(*handle, size);
+        add_chunk_only(*handle, size, dev);
     }
     return res;
 }
