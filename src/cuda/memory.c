@@ -267,8 +267,13 @@ CUresult cuMemHostRegister_v2(void* hptr, size_t bytesize, unsigned int flags) {
     /*}*/
     // TODO: process flags properly
     LOG_DEBUG("cuMemHostRegister_v2 hptr=%p bytesize=%ld",hptr,bytesize);
-    CUdevice dev;
-    cuCtxGetDevice(&dev);
+    /* Drop the vestigial cuCtxGetDevice() — its result was ignored and
+     * `dev` was never used. Forward-first to the real driver so NULL hptr
+     * surfaces CUDA_ERROR_INVALID_VALUE exactly as without HAMi. Pattern
+     * matches cuMemAlloc_v2 (commit 88143ab). */
+    if (hptr == NULL) {
+        return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemHostRegister_v2, hptr, bytesize, flags);
+    }
     ENSURE_RUNNING();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemHostRegister_v2, hptr, bytesize, flags);
     LOG_DEBUG("cuMemHostRegister_v2 returned :%d(%p:%ld)",res,hptr,bytesize);

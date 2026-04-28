@@ -20,6 +20,9 @@ extern CUresult cuMemAllocManaged(CUdeviceptr* dptr, size_t bytesize, unsigned i
 extern CUresult cuMemAllocPitch_v2(CUdeviceptr* dptr, size_t* pPitch,
                                     size_t WidthInBytes, size_t Height,
                                     unsigned int ElementSizeBytes);
+extern CUresult cuMemHostAlloc(void** hptr, size_t bytesize, unsigned int flags);
+extern CUresult cuMemHostRegister_v2(void* hptr, size_t bytesize, unsigned int flags);
+extern CUresult cuCtxGetDevice(CUdevice* device);
 
 static void test_cuMemAlloc_v2_null_dptr(void) {
     CUresult r = cuMemAlloc_v2(NULL, 4096);
@@ -59,6 +62,24 @@ static void test_cuMemAllocPitch_v2_null_pitch(void) {
     printf("[OK] cuMemAllocPitch_v2(&dptr, NULL, ...) returned %d\n", r);
 }
 
+static void test_cuMemHostAlloc_null_hptr(void) {
+    CUresult r = cuMemHostAlloc(NULL, 4096, 0);
+    assert(r != CUDA_SUCCESS);
+    printf("[OK] cuMemHostAlloc(NULL, 4096, 0) returned %d\n", r);
+}
+
+static void test_cuMemHostRegister_v2_null_hptr(void) {
+    CUresult r = cuMemHostRegister_v2(NULL, 4096, 0);
+    assert(r != CUDA_SUCCESS);
+    printf("[OK] cuMemHostRegister_v2(NULL, 4096, 0) returned %d\n", r);
+}
+
+static void test_cuCtxGetDevice_null(void) {
+    CUresult r = cuCtxGetDevice(NULL);
+    assert(r != CUDA_SUCCESS);
+    printf("[OK] cuCtxGetDevice(NULL) returned %d\n", r);
+}
+
 int main(void) {
     CUresult r = cuInit(0);
     if (r != CUDA_SUCCESS) {
@@ -76,6 +97,9 @@ int main(void) {
     test_cuMemAllocManaged_null_dptr();
     test_cuMemAllocPitch_v2_null_dptr();
     test_cuMemAllocPitch_v2_null_pitch();
+    test_cuMemHostAlloc_null_hptr();
+    test_cuMemHostRegister_v2_null_hptr();
+    test_cuCtxGetDevice_null();
 
     cuCtxDestroy_v2(ctx);
     return 0;
