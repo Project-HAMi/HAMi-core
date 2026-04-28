@@ -587,7 +587,7 @@ CUresult cuMemAddressReserve(CUdeviceptr* ptr, size_t size,
 CUresult cuMemCreate ( CUmemGenericAllocationHandle* handle, size_t size, const CUmemAllocationProp* prop, unsigned long long flags ) {
     LOG_INFO("cuMemCreate:%lld:%d", size, prop->location.id);
     ENSURE_RUNNING();
-    CUdevice dev;
+    CUdevice dev = prop->location.id;
     int do_oom_check = (prop->location.type == CU_MEM_LOCATION_TYPE_DEVICE);
     if (do_oom_check && cuCtxGetDevice(&dev) != CUDA_SUCCESS) {
         dev = prop->location.id;
@@ -597,7 +597,7 @@ CUresult cuMemCreate ( CUmemGenericAllocationHandle* handle, size_t size, const 
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,
         cuMemCreate, handle, size, prop, flags);
-    if (res == CUDA_SUCCESS) {
+    if (res == CUDA_SUCCESS && do_oom_check) {
         add_chunk_only(*handle, size, dev);
     }
     return res;

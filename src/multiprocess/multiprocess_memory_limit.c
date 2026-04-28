@@ -1243,10 +1243,11 @@ int set_current_device_memory_limit(const int dev,size_t newlimit) {
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
+        return -1;
     }
     LOG_INFO("dev %d new limit set to %ld",dev,newlimit);
     region_info.shared_region->limit[dev]=newlimit;
-    return 0; 
+    return 0;
 }
 
 uint64_t get_current_device_memory_limit(const int dev) {
