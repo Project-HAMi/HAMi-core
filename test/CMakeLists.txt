@@ -19,7 +19,14 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     endif()
 
     list(APPEND TEST_TARGET_NAMES_LIST ${TEST_TARGET_NAME})
-    target_link_libraries(${TEST_TARGET_NAME}  -lrt -lpthread -lnvidia-ml -lcuda -lcudart -L${CUDA_HOME}/lib64)
+    #Link all internal core modules to the test targets
+    target_link_libraries(${TEST_TARGET_NAME} 
+        nvml_mod 
+        cuda_mod 
+        allocator_mod 
+        multiprocess_mod 
+        -lrt -lpthread -lnvidia-ml -lcuda -lcudart -L${CUDA_HOME}/lib64
+    )
     target_compile_options(${TEST_TARGET_NAME} PUBLIC ${TEST_COMPILE_FLAGS})
 
     if (DEFINED TEST_DEVICE_ID)
