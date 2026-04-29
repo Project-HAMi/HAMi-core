@@ -328,7 +328,8 @@ hami_vkGetInstanceProcAddr(VkInstance instance, const char *pName) {
      * allows us to return NULL for instance entry points (the loader
      * still resolves the global Enumerate* hooks via the same GIPA, but
      * those are matched above by HAMI_HOOK before this fall-through). */
-    HAMI_TRACE("hami_vkGetInstanceProcAddr: instance %p not registered AND no cached gipa, returning NULL", (void *)instance);
+    HAMI_TRACE("hami_vkGetInstanceProcAddr: instance %p not registered AND no cached gipa, returning NULL",
+               (void *)instance);
     return NULL;
 }
 
