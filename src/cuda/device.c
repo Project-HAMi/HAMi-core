@@ -55,9 +55,17 @@ CUresult cuDeviceGetPCIBusId(char *pciBusId, int len, CUdevice dev) {
     return res;
 }
 
+#if CUDA_VERSION < 13000
 CUresult cuDeviceGetUuid(CUuuid* uuid,CUdevice dev) {
     LOG_DEBUG("into cuDeviceGetUuid dev=%d",dev);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDeviceGetUuid,uuid,dev);
+    return res;
+}
+#endif
+
+CUresult cuDeviceGetUuid_v2(CUuuid* uuid, CUdevice dev) {
+    LOG_DEBUG("into cuDeviceGetUuid_v2 dev=%d", dev);
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGetUuid_v2, uuid, dev);
     return res;
 }
 

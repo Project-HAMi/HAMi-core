@@ -481,10 +481,21 @@ CUresult cuMemsetD8Async ( CUdeviceptr dstDevice, unsigned char  uc, size_t N, C
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemsetD8Async,dstDevice,uc,N,hStream);
 }
 
+#if CUDA_VERSION < 13000
 CUresult cuMemAdvise( CUdeviceptr devPtr, size_t count, CUmem_advise advice, CUdevice device ){
     LOG_DEBUG("cuMemAdvise devPtr=%llx count=%lx",devPtr,count);
     ENSURE_RUNNING();
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemAdvise,devPtr,count,advice,device);
+}
+#endif
+
+/* On CUDA 13+, cuda.h #defines cuMemAdvise as cuMemAdvise_v2 with a new CUmemLocation
+   parameter. The old CUdevice wrapper above would conflict, so it is excluded.
+   On CUDA 12 and below, both symbols exist separately and this is the explicit v2 wrapper. */
+CUresult cuMemAdvise_v2(CUdeviceptr devPtr, size_t count, CUmem_advise advice, CUmemLocation location) {
+    LOG_DEBUG("cuMemAdvise_v2 devPtr=%llx count=%lx", devPtr, count);
+    ENSURE_RUNNING();
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAdvise_v2, devPtr, count, advice, location);
 }
 
 #ifdef HOOK_MEMINFO_ENABLE
@@ -778,9 +789,17 @@ CUresult cuMemcpy3DPeerAsync(const CUDA_MEMCPY3D_PEER *pCopy, CUstream hStream) 
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemcpy3DPeerAsync,pCopy,hStream);
 }
 
+#if CUDA_VERSION < 13000
 CUresult cuMemPrefetchAsync(CUdeviceptr devPtr, size_t count, CUdevice dstDevice, CUstream hStream) {
     LOG_DEBUG("cuMemPrefetchAsync");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemPrefetchAsync,devPtr,count,dstDevice,hStream);
+}
+#endif
+
+CUresult cuMemPrefetchAsync_v2(CUdeviceptr devPtr, size_t count, CUmemLocation location, unsigned int flags,
+                               CUstream hStream) {
+    LOG_DEBUG("cuMemPrefetchAsync_v2");
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemPrefetchAsync_v2, devPtr, count, location, flags, hStream);
 }
 
 CUresult cuMemRangeGetAttribute(void *data, size_t dataSize, CUmem_range_attribute attribute, CUdeviceptr devPtr, size_t count) {

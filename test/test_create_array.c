@@ -16,7 +16,11 @@ int main() {
     CHECK_DRV_API(cuDeviceGet(&device, 0));
 
     CUcontext ctx;
+#if CUDA_VERSION >= 13000
+    CHECK_DRV_API(cuCtxCreate(&ctx, NULL, 0, device));
+#else
     CHECK_DRV_API(cuCtxCreate(&ctx, 0, device));
+#endif
 
     size_t usage = 0;
     size_t t_size=0;
