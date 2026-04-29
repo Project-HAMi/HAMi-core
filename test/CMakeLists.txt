@@ -6,7 +6,10 @@ set(TEST_TARGET_NAMES_LIST)
 
 
 file(GLOB_RECURSE TEST_SCRIPTS "${TEST_CPP_SOURCE_DIR}/*.c" "${TEST_CPP_SOURCE_DIR}/*.cu")
-foreach(TEST_SCRIPT ${TEST_SCRIPTS}) 
+# Vulkan unit tests link against vulkan_mod (not CUDA) and have their own
+# build harness; exclude them from this CUDA-test glob.
+list(FILTER TEST_SCRIPTS EXCLUDE REGEX "/vulkan/")
+foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     file(RELATIVE_PATH RELATIVE_TEST_PATH ${TEST_CPP_SOURCE_DIR} ${TEST_SCRIPT})
     get_filename_component(TEST_TARGET_DIR ${RELATIVE_TEST_PATH} DIRECTORY)
     get_filename_component(TEST_TARGET_NAME ${RELATIVE_TEST_PATH} NAME_WE)

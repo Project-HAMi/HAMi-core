@@ -135,6 +135,12 @@ CUresult cuMemoryAllocate(CUdeviceptr* dptr, size_t bytesize, void* data) {
 CUresult cuMemAlloc_v2(CUdeviceptr* dptr, size_t bytesize) {
     LOG_INFO("into cuMemAllocing_v2 dptr=%p bytesize=%ld",dptr,bytesize);
     ENSURE_RUNNING();
+    /* Forward NULL/invalid args to the real driver so error codes match
+     * non-HAMi behavior. NVIDIA OptiX/Aftermath internals can call us with
+     * NULL during early init paths; dereferencing would SegFault. */
+    if (dptr == NULL) {
+        return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAlloc_v2, dptr, bytesize);
+    }
     CUresult res = allocate_raw(dptr,bytesize);
     if (res!=CUDA_SUCCESS)
         return res;
@@ -159,6 +165,14 @@ CUresult cuMemAllocHost_v2(void** hptr, size_t bytesize) {
 CUresult cuMemAllocManaged(CUdeviceptr* dptr, size_t bytesize, unsigned int flags) {
     LOG_DEBUG("cuMemAllocManaged dptr=%p bytesize=%ld",dptr,bytesize);
     ENSURE_RUNNING();
+    /* Forward NULL dptr to the real driver so callers see the driver's
+     * defined CUDA_ERROR_INVALID_VALUE instead of HAMi's
+     * CUDA_ERROR_OUT_OF_MEMORY when oom_check would trip first. Pattern
+     * matches cuMemAlloc_v2 (commit 88143ab) and cuMemGetInfo_v2
+     * (commit 03f99d7). */
+    if (dptr == NULL) {
+        return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAllocManaged, dptr, bytesize, flags);
+    }
     CUdevice dev;
     CHECK_DRV_API(cuCtxGetDevice(&dev));
     if (oom_check(dev,bytesize)){
@@ -171,9 +185,18 @@ CUresult cuMemAllocManaged(CUdeviceptr* dptr, size_t bytesize, unsigned int flag
     return res;
 }
 
-CUresult cuMemAllocPitch_v2(CUdeviceptr* dptr, size_t* pPitch, size_t WidthInBytes, 
+CUresult cuMemAllocPitch_v2(CUdeviceptr* dptr, size_t* pPitch, size_t WidthInBytes,
                                       size_t Height, unsigned int ElementSizeBytes) {
     LOG_DEBUG("cuMemAllocPitch_v2 dptr=%p (%ld,%ld)",dptr,WidthInBytes,Height);
+    /* Forward NULL dptr/pPitch to the real driver so callers see
+     * CUDA_ERROR_INVALID_VALUE instead of HAMi's CUDA_ERROR_OUT_OF_MEMORY
+     * when oom_check would trip. Also avoids dereferencing *dptr in
+     * add_chunk_only on the success path. Pattern matches cuMemAlloc_v2
+     * (commit 88143ab) and cuMemAllocManaged (commit 275ba3d). */
+    if (dptr == NULL || pPitch == NULL) {
+        return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAllocPitch_v2,
+                                   dptr, pPitch, WidthInBytes, Height, ElementSizeBytes);
+    }
     size_t guess_pitch = (((WidthInBytes - 1) / ElementSizeBytes) + 1) * ElementSizeBytes;
     size_t bytesize = guess_pitch * Height;
     ENSURE_RUNNING();
@@ -194,9 +217,19 @@ CUresult cuMemFree_v2(CUdeviceptr dptr) {
     if (dptr == 0) {  // NULL
         return CUDA_SUCCESS;
     }
-    CUresult res = free_raw(dptr);
-    LOG_INFO("after free_raw dptr=%p res=%d",(void *)dptr,res);
-    return res;
+    /* free_raw returns 0 when the pointer was tracked by HAMi (it calls the
+     * real cuMemFree_v2 internally), -1 when unknown. Pointers can be
+     * unknown when: (a) allocated via paths that bypass HAMi's add_chunk
+     * (e.g., cuMemAllocManaged, cuMemCreate/cuMemMap VMM flow, or CUDA
+     * runtime cudaMalloc called before HAMi's preload took effect) or
+     * (b) already freed. Casting -1 to CUresult yields 0xFFFFFFFF which
+     * downstream plugins like Isaac Sim's carb.cudainterop flag as
+     * "unrecognized error code -1". Fall through to the real driver so
+     * the actual behaviour matches an un-hooked runtime. */
+    int rc = free_raw(dptr);
+    LOG_INFO("after free_raw dptr=%p rc=%d", (void *)dptr, rc);
+    if (rc == 0) return CUDA_SUCCESS;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFree_v2, dptr);
 }
 
 
@@ -234,8 +267,13 @@ CUresult cuMemHostRegister_v2(void* hptr, size_t bytesize, unsigned int flags) {
     /*}*/
     // TODO: process flags properly
     LOG_DEBUG("cuMemHostRegister_v2 hptr=%p bytesize=%ld",hptr,bytesize);
-    CUdevice dev;
-    cuCtxGetDevice(&dev);
+    /* Drop the vestigial cuCtxGetDevice() — its result was ignored and
+     * `dev` was never used. Forward-first to the real driver so NULL hptr
+     * surfaces CUDA_ERROR_INVALID_VALUE exactly as without HAMi. Pattern
+     * matches cuMemAlloc_v2 (commit 88143ab). */
+    if (hptr == NULL) {
+        return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemHostRegister_v2, hptr, bytesize, flags);
+    }
     ENSURE_RUNNING();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemHostRegister_v2, hptr, bytesize, flags);
     LOG_DEBUG("cuMemHostRegister_v2 returned :%d(%p:%ld)",res,hptr,bytesize);
@@ -489,33 +527,44 @@ CUresult cuMemAdvise( CUdeviceptr devPtr, size_t count, CUmem_advise advice, CUd
 
 #ifdef HOOK_MEMINFO_ENABLE
 CUresult cuMemGetInfo_v2(size_t* free, size_t* total) {
-    CUdevice dev;
     LOG_DEBUG("cuMemGetInfo_v2");
     ENSURE_INITIALIZED();
-    CHECK_DRV_API(cuCtxGetDevice(&dev));
+
+    /* Forward to the real driver first. This lets NULL-pointer and
+     * missing-context errors surface exactly as they would without HAMi,
+     * and guarantees we do not dereference pointers the driver rejected.
+     * Isaac Sim / OptiX in particular can invoke this hook via internal
+     * paths that (historically) trip NULL-deref regressions; crashing
+     * inside our hook prevents the app from even reporting the error. */
+    CUresult r = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemGetInfo_v2, free, total);
+    if (r != CUDA_SUCCESS) return r;
+    if (free == NULL || total == NULL) return r;
+
+    CUdevice dev;
+    if (CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxGetDevice, &dev) != CUDA_SUCCESS) {
+        /* No current context — driver already wrote free/total; leave as-is. */
+        return r;
+    }
+
     size_t usage = get_current_device_memory_usage(cuda_to_nvml_map(dev));
     size_t limit = get_current_device_memory_limit(cuda_to_nvml_map(dev));
+    LOG_INFO("orig free=%zu total=%zu limit=%zu usage=%zu",
+             *free, *total, limit, usage);
+
     if (limit == 0) {
-        CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
-        LOG_INFO("orig free=%ld total=%ld", *free, *total);
-        *free = *total - usage;
-        LOG_INFO("after free=%ld total=%ld", *free, *total);
-        return CUDA_SUCCESS;
-    } else if (limit < usage) {
-        LOG_WARN("limit < usage; usage=%ld, limit=%ld", usage, limit);
-        return CUDA_ERROR_INVALID_VALUE;
+        /* Unlimited — only adjust free to account for tracked HAMi usage. */
+        *free = (*total > usage) ? (*total - usage) : 0;
     } else {
-        CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
-        LOG_INFO("orig free=%ld total=%ld limit=%ld usage=%ld",
-            *free, *total, limit, usage);
-        // Ensure total memory does not exceed the physical or imposed limit.
+        /* Clamp total to min(physical, pod budget); compute free from usage.
+         * When usage has drifted past limit (can happen with racy multi-proc
+         * updates or mid-stream limit changes) report free=0 instead of
+         * returning an error, so callers like OptiX do not crash. */
         size_t actual_limit = (limit > *total) ? *total : limit;
-        *free = (actual_limit > usage) ? (actual_limit - usage) : 0;
         *total = actual_limit;
-        LOG_INFO("after free=%ld total=%ld limit=%ld usage=%ld",
-            *free, *total, limit, usage);
-        return CUDA_SUCCESS;
+        *free  = (actual_limit > usage) ? (actual_limit - usage) : 0;
     }
+    LOG_INFO("after free=%zu total=%zu", *free, *total);
+    return CUDA_SUCCESS;
 }
 #endif
 
@@ -636,10 +685,13 @@ CUresult cuMemFreeAsync(CUdeviceptr dptr, CUstream hStream) {
     if (dptr == 0) {  // NULL
         return CUDA_SUCCESS;
     }
-    CUresult res = free_raw_async(dptr,hStream);
-    //CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemFreeAsync,dptr,hStream); 
-    LOG_DEBUG("after free_raw_async dptr=%p res=%d",(void *)dptr,res);
-    return res;
+    /* Same unknown-pointer fallback as cuMemFree_v2: return CUDA_SUCCESS
+     * when tracked (free_raw_async already called the real driver), else
+     * forward to driver instead of leaking a bogus -1 CUresult. */
+    int rc = free_raw_async(dptr, hStream);
+    LOG_DEBUG("after free_raw_async dptr=%p rc=%d", (void *)dptr, rc);
+    if (rc == 0) return CUDA_SUCCESS;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFreeAsync, dptr, hStream);
 }
 
 CUresult cuMemHostGetDevicePointer_v2(CUdeviceptr *pdptr, void *p, unsigned int Flags){
