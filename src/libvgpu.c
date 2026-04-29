@@ -119,7 +119,7 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
         //Compatible with cuda 12.8+ fix
         if (strcmp(symbol,"cuGetExportTable")!=0)
             pthread_once(&pre_cuinit_flag,(void(*)(void))preInit);
-        void *f = real_dlsym(vgpulib,symbol);
+        void *f = __dlsym_hook_section(vgpulib,symbol);
         if (f!=NULL)
             return f;
     }
