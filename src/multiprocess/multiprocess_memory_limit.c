@@ -122,7 +122,16 @@ size_t get_limit_from_env(const char* env_name) {
             LOG_INFO("device core util limit set to 0, which means no limit: %s=%s",
                 env_name, env_limit);
         }else if (env_name[12]=='M'){
-            LOG_WARN("invalid device memory limit %s=%s",env_name,env_limit);
+            // 0m / 0g / 0k / 0 are valid encodings of "no memory limit",
+            // matching the SM-limit branch above. Some orchestrators (e.g.
+            // Olares' device-plugin) emit "0m" by default when no per-pod
+            // memory cap is configured; previously this was logged as
+            // "invalid" and the caller fell through to a 0-byte effective
+            // limit, which then failed cuMemAlloc / cuMemoryAllocate with
+            // res=2 on the Driver API path even though the device has
+            // memory available.
+            LOG_INFO("device memory limit set to 0, which means no limit: %s=%s",
+                env_name, env_limit);
         }else{
             LOG_WARN("invalid env name:%s",env_name);
         }
