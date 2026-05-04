@@ -1,5 +1,6 @@
 #include "vulkan/budget.h"
 
+#include <inttypes.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -43,7 +44,7 @@ static void hami_core_init_once(void) { (void)cuInit(0); }
 int hami_budget_reserve(int dev, size_t size) {
     pthread_once(&g_hami_core_init, hami_core_init_once);
     uint64_t limit = hami_core_get_memory_limit(dev);
-    HAMI_TRACE("budget_reserve dev=%d size=%zu limit=%llu", dev, size, (unsigned long long)limit);
+    HAMI_TRACE("budget_reserve dev=%d size=%zu limit=%" PRIu64, dev, size, (uint64_t)limit);
     if (limit == 0) {
         /* Unlimited — skip check, but still bump the counter so metrics
          * remain accurate. add_gpu_device_memory_usage returns 0 on
@@ -68,6 +69,6 @@ void hami_budget_release(int dev, size_t size) {
 size_t hami_budget_of(int dev) {
     pthread_once(&g_hami_core_init, hami_core_init_once);
     uint64_t v = hami_core_get_memory_limit(dev);
-    HAMI_TRACE("budget_of dev=%d -> limit=%llu", dev, (unsigned long long)v);
+    HAMI_TRACE("budget_of dev=%d -> limit=%" PRIu64, dev, (uint64_t)v);
     return (size_t)v;
 }

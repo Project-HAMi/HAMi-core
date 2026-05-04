@@ -1,6 +1,6 @@
 /* libvgpu/src/include/hami_core_export.h */
-#ifndef HAMI_CORE_EXPORT_H_
-#define HAMI_CORE_EXPORT_H_
+#ifndef SRC_INCLUDE_HAMI_CORE_EXPORT_H_
+#define SRC_INCLUDE_HAMI_CORE_EXPORT_H_
 
 #include <stddef.h>
 #include <stdint.h>
@@ -35,4 +35,4 @@ void hami_core_throttle(void);
 }
 #endif
 
-#endif  /* HAMI_CORE_EXPORT_H_ */
+#endif  // SRC_INCLUDE_HAMI_CORE_EXPORT_H_

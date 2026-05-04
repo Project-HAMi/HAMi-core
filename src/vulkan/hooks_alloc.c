@@ -1,3 +1,4 @@
+#include <inttypes.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,8 +42,8 @@ static int device_to_index(VkDevice d) {
 VKAPI_ATTR VkResult VKAPI_CALL
 hami_vkAllocateMemory(VkDevice device, const VkMemoryAllocateInfo *pInfo,
                       const VkAllocationCallbacks *pAlloc, VkDeviceMemory *pMem) {
-    HAMI_TRACE("hami_vkAllocateMemory device=%p size=%llu",
-               (void *)device, (unsigned long long)pInfo->allocationSize);
+    HAMI_TRACE("hami_vkAllocateMemory device=%p size=%" PRIu64,
+               (void *)device, (uint64_t)pInfo->allocationSize);
     hami_device_dispatch_t *d = hami_device_lookup(device);
     if (!d || !d->AllocateMemory) {
         HAMI_TRACE("hami_vkAllocateMemory: device dispatch missing -> VK_ERROR_INITIALIZATION_FAILED");
@@ -52,8 +53,8 @@ hami_vkAllocateMemory(VkDevice device, const VkMemoryAllocateInfo *pInfo,
     int idx = device_to_index(device);
     HAMI_TRACE("hami_vkAllocateMemory: device_to_index -> idx=%d", idx);
     if (idx >= 0 && !hami_budget_reserve(idx, pInfo->allocationSize)) {
-        HAMI_TRACE("hami_vkAllocateMemory: budget reserve REJECTED idx=%d size=%llu",
-                   idx, (unsigned long long)pInfo->allocationSize);
+        HAMI_TRACE("hami_vkAllocateMemory: budget reserve REJECTED idx=%d size=%" PRIu64,
+                   idx, (uint64_t)pInfo->allocationSize);
         return VK_ERROR_OUT_OF_DEVICE_MEMORY;
     }
     if (idx < 0) {

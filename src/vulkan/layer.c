@@ -293,6 +293,20 @@ hami_vkEnumerateDeviceLayerProperties(VkPhysicalDevice physicalDevice,
     }                                                                              \
 } while (0)
 
+/* Same hook function, matched against the KHR-suffixed alias. The
+ * `*2KHR` names are the original extension form (VK_KHR_get_physical_
+ * device_properties2) that many engines still query through
+ * vkGetInstanceProcAddr even though Vulkan 1.1 promoted them to core.
+ * Without this alias, the loader returns the next layer's pointer for
+ * the KHR name and our hook is bypassed — observed in Carbonite/Kit
+ * where vkGetPhysicalDeviceMemoryProperties2KHR was reading the
+ * unclamped 45 GiB heap and 32 GiB budget straight from the ICD. */
+#define HAMI_HOOK_KHR_ALIAS(name) do {                                             \
+    if (strcmp(pName, "vk" #name "KHR") == 0) {                                    \
+        return (PFN_vkVoidFunction)hami_vk##name;                                  \
+    }                                                                              \
+} while (0)
+
 PFN_vkVoidFunction VKAPI_CALL
 hami_vkGetInstanceProcAddr(VkInstance instance, const char *pName) {
     HAMI_TRACE("hami_vkGetInstanceProcAddr instance=%p name=%s", (void *)instance, pName);
@@ -302,6 +316,7 @@ hami_vkGetInstanceProcAddr(VkInstance instance, const char *pName) {
     HAMI_HOOK(GetInstanceProcAddr);
     HAMI_HOOK(GetPhysicalDeviceMemoryProperties);
     HAMI_HOOK(GetPhysicalDeviceMemoryProperties2);
+    HAMI_HOOK_KHR_ALIAS(GetPhysicalDeviceMemoryProperties2);
     /* Spec-required global entry points that the loader queries with
      * instance=NULL during layer initialization. Returning NULL here
      * caused libcarb.graphics-vulkan to SegFault while assembling the
@@ -321,7 +336,8 @@ hami_vkGetInstanceProcAddr(VkInstance instance, const char *pName) {
      * was set the first time vkCreateInstance ran and is a valid pointer
      * into the next layer / driver. */
     if (g_first_next_gipa) {
-        HAMI_TRACE("hami_vkGetInstanceProcAddr: instance %p not registered, forwarding via cached gipa", (void *)instance);
+        HAMI_TRACE("hami_vkGetInstanceProcAddr: instance %p not registered,"
+                   " forwarding via cached gipa", (void *)instance);
         return g_first_next_gipa(instance, pName);
     }
     /* Pre-CreateInstance loader bootstrap: the only case where the spec
