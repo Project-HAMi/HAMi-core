@@ -89,7 +89,7 @@ CUresult get_listsize(allocated_list *al, size_t *size) {
 
 void allocator_init() {
     LOG_DEBUG("Allocator_init\n");
-    
+
     device_overallocated = malloc(sizeof(allocated_list));
     LIST_INIT(device_overallocated);
     device_allocasync=malloc(sizeof(allocated_list));
@@ -99,32 +99,43 @@ void allocator_init() {
 }
 
 int add_chunk(CUdeviceptr *address, size_t size) {
-    size_t addr=0;
-    size_t allocsize;
-    CUresult res = CUDA_SUCCESS;
     CUdevice dev;
+    CUresult res;
+
     cuCtxGetDevice(&dev);
-    if (oom_check(dev,size))
+
+    /* OOM pre-check without lock */
+    if (oom_check(dev, size))
         return CUDA_ERROR_OUT_OF_MEMORY;
-    
-    allocated_list_entry *e;
-    INIT_ALLOCATED_LIST_ENTRY(e, addr, size, dev);
-    if (size <= IPCSIZE)
-        res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemAlloc_v2,&e->entry->address,size);
-    else{
-        e->entry->length = size;
-        res = cuMemoryAllocate(&e->entry->address, size, e->entry->allocHandle);
+
+    /* GPU allocation outside lock — the expensive part */
+    if (size <= IPCSIZE) {
+        res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAlloc_v2, address, size);
+    } else {
+        res = cuMemoryAllocate(address, size, NULL);
     }
-    if (res!=CUDA_SUCCESS){
-        LOG_ERROR("cuMemoryAllocate failed res=%d",res);
+    if (res != CUDA_SUCCESS) {
+        LOG_ERROR("cuMemoryAllocate failed res=%d", res);
         return res;
     }
-    LIST_ADD(device_overallocated,e);
-    //uint64_t t_size;
-    *address = e->entry->address;
-    allocsize = size;
-    cuCtxGetDevice(&dev);
-    add_gpu_device_memory_usage(getpid(), dev, allocsize, 2);
+
+    /* Tracking inside lock — pure in-memory ops, microseconds */
+    pthread_mutex_lock(&mutex);
+
+    if (oom_check(dev, size)) {
+        /* Another process consumed memory between our pre-check and now */
+        pthread_mutex_unlock(&mutex);
+        CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFree_v2, *address);
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+
+    allocated_list_entry *e;
+    INIT_ALLOCATED_LIST_ENTRY(e, 0, size, dev);
+    e->entry->address = *address;
+    LIST_ADD(device_overallocated, e);
+    add_gpu_device_memory_usage(getpid(), dev, size, 2);
+
+    pthread_mutex_unlock(&mutex);
     return 0;
 }
 
@@ -159,21 +170,31 @@ int check_memory_type(CUdeviceptr address) {
 
 int remove_chunk(allocated_list *a_list, CUdeviceptr dptr) {
     size_t t_size;
-    if (a_list->length==0) {
+    CUdevice t_dev;
+
+    if (a_list->length == 0) {
         return -1;
     }
+
+    pthread_mutex_lock(&mutex);
+
     allocated_list_entry *val;
-    for (val=a_list->head;val!=NULL;val=val->next){
+    for (val = a_list->head; val != NULL; val = val->next) {
         if (val->entry->address == dptr) {
-            t_size=val->entry->length;
+            t_size = val->entry->length;
+            t_dev = val->entry->dev;
+            LIST_REMOVE(a_list, val);
+            rm_gpu_device_memory_usage(getpid(), t_dev, t_size, 2);
+
+            pthread_mutex_unlock(&mutex);
+
+            /* GPU free outside lock */
             cuMemoryFree(dptr);
-            LIST_REMOVE(a_list,val);
-            CUdevice dev;
-            cuCtxGetDevice(&dev);
-            rm_gpu_device_memory_usage(getpid(), dev, t_size, 2);
             return 0;
         }
     }
+
+    pthread_mutex_unlock(&mutex);
     return -1;
 }
 
@@ -198,18 +219,11 @@ int remove_chunk_only(CUdeviceptr dptr) {
 }
 
 int allocate_raw(CUdeviceptr *dptr, size_t size) {
-    int tmp;
-    pthread_mutex_lock(&mutex);
-    tmp = add_chunk(dptr, size);
-    pthread_mutex_unlock(&mutex);
-    return tmp;
+    return add_chunk(dptr, size);
 }
 
 int free_raw(CUdeviceptr dptr) {
-    pthread_mutex_lock(&mutex);
-    unsigned int tmp = remove_chunk(device_overallocated, dptr);
-    pthread_mutex_unlock(&mutex);
-    return tmp;
+    return remove_chunk(device_overallocated, dptr);
 }
 
 int remove_chunk_async(
@@ -279,7 +293,7 @@ int add_chunk_async(CUdeviceptr *address, size_t size, CUstream hStream) {
             e->entry->length=allocsize;
         }else{
             e->entry->length=0;
-        } 
+        }
     }
     LIST_ADD(device_allocasync,e);
     return 0;

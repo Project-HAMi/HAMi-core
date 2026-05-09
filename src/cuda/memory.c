@@ -608,7 +608,7 @@ CUresult cuMemCreate ( CUmemGenericAllocationHandle* handle, size_t size, const 
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,
         cuMemCreate, handle, size, prop, flags);
-    if (res == CUDA_SUCCESS) {
+    if (do_oom_check && res == CUDA_SUCCESS) {
         add_chunk_only(*handle, size, dev);
     }
     return res;

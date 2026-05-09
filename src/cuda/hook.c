@@ -317,6 +317,10 @@ void* find_real_symbols_in_table(const char *symbol) {
 void *find_symbols_in_table(const char *symbol) {
     char symbol_v[500];
     void *pfn;
+    /* Skip CUDA graph functions: let them fall through to real driver */
+    if (strncmp(symbol, "cuGraph", 7) == 0) {
+        return NULL;
+    }
     strcpy(symbol_v,symbol);
     strcat(symbol_v,"_v3");
     pfn = __dlsym_hook_section(NULL,symbol_v);
