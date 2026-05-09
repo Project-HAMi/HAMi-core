@@ -122,7 +122,8 @@ size_t get_limit_from_env(const char* env_name) {
             LOG_INFO("device core util limit set to 0, which means no limit: %s=%s",
                 env_name, env_limit);
         }else if (env_name[12]=='M'){
-            LOG_WARN("invalid device memory limit %s=%s",env_name,env_limit);
+            LOG_INFO("device memory limit set to 0, which means no limit: %s=%s",
+                env_name, env_limit);
         }else{
             LOG_WARN("invalid env name:%s",env_name);
         }
