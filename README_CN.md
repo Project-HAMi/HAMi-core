@@ -42,6 +42,18 @@ export CUDA_DEVICE_MEMORY_LIMIT=1g
 export CUDA_DEVICE_SM_LIMIT=50
 ```
 
+如果在本地运行 CUDA 应用，请先创建本地目录。
+
+```
+mkdir /tmp/vgpulock/
+```
+
+如果更新了 `CUDA_DEVICE_MEMORY_LIMIT` 或 `CUDA_DEVICE_SM_LIMIT`，请删除本地缓存文件。
+
+```
+rm /tmp/cudevshr.cache
+```
+
 ## Docker镜像使用
 
 ```bash
