@@ -287,7 +287,7 @@ void load_nvml_libraries() {
 
     table = dlopen(driver_filename, RTLD_NOW | RTLD_NODELETE);
     if (!table) {
-        LOG_WARN("can't find library %s", driver_filename);  
+        LOG_WARN("can't find library %s", driver_filename);
     }
     int i;
     for (i = 0; i < NVML_ENTRY_END; i++) {
@@ -308,7 +308,7 @@ void nvml_preInit() {
     load_nvml_libraries();
     for (int i = 0; i < CUDA_DEVICE_MAX_COUNT; i++) {
         cuda_to_nvml_map_array[i] = i;
-    }   
+    }
 }
 
 void nvml_postInit() {
@@ -364,108 +364,111 @@ nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,void* memory,int versi
             ((nvmlMemory_v2_t *)memory)->total = limit;
             ((nvmlMemory_v2_t *)memory)->used = usage;
             return NVML_SUCCESS;
-        } 
+        }
     }
     return NVML_SUCCESS;
 }
 
 nvmlReturn_t nvmlDeviceGetMemoryInfo(nvmlDevice_t device, nvmlMemory_t* memory) {
-    return _nvmlDeviceGetMemoryInfo(device,memory,1); 
+    return _nvmlDeviceGetMemoryInfo(device, memory, 1);
 }
 
 nvmlReturn_t nvmlDeviceGetMemoryInfo_v2(nvmlDevice_t device, nvmlMemory_v2_t* memory) {
-    return _nvmlDeviceGetMemoryInfo(device,memory,2);
+    return _nvmlDeviceGetMemoryInfo(device, memory, 2);
 }
 
 
 nvmlReturn_t nvmlDeviceGetNvLinkRemotePciInfo_v2 ( nvmlDevice_t device, unsigned int  link, nvmlPciInfo_t* pci ) {
-    nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry,nvmlDeviceGetNvLinkRemotePciInfo_v2,device,link,pci);
+    nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetNvLinkRemotePciInfo_v2, device, link, pci);
     return res;
 }
 
 nvmlReturn_t nvmlDeviceGetNvLinkRemotePciInfo ( nvmlDevice_t device, unsigned int  link, nvmlPciInfo_t* pci ) {
-    nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry,nvmlDeviceGetNvLinkRemotePciInfo,device,link,pci);
+    nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry,nvmlDeviceGetNvLinkRemotePciInfo, device, link, pci);
     return res;
 }
 
 nvmlReturn_t nvmlDeviceGetHandleByIndex ( unsigned int  index, nvmlDevice_t* device ){
     nvmlReturn_t res;
-    LOG_DEBUG("nvmlDeviceGetHandleByIndex index=%u",index); 
-    res = NVML_OVERRIDE_CALL_NO_LOG(nvml_library_entry,nvmlDeviceGetHandleByIndex,index,device);
+    LOG_DEBUG("nvmlDeviceGetHandleByIndex index=%u",index);
+    res = NVML_OVERRIDE_CALL_NO_LOG(nvml_library_entry, nvmlDeviceGetHandleByIndex, index, device);
     return res;
 }
 
 nvmlReturn_t nvmlDeviceGetHandleByIndex_v2 ( unsigned int  index, nvmlDevice_t* device ){
     nvmlReturn_t res;
-    LOG_DEBUG("nvmlDeviceGetHandleByIndex_v2 index=%u",index); 
-    res = NVML_OVERRIDE_CALL_NO_LOG(nvml_library_entry,nvmlDeviceGetHandleByIndex_v2,index,device);
+    LOG_DEBUG("nvmlDeviceGetHandleByIndex_v2 index=%u",index);
+    res = NVML_OVERRIDE_CALL_NO_LOG(nvml_library_entry, nvmlDeviceGetHandleByIndex_v2, index, device);
     return res;
 }
 
 nvmlReturn_t nvmlDeviceGetHandleByPciBusId_v2 ( const char* pciBusId, nvmlDevice_t* device ) {
     LOG_INFO("NVML DeviceGetHandleByPciBusID_v2 %s",pciBusId);
-    return NVML_OVERRIDE_CALL(nvml_library_entry,nvmlDeviceGetHandleByPciBusId_v2,pciBusId,device);
+    return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetHandleByPciBusId_v2, pciBusId,device);
 }
 
 
-nvmlReturn_t nvmlDeviceGetHandleByPciBusId(const char *pciBusId,
-                                           nvmlDevice_t *device) {
+nvmlReturn_t nvmlDeviceGetHandleByPciBusId(const char *pciBusId, nvmlDevice_t *device) {
     LOG_DEBUG("NVML DeviceGetHandleByPciBusId %s",pciBusId);
-    return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetHandleByPciBusId,
-                         pciBusId, device);
+    return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetHandleByPciBusId, pciBusId, device);
 }
 
 nvmlReturn_t nvmlDeviceGetHandleBySerial ( const char* serial, nvmlDevice_t* device ) {
     LOG_INFO("NVML DeviceGetHandleBySerial Not supported %s",serial);
-    return NVML_OVERRIDE_CALL(nvml_library_entry,nvmlDeviceGetHandleBySerial,serial,device);
+    return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetHandleBySerial, serial, device);
 }
 
 nvmlReturn_t nvmlDeviceGetHandleByUUID ( const char* uuid, nvmlDevice_t* device ) {
-    nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry,nvmlDeviceGetHandleByUUID,uuid,device);
+    nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetHandleByUUID, uuid, device);
     return res;
 }
 
 nvmlReturn_t nvmlDeviceGetCount ( unsigned int* deviceCount ) {
-    return NVML_OVERRIDE_CALL(nvml_library_entry,nvmlDeviceGetCount_v2,deviceCount);
+    return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetCount_v2, deviceCount);
 }
 
 nvmlReturn_t nvmlDeviceGetCount_v2 ( unsigned int* deviceCount ) {
-    return NVML_OVERRIDE_CALL(nvml_library_entry,nvmlDeviceGetCount_v2,deviceCount);
+    return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetCount_v2, deviceCount);
 }
-
-nvmlReturn_t nvmlInitWithFlags( unsigned int  flags ) {
+nvmlReturn_t nvmlInitWithFlags(unsigned int flags) {
     LOG_DEBUG("nvmlInitWithFlags")
     pthread_once(&init_virtual_map_pre_flag, (void(*) (void))nvml_preInit);
-    nvmlReturn_t res =  NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInitWithFlags,flags);
-    pthread_once(&init_virtual_map_post_flag,(void (*)(void))nvml_postInit);
+    nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInitWithFlags, flags);
+
+    if (res == NVML_SUCCESS) {
+        pthread_once(&init_virtual_map_post_flag, (void (*)(void))nvml_postInit);
+    }
     return res;
 }
 
 nvmlReturn_t nvmlInit(void) {
     LOG_DEBUG("nvmlInit")
-    pthread_once(&init_virtual_map_pre_flag,(void (*)(void))nvml_preInit);
+    pthread_once(&init_virtual_map_pre_flag, (void (*)(void))nvml_preInit);
     nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInit_v2);
-    pthread_once(&init_virtual_map_post_flag,(void (*)(void))nvml_postInit);
+
+    if (res == NVML_SUCCESS) {
+        pthread_once(&init_virtual_map_post_flag, (void (*)(void))nvml_postInit);
+    }
     return res;
 }
 
 nvmlReturn_t nvmlInit_v2(void) {
     LOG_DEBUG("nvmlInit_v2");
-    pthread_once(&init_virtual_map_pre_flag,(void (*)(void))nvml_preInit);
+    pthread_once(&init_virtual_map_pre_flag, (void (*)(void))nvml_preInit);
     nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInit_v2);
-    pthread_once(&init_virtual_map_post_flag,(void (*)(void))nvml_postInit);
+
+    if (res == NVML_SUCCESS) {
+        pthread_once(&init_virtual_map_post_flag, (void (*)(void))nvml_postInit);
+    }
     return res;
 }
-
 nvmlReturn_t nvmlDeviceGetPciInfo_v3(nvmlDevice_t device, nvmlPciInfo_t *pci) {
-  nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetPciInfo_v3, device,
-                         pci);
+  nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetPciInfo_v3, device, pci);
   return res;
 }
 
 nvmlReturn_t nvmlDeviceGetPciInfo_v2(nvmlDevice_t device, nvmlPciInfo_t *pci) {
-  nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetPciInfo_v2, device,
-                         pci);
+  nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetPciInfo_v2, device, pci);
   return res;
 }
 
@@ -476,7 +479,6 @@ nvmlReturn_t nvmlDeviceGetPciInfo(nvmlDevice_t device, nvmlPciInfo_t *pci) {
 
 nvmlReturn_t nvmlDeviceGetUUID(nvmlDevice_t device, char *uuid,
                                unsigned int length) {
-    nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetUUID, device, uuid,
-                         length);
+    nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetUUID, device, uuid, length);
     return res;
 }
