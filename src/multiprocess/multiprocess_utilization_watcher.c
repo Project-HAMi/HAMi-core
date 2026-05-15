@@ -34,7 +34,6 @@ int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 
 /* Cached at init — these values do not change at runtime */
 static int cached_sm_limit[CUDA_DEVICE_MAX_COUNT] = {0};
-static int cached_util_switch = 0;
 
 void rate_limiter(int grids, int blocks) {
   CUdevice current_device;
@@ -49,7 +48,7 @@ void rate_limiter(int grids, int blocks) {
   if (cached_sm_limit[device_id] >= 100 || cached_sm_limit[device_id] == 0) {
       return;
   }
-  if (cached_util_switch == 0) {
+  if (get_utilization_switch() == 0) {
       return;
   }
 
@@ -256,8 +255,7 @@ void* utilization_watcher() {
 }
 
 void init_utilization_watcher() {
-    cached_util_switch = get_utilization_switch();
-    LOG_INFO("init_utilization_watcher: util_switch=%d", cached_util_switch);
+    LOG_INFO("init_utilization_watcher: util_switch=%d", get_utilization_switch());
 
     unsigned int device_count;
     if (nvmlDeviceGetCount(&device_count) != NVML_SUCCESS) {
@@ -278,7 +276,7 @@ void init_utilization_watcher() {
     }
 
     pthread_t tid;
-    if (has_limit && cached_util_switch == 1) {
+    if (has_limit) {
         pthread_create(&tid, NULL, utilization_watcher, NULL);
     }
     return;
