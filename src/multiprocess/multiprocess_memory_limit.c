@@ -1357,7 +1357,6 @@ int wait_status_all(int status){
 shrreg_proc_slot_t *find_proc_by_hostpid(int hostpid) {
     int i;
     for (i=0;i<region_info.shared_region->proc_num;i++) {
-        LOG_WARN("i=%ld, hostpid=%ld",i,region_info.shared_region->procs[i].hostpid);
         if (region_info.shared_region->procs[i].hostpid == hostpid) 
             return &region_info.shared_region->procs[i];
     }
