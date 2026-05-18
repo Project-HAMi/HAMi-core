@@ -229,10 +229,8 @@ void* utilization_watcher() {
           if (pidfound==0)
             continue;
         }
-        
         cached_util_switch = get_utilization_switch();
         LOG_INFO("init_utilization_watcher: util_switch=%d", cached_util_switch);
-
         init_gpu_device_utilization();
         get_used_gpu_utilization(userutil,&sysprocnum);
 
