@@ -1090,28 +1090,34 @@ void try_create_shrreg() {
     int fd = open(shr_reg_file, O_RDWR | O_CREAT, 0666);
     if (fd == -1) {
         LOG_ERROR("Fail to open shrreg %s: errno=%d", shr_reg_file, errno);
+        goto fail;
     }
     region_info.fd = fd;
-    size_t offset = lseek(fd, SHARED_REGION_SIZE_MAGIC, SEEK_SET);
+    off_t offset = lseek(fd, SHARED_REGION_SIZE_MAGIC, SEEK_SET);
     if (offset != SHARED_REGION_SIZE_MAGIC) {
         LOG_ERROR("Fail to init shrreg %s: errno=%d", shr_reg_file, errno);
+        goto fail;
     }
-    size_t check_bytes = write(fd, "\0", 1);
+    ssize_t check_bytes = write(fd, "\0", 1);
     if (check_bytes != 1) {
         LOG_ERROR("Fail to write shrreg %s: errno=%d", shr_reg_file, errno);
+        goto fail;
     }
     if (lseek(fd, 0, SEEK_SET) != 0) {
         LOG_ERROR("Fail to reseek shrreg %s: errno=%d", shr_reg_file, errno);
+        goto fail;
     }
     region_info.shared_region = (shared_region_t*) mmap(
-        NULL, SHARED_REGION_SIZE_MAGIC, 
+        NULL, SHARED_REGION_SIZE_MAGIC,
         PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0);
     shared_region_t* region = region_info.shared_region;
-    if (region == NULL) {
+    if (region == MAP_FAILED) {
         LOG_ERROR("Fail to map shrreg %s: errno=%d", shr_reg_file, errno);
+        goto fail;
     }
     if (lockf(fd, F_LOCK, SHARED_REGION_SIZE_MAGIC) != 0) {
         LOG_ERROR("Fail to lock shrreg %s: errno=%d", shr_reg_file, errno);
+        goto fail;
     }
     //put_device_info();
     int32_t init_flag = atomic_load_explicit(&region->initialized_flag, memory_order_acquire);
@@ -1173,6 +1179,18 @@ void try_create_shrreg() {
         LOG_ERROR("Fail to unlock shrreg %s: errno=%d", shr_reg_file, errno);
     }
     LOG_DEBUG("shrreg created");
+    return;
+
+fail:
+    if (region_info.shared_region != NULL && region_info.shared_region != MAP_FAILED) {
+        munmap(region_info.shared_region, SHARED_REGION_SIZE_MAGIC);
+    }
+    region_info.shared_region = NULL;
+    if (fd != -1) {
+        close(fd);
+    }
+    region_info.fd = -1;
+    exit(-1);
 }
 
 void initialized() {
