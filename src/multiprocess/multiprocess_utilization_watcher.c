@@ -229,6 +229,8 @@ void* utilization_watcher() {
           if (pidfound==0)
             continue;
         }
+        cached_util_switch = get_utilization_switch();
+        LOG_INFO("init_utilization_watcher: util_switch=%d", cached_util_switch);
         init_gpu_device_utilization();
         get_used_gpu_utilization(userutil,&sysprocnum);
 
@@ -256,9 +258,6 @@ void* utilization_watcher() {
 }
 
 void init_utilization_watcher() {
-    cached_util_switch = get_utilization_switch();
-    LOG_INFO("init_utilization_watcher: util_switch=%d", cached_util_switch);
-
     unsigned int device_count;
     if (nvmlDeviceGetCount(&device_count) != NVML_SUCCESS) {
         LOG_WARN("nvmlDeviceGetCount failed");
@@ -278,7 +277,7 @@ void init_utilization_watcher() {
     }
 
     pthread_t tid;
-    if (has_limit && cached_util_switch == 1) {
+    if (has_limit) {
         pthread_create(&tid, NULL, utilization_watcher, NULL);
     }
     return;
