@@ -20,6 +20,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuDeviceGetByPCIBusId"},
     {.name = "cuDeviceGetPCIBusId"},
     {.name = "cuDeviceGetUuid"},
+    {.name = "cuDeviceGetUuid_v2"},
     {.name = "cuDeviceGetDefaultMemPool"},
     {.name = "cuDeviceGetLuid"},
     {.name = "cuDeviceGetMemPool"},
@@ -37,6 +38,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuCtxGetDevice"},
     {.name = "cuCtxCreate_v2"},
     {.name = "cuCtxCreate_v3"},
+    {.name = "cuCtxCreate_v4"},
     {.name = "cuCtxDestroy_v2"},
     {.name = "cuCtxGetApiVersion"},
     {.name = "cuCtxGetCacheConfig"},
@@ -106,6 +108,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemsetD8_v2"},
     {.name = "cuMemsetD8Async"},
     {.name = "cuMemAdvise"},
+    {.name = "cuMemAdvise_v2"},
     {.name = "cuFuncSetCacheConfig"},
     {.name = "cuFuncSetSharedMemConfig"},
     {.name = "cuFuncGetAttribute"},
@@ -161,6 +164,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemcpy3DPeer"},
     {.name = "cuMemcpy3DPeerAsync"},
     {.name = "cuMemPrefetchAsync"},
+    {.name = "cuMemPrefetchAsync_v2"},
     {.name = "cuMemRangeGetAttribute"},
     {.name = "cuMemRangeGetAttributes"},
     /* cuda 11.7 external resource interoperability */
@@ -209,10 +213,15 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuGraphGetNodes"},
     {.name = "cuGraphGetRootNodes"},
     {.name = "cuGraphGetEdges"},
+    {.name = "cuGraphGetEdges_v2"},
     {.name = "cuGraphNodeGetDependencies"},
+    {.name = "cuGraphNodeGetDependencies_v2"},
     {.name = "cuGraphNodeGetDependentNodes"},
+    {.name = "cuGraphNodeGetDependentNodes_v2"},
     {.name = "cuGraphAddDependencies"},
+    {.name = "cuGraphAddDependencies_v2"},
     {.name = "cuGraphRemoveDependencies"},
+    {.name = "cuGraphRemoveDependencies_v2"},
     {.name = "cuGraphDestroyNode"},
     {.name = "cuGraphInstantiate"},
     {.name = "cuGraphInstantiateWithFlags"},
@@ -308,6 +317,10 @@ void* find_real_symbols_in_table(const char *symbol) {
 void *find_symbols_in_table(const char *symbol) {
     char symbol_v[500];
     void *pfn;
+    /* Skip CUDA graph functions: let them fall through to real driver */
+    if (strncmp(symbol, "cuGraph", 7) == 0) {
+        return NULL;
+    }
     strcpy(symbol_v,symbol);
     strcat(symbol_v,"_v3");
     pfn = __dlsym_hook_section(NULL,symbol_v);

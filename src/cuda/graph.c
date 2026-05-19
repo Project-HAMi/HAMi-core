@@ -175,29 +175,73 @@ CUresult cuGraphGetRootNodes(CUgraph hGraph, CUgraphNode *rootNodes, size_t *num
 	return CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphGetRootNodes,hGraph,rootNodes,numRootNodes);
 }
 
+#if CUDA_VERSION < 13000
 CUresult cuGraphGetEdges(CUgraph hGraph, CUgraphNode *from, CUgraphNode *to, size_t *numEdges) {
 	LOG_DEBUG("cuGraphGetEdges");
 	return CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphGetEdges,hGraph,from,to,numEdges);
 }
+#endif
 
+CUresult cuGraphGetEdges_v2(CUgraph hGraph, CUgraphNode *from, CUgraphNode *to, CUgraphEdgeData *edgeData,
+                            size_t *numEdges) {
+    LOG_DEBUG("cuGraphGetEdges_v2");
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphGetEdges_v2, hGraph, from, to, edgeData, numEdges);
+}
+
+#if CUDA_VERSION < 13000
 CUresult cuGraphNodeGetDependencies(CUgraphNode hNode, CUgraphNode *dependencies, size_t *numDependencies) {
 	LOG_DEBUG("cuGraphNodeGetDependencies");
 	return CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphNodeGetDependencies,hNode,dependencies,numDependencies);
 }
+#endif
 
+CUresult cuGraphNodeGetDependencies_v2(CUgraphNode hNode, CUgraphNode *dependencies, CUgraphEdgeData *edgeData,
+                                       size_t *numDependencies) {
+    LOG_DEBUG("cuGraphNodeGetDependencies_v2");
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphNodeGetDependencies_v2, hNode, dependencies, edgeData,
+                              numDependencies);
+}
+
+#if CUDA_VERSION < 13000
 CUresult cuGraphNodeGetDependentNodes(CUgraphNode hNode, CUgraphNode *dependentNodes, size_t *numDependentNodes) {
 	LOG_DEBUG("cuGraphNodeGetDependentNodes");
 	return CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphNodeGetDependentNodes,hNode,dependentNodes,numDependentNodes);
 }
+#endif
 
+CUresult cuGraphNodeGetDependentNodes_v2(CUgraphNode hNode, CUgraphNode *dependentNodes, CUgraphEdgeData *edgeData,
+                                         size_t *numDependentNodes) {
+    LOG_DEBUG("cuGraphNodeGetDependentNodes_v2");
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphNodeGetDependentNodes_v2, hNode, dependentNodes, edgeData,
+                              numDependentNodes);
+}
+
+#if CUDA_VERSION < 13000
 CUresult cuGraphAddDependencies(CUgraph hGraph, const CUgraphNode *from, const CUgraphNode *to, size_t numDependencies) {
 	LOG_DEBUG("cuGraphAddDependencies");
 	return CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphAddDependencies,hGraph,from,to,numDependencies);
 }
+#endif
 
+CUresult cuGraphAddDependencies_v2(CUgraph hGraph, const CUgraphNode *from, const CUgraphNode *to,
+                                   const CUgraphEdgeData *edgeData, size_t numDependencies) {
+    LOG_DEBUG("cuGraphAddDependencies_v2");
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphAddDependencies_v2, hGraph, from, to, edgeData,
+                              numDependencies);
+}
+
+#if CUDA_VERSION < 13000
 CUresult cuGraphRemoveDependencies(CUgraph hGraph, const CUgraphNode *from, const CUgraphNode *to, size_t numDependencies) {
 	LOG_DEBUG("cuGraphRemoveDependencies");
 	return CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphRemoveDependencies,hGraph,from,to,numDependencies);
+}
+#endif
+
+CUresult cuGraphRemoveDependencies_v2(CUgraph hGraph, const CUgraphNode *from, const CUgraphNode *to,
+                                      const CUgraphEdgeData *edgeData, size_t numDependencies) {
+    LOG_DEBUG("cuGraphRemoveDependencies_v2");
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphRemoveDependencies_v2, hGraph, from, to, edgeData,
+                              numDependencies);
 }
 
 CUresult cuGraphDestroyNode(CUgraphNode hNode) {

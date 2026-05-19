@@ -27,7 +27,11 @@ int main() {
     CHECK_DRV_API(cuDeviceGet(&device, TEST_DEVICE_ID));
 
     CUcontext ctx;
+#if CUDA_VERSION >= 13000
+    CHECK_DRV_API(cuCtxCreate(&ctx, NULL, 0, device));
+#else
     CHECK_DRV_API(cuCtxCreate(&ctx, 0, device));
+#endif
     CHECK_NVML_API(get_current_memory_usage(&usage));
 
     size_t arr[84] = {};

@@ -45,7 +45,11 @@ int main() {
     CHECK_DRV_API(cuDeviceGet(&g_device, TEST_DEVICE_ID));
 
     CUcontext ctx;
+#if CUDA_VERSION >= 13000
+    CHECK_DRV_API(cuCtxCreate(&ctx, NULL, 0, g_device));
+#else
     CHECK_DRV_API(cuCtxCreate(&ctx, 0, g_device));
+#endif
 
     pthread_t threads[NUM_THREADS];
     int tids[NUM_THREADS];

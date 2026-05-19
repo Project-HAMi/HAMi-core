@@ -267,8 +267,6 @@ nvmlReturn_t nvmlDeviceGetIndex(nvmlDevice_t device, unsigned int *index) {
 }
 
 
-extern void* _dl_sym(void*, const char*, void*);
-
 void load_nvml_libraries() {
     void *table = NULL;
     char driver_filename[FILENAME_MAX];
@@ -276,7 +274,10 @@ void load_nvml_libraries() {
     if (real_dlsym == NULL) {
         real_dlsym = dlvsym(RTLD_NEXT,"dlsym","GLIBC_2.2.5");
         if (real_dlsym == NULL) {
-            real_dlsym = _dl_sym(RTLD_NEXT, "dlsym", dlsym);
+            void *libc_handle = dlopen("libc.so.6", RTLD_LAZY);
+            if (libc_handle) {
+                real_dlsym = dlsym(libc_handle, "dlsym");
+            }
             if (real_dlsym == NULL)
                 LOG_ERROR("real dlsym not found");
         }
