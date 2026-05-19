@@ -1,0 +1,13 @@
+{
+  "file_format_version": "1.0.0",
+  "layer": {
+    "name": "VK_LAYER_HAMI_vgpu",
+    "type": "INSTANCE",
+    "library_path": "/usr/local/vgpu/libvgpu_vk.so",
+    "api_version": "1.3.0",
+    "implementation_version": "1",
+    "description": "HAMi vGPU partition layer — clamps device-memory queries and tracks Vulkan allocations against the per-pod budget.",
+    "instance_extensions": [],
+    "device_extensions": []
+  }
+}
