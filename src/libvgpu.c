@@ -919,6 +919,10 @@ void postInit(){
     init_utilization_watcher();
 }
 
+void ensure_post_init(){
+    pthread_once(&post_cuinit_flag, (void(*) (void))postInit);
+}
+
 CUresult cuInit(unsigned int Flags){
     LOG_INFO("Into cuInit");
     pthread_once(&pre_cuinit_flag,(void(*)(void))preInit);
@@ -928,6 +932,6 @@ CUresult cuInit(unsigned int Flags){
         LOG_ERROR("cuInit failed:%d",res);
         return res;
     }
-    pthread_once(&post_cuinit_flag, (void(*) (void))postInit);
+    ensure_post_init();
     return CUDA_SUCCESS;
 }

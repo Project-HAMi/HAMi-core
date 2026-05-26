@@ -411,7 +411,6 @@ int init_gpu_device_utilization(){
                 0,
                 memory_order_relaxed);
             atomic_store_explicit(&region_info.shared_region->procs[i].monitorused[dev], 0, memory_order_relaxed);
-            break;
         }
     }
     return 1;
