@@ -69,4 +69,4 @@ nvmlReturn_t set_task_pid();
 int map_cuda_visible_devices();
 void ensure_post_init();
 
-#endif  // __LIBVGPU_GLIBC_H__
+#endif  // SRC_INCLUDE_LIBVGPU_H_
