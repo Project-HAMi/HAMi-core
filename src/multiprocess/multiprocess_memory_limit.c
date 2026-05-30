@@ -1190,7 +1190,7 @@ fail:
         close(fd);
     }
     region_info.fd = -1;
-    exit(-1);
+    exit(EXIT_FAILURE);
 }
 
 void initialized() {
