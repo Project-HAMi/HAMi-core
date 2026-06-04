@@ -353,16 +353,17 @@ nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,void* memory,int versi
             return NVML_SUCCESS;
         }
     } else {
+        size_t clamped = (usage > limit) ? limit : usage;
         switch (version) {
         case 1:
-             ((nvmlMemory_t*)memory)->free = (limit-usage);
+             ((nvmlMemory_t*)memory)->free = limit - clamped;
              ((nvmlMemory_t*)memory)->total = limit;
-             ((nvmlMemory_t*)memory)->used = usage;
+             ((nvmlMemory_t*)memory)->used = clamped;
             return NVML_SUCCESS;
         case 2:
-            ((nvmlMemory_v2_t *)memory)->free = (limit-usage);
+            ((nvmlMemory_v2_t *)memory)->free = limit - clamped;
             ((nvmlMemory_v2_t *)memory)->total = limit;
-            ((nvmlMemory_v2_t *)memory)->used = usage;
+            ((nvmlMemory_v2_t *)memory)->used = clamped;
             return NVML_SUCCESS;
         } 
     }
