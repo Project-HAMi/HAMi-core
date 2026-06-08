@@ -1,0 +1,13 @@
+{
+  "file_format_version": "1.2.0",
+  "layer": {
+    "name": "VK_LAYER_HAMI_vgpu",
+    "type": "GLOBAL",
+    "library_path": "/usr/local/vgpu/libvgpu.so",
+    "api_version": "1.3.0",
+    "implementation_version": "1",
+    "description": "HAMi Vulkan vGPU limiter",
+    "enable_environment":  { "HAMI_VULKAN_ENABLE": "1" },
+    "disable_environment": { "HAMI_VULKAN_DISABLE": "1" }
+  }
+}
