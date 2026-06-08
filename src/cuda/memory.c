@@ -3,6 +3,7 @@
 
 #include "allocator/allocator.h"
 #include "include/libcuda_hook.h"
+#include "include/libvgpu.h"
 #include "include/memory_limit.h"
 
 extern int pidfound;
@@ -555,6 +556,7 @@ CUresult cuMipmappedArrayDestroy(CUmipmappedArray hMipmappedArray) {
 
 CUresult cuLaunchKernel ( CUfunction f, unsigned int  gridDimX, unsigned int  gridDimY, unsigned int  gridDimZ, unsigned int  blockDimX, unsigned int  blockDimY, unsigned int  blockDimZ, unsigned int  sharedMemBytes, CUstream hStream, void** kernelParams, void** extra ){
     ENSURE_RUNNING();
+    ensure_post_init();
     pre_launch_kernel();
     if (pidfound==1){ 
         rate_limiter(gridDimX * gridDimY * gridDimZ,
@@ -566,6 +568,7 @@ CUresult cuLaunchKernel ( CUfunction f, unsigned int  gridDimX, unsigned int  gr
 
 CUresult cuLaunchKernelEx(const CUlaunchConfig *config, CUfunction f, void **kernelParams, void **extra) {
     ENSURE_RUNNING();
+    ensure_post_init();
     pre_launch_kernel();
     if (pidfound==1){
         rate_limiter(config->gridDimX * config->gridDimY * config->gridDimZ,
@@ -577,6 +580,7 @@ CUresult cuLaunchKernelEx(const CUlaunchConfig *config, CUfunction f, void **ker
 
 CUresult cuLaunchCooperativeKernel ( CUfunction f, unsigned int  gridDimX, unsigned int  gridDimY, unsigned int  gridDimZ, unsigned int  blockDimX, unsigned int  blockDimY, unsigned int  blockDimZ, unsigned int  sharedMemBytes, CUstream hStream, void** kernelParams ){
     ENSURE_RUNNING();
+    ensure_post_init();
     pre_launch_kernel();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuLaunchCooperativeKernel,f,gridDimX,gridDimY,gridDimZ,blockDimX,blockDimY,blockDimZ,sharedMemBytes,hStream,kernelParams);
     return res;

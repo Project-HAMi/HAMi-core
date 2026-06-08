@@ -19,6 +19,7 @@ extern void initial_virtual_map(void);
 extern int set_host_pid(int hostpid);
 extern void allocator_init(void);
 void preInit();
+void childReinitPostInit();
 char *(*real_realpath)(const char *path, char *resolved_path);
 void *vgpulib;
 
@@ -884,6 +885,7 @@ void preInit(){
     load_cuda_libraries();
     //nvmlInit();
     ENSURE_INITIALIZED();
+    pthread_atfork(NULL, NULL, childReinitPostInit);
 }
 
 void postInit(){
@@ -919,6 +921,16 @@ void postInit(){
     init_utilization_watcher();
 }
 
+void childReinitPostInit() {
+    LOG_DEBUG("Reset postInit state after fork");
+    post_cuinit_flag = PTHREAD_ONCE_INIT;
+    pidfound = 0;
+}
+
+void ensure_post_init() {
+    pthread_once(&post_cuinit_flag, (void(*) (void))postInit);
+}
+
 CUresult cuInit(unsigned int Flags){
     LOG_INFO("Into cuInit");
     pthread_once(&pre_cuinit_flag,(void(*)(void))preInit);
@@ -928,6 +940,6 @@ CUresult cuInit(unsigned int Flags){
         LOG_ERROR("cuInit failed:%d",res);
         return res;
     }
-    pthread_once(&post_cuinit_flag, (void(*) (void))postInit);
+    ensure_post_init();
     return CUDA_SUCCESS;
 }
