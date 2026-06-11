@@ -215,7 +215,7 @@ void* utilization_watcher() {
 
     unsigned int device_count;
     if (nvmlDeviceGetCount(&device_count) != NVML_SUCCESS) {
-        return;
+        return NULL;
     }
 
     int64_t share[CUDA_DEVICE_MAX_COUNT] = {0};

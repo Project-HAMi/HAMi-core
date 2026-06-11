@@ -11,7 +11,7 @@ build-in-docker:
 		-v $(current_dir):/libvgpu \
 		-w /libvgpu \
 		-e DEBIAN_FRONTEND=noninteractive \
-		nvidia/cuda:12.9.1-cudnn-devel-ubuntu20.04 \
+		nvidia/cuda:13.3.0-cudnn-devel-ubuntu24.04 \
 		sh -c "apt-get -y update && \
            apt-get -y install cmake git && \
            git config --global --add safe.directory /libvgpu && \
