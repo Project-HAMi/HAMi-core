@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <ctype.h>
 #include <time.h>
+#include <sys/file.h>
 #include "include/utils.h"
 #include "include/log_utils.h"
 #include "include/nvml_prefix.h"
