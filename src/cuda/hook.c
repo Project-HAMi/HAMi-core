@@ -1,5 +1,6 @@
-#include "include/libcuda_hook.h"
+#include <stdio.h>
 #include <string.h>
+#include "include/libcuda_hook.h"
 #include "include/libvgpu.h"
 #include "include/multi_func_hook.h"
 
@@ -269,8 +270,7 @@ void load_cuda_libraries() {
             cuda_library_entry[i].fn_ptr=real_dlsym(RTLD_NEXT,cuda_library_entry[i].name);
             if (!cuda_library_entry[i].fn_ptr){
                 LOG_INFO("can't find function %s in %s", cuda_library_entry[i].name,cuda_filename);
-                memset(tmpfunc,0,500);
-                strcpy(tmpfunc,cuda_library_entry[i].name);
+                snprintf(tmpfunc, sizeof(tmpfunc), "%s", cuda_library_entry[i].name);
                 while (prior_function(tmpfunc)) {
                     cuda_library_entry[i].fn_ptr=real_dlsym(RTLD_NEXT,tmpfunc);
                     if (cuda_library_entry[i].fn_ptr) {
@@ -321,22 +321,13 @@ void *find_symbols_in_table(const char *symbol) {
     if (strncmp(symbol, "cuGraph", 7) == 0) {
         return NULL;
     }
-    strcpy(symbol_v,symbol);
-    strcat(symbol_v,"_v3");
-    pfn = __dlsym_hook_section(NULL,symbol_v);
-    if (pfn!=NULL) {
+    snprintf(symbol_v, sizeof(symbol_v), "%s_v3", symbol);
+    if ((pfn = __dlsym_hook_section(NULL, symbol_v)) != NULL)
         return pfn;
-    }
     symbol_v[strlen(symbol_v)-1]='2';
-    pfn = __dlsym_hook_section(NULL,symbol_v);
-    if (pfn!=NULL) {
+    if ((pfn = __dlsym_hook_section(NULL, symbol_v)) != NULL)
         return pfn;
-    }
-    pfn = __dlsym_hook_section(NULL,symbol);
-    if (pfn!=NULL) {
-        return pfn;
-    }
-    return NULL;
+    return __dlsym_hook_section(NULL, symbol);
 }
 
 void *find_symbols_in_table_by_cudaversion(const char *symbol,int  cudaVersion) {
