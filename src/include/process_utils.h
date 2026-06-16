@@ -16,7 +16,7 @@
 
 int proc_alive(int32_t pid) {
     char filename[FILENAME_LENGTH] = {0};
-    sprintf(filename, "/proc/%d/stat", pid);
+    snprintf(filename, sizeof(filename), "/proc/%d/stat", pid);
 
     FILE* fp;
     if ((fp = fopen(filename, "r")) == NULL) {   
