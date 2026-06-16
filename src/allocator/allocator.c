@@ -91,8 +91,16 @@ void allocator_init() {
     LOG_DEBUG("Allocator_init\n");
 
     device_overallocated = malloc(sizeof(allocated_list));
+    if (!device_overallocated) {
+        LOG_ERROR("allocator_init: malloc failed");
+        exit(EXIT_FAILURE);
+    }
     LIST_INIT(device_overallocated);
-    device_allocasync=malloc(sizeof(allocated_list));
+    device_allocasync = malloc(sizeof(allocated_list));
+    if (!device_allocasync) {
+        LOG_ERROR("allocator_init: malloc failed");
+        exit(EXIT_FAILURE);
+    }
     LIST_INIT(device_allocasync);
 
     pthread_mutex_init(&mutex,NULL);
