@@ -1135,8 +1135,9 @@ void try_create_shrreg() {
         atomic_store_explicit(&region->recent_kernel, 2, memory_order_relaxed);
         atomic_store_explicit(&region->proc_num, 0, memory_order_relaxed);
         region->priority = 1;
-        if (getenv(CUDA_TASK_PRIORITY_ENV)!=NULL)
-            region->priority = atoi(getenv(CUDA_TASK_PRIORITY_ENV));
+        char *_priority_env = getenv(CUDA_TASK_PRIORITY_ENV);
+        if (_priority_env != NULL)
+            region->priority = atoi(_priority_env);
 
         // Release barrier ensures all initialization is visible before flag is set
         atomic_thread_fence(memory_order_release);
