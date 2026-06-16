@@ -10,11 +10,10 @@ build-in-docker:
 	docker run -i --rm \
 		-v $(current_dir):/libvgpu \
 		-w /libvgpu \
-		-e DEBIAN_FRONTEND=noninteractive \
-		nvidia/cuda:12.9.1-cudnn-devel-ubuntu20.04 \
-		sh -c "apt-get -y update && \
-           apt-get -y install cmake git && \
+		nvidia/cuda:13.3.0-cudnn-devel-ubi8 \
+		sh -c "dnf install -y cmake git && \
            git config --global --add safe.directory /libvgpu && \
+           rm -rf /libvgpu/build && \
            bash ./build.sh"
 .PHONY: build-in-docker
 
