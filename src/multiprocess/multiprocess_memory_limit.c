@@ -177,10 +177,8 @@ void do_init_device_memory_limits(uint64_t* arr, int len) {
     size_t fallback_limit = get_limit_from_env(CUDA_DEVICE_MEMORY_LIMIT);
     int i;
     for (i = 0; i < len; ++i) {
-        char env_name[CUDA_DEVICE_MEMORY_LIMIT_KEY_LENGTH] = CUDA_DEVICE_MEMORY_LIMIT;
-        char index_name[8];
-        snprintf(index_name, 8, "_%d", i);
-        strcat(env_name, index_name);
+        char env_name[CUDA_DEVICE_MEMORY_LIMIT_KEY_LENGTH];
+        snprintf(env_name, sizeof(env_name), "%s_%d", CUDA_DEVICE_MEMORY_LIMIT, i);
         size_t cur_limit = get_limit_from_env(env_name);
         if (cur_limit > 0) {
             arr[i] = cur_limit;
@@ -197,10 +195,8 @@ void do_init_device_sm_limits(uint64_t *arr, int len) {
     if (fallback_limit == 0) fallback_limit = 100;
     int i;
     for (i = 0; i < len; ++i) {
-        char env_name[CUDA_DEVICE_SM_LIMIT_KEY_LENGTH] = CUDA_DEVICE_SM_LIMIT;
-        char index_name[8];
-        snprintf(index_name, 8, "_%d", i);
-        strcat(env_name, index_name);
+        char env_name[CUDA_DEVICE_SM_LIMIT_KEY_LENGTH];
+        snprintf(env_name, sizeof(env_name), "%s_%d", CUDA_DEVICE_SM_LIMIT, i);
         size_t cur_limit = get_limit_from_env(env_name);
         if (cur_limit > 0) {
             arr[i] = cur_limit;
