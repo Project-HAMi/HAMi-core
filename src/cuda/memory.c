@@ -95,36 +95,19 @@ uint64_t compute_array_alloc_bytes(const CUDA_ARRAY_DESCRIPTOR* desc) {
 
 CUresult cuArray3DCreate_v2(CUarray* arr, const CUDA_ARRAY3D_DESCRIPTOR* desc) {
     LOG_DEBUG("cuArray3DCreate_v2");
-    /*uint64_t bytes*/
-    compute_3d_array_alloc_bytes(desc);
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuArray3DCreate_v2, arr, desc);
-    if (res != CUDA_SUCCESS) {
-        return res;
-    }
-    return res;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuArray3DCreate_v2, arr, desc);
 }
 
 
 CUresult cuArrayCreate_v2(CUarray* arr, const CUDA_ARRAY_DESCRIPTOR* desc) {
     LOG_DEBUG("cuArrayCreate_v2");
-    /*uint64_t bytes*/
-    compute_array_alloc_bytes(desc);
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuArrayCreate_v2, arr, desc);
-    if (res != CUDA_SUCCESS) {
-        return res;
-    }
-    return res;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuArrayCreate_v2, arr, desc);
 }
 
 
 CUresult cuArrayDestroy(CUarray arr) {
-    CUDA_ARRAY3D_DESCRIPTOR desc;
     LOG_DEBUG("cuArrayDestroy");
-    CHECK_DRV_API(cuArray3DGetDescriptor(&desc, arr));
-    /*uint64_t bytes*/
-    compute_3d_array_alloc_bytes(&desc);
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuArrayDestroy, arr);
-    return res;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuArrayDestroy, arr);
 }
 
 CUresult cuMemoryAllocate(CUdeviceptr* dptr, size_t bytesize, void* data) {
