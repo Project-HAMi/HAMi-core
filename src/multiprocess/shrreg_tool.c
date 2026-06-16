@@ -74,9 +74,6 @@ int main(int argc, char* argv[]) {
         if (strcmp(arg, "--resume") == 0){
             send_resume_signal();
         }
-        if (strcmp(arg, "--print") == 0){
-            print_shared_region();
-        }
         if (strcmp(arg, "--version") == 0){
             printf("shrreg size: %ld, version %d.%d\n", 
                     sizeof(shared_region_t),
