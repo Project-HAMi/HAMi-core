@@ -79,6 +79,7 @@ endif()
 # Generate the static config header file
 configure_file(src/static_config.h.in ${CMAKE_CURRENT_BINARY_DIR}/config/static_config.h)
 
+link_libraries(dl)
 # Add subdirectories for building
 add_subdirectory(src)
 add_subdirectory(test)
