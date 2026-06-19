@@ -20,7 +20,7 @@ def app(args):
     print("Test use float device tensor: (%s)" % ", ".join([str(_) for _ in shape])) 
 
     print("PyTorch version: " + torch.__version__)
-    data = torch.ones(size=shape, dtype=torch.float32).cuda()
+    data = torch.ones(size=shape, dtype=torch.float32).cuda(args.device)
     summation = data.sum()
     print("Tensor sum: " + str(summation.cpu().numpy()))
 
