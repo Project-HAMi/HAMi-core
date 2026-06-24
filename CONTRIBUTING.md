@@ -78,7 +78,7 @@ Please never hesitate to ask questions or submit a pull request.
 
 This is a rough outline of what a contributor's workflow looks like:
 
-- Create a topic branch from where you want to base the contribution (usually master)
+- Create a topic branch from where you want to base the contribution (usually main)
 - Make commits of logical units
 - Push changes in your topic branch to your personal fork of the repository
 - Submit a pull request to [Project-HAMi/HAMi-core](https://github.com/Project-HAMi/HAMi-core)
