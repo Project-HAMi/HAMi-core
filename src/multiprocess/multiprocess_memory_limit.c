@@ -154,16 +154,17 @@ int load_env_from_file(char *filename) {
     if (f==NULL)
         return 0;
     char tmp[10000];
-    int cursor=0;
-    while (!feof(f)){
-        fgets(tmp,10000,f);
-        if (strstr(tmp,"=")==NULL)
+    int cursor = 0;
+    size_t tmplen = 0;
+    while (fgets(tmp, sizeof(tmp), f) != NULL) {
+        if (strstr(tmp, "=") == NULL)
             break;
-        if (tmp[strlen(tmp)-1]=='\n')
-            tmp[strlen(tmp)-1]='\0';
-        for (cursor=0;cursor<strlen(tmp);cursor++){
-            if (tmp[cursor]=='=') {
-                tmp[cursor]='\0';
+        tmplen = strlen(tmp);
+        if (tmp[tmplen - 1] == '\n')
+            tmp[--tmplen] = '\0';
+        for (cursor = 0; cursor < (int)tmplen; cursor++) {
+            if (tmp[cursor] == '=') {
+                tmp[cursor] = '\0';
                 setenv(tmp,tmp+cursor+1,1);
                 LOG_INFO("SET %s to %s",tmp,tmp+cursor+1);
                 break;
