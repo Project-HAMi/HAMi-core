@@ -78,7 +78,7 @@ Please never hesitate to ask questions or submit a pull request.
 
 This is a rough outline of what a contributor's workflow looks like:
 
-- Create a topic branch from where you want to base the contribution (usually master)
+- Create a topic branch from where you want to base the contribution (usually main)
 - Make commits of logical units
 - Push changes in your topic branch to your personal fork of the repository
 - Submit a pull request to [Project-HAMi/HAMi-core](https://github.com/Project-HAMi/HAMi-core)
@@ -91,6 +91,16 @@ To submit a proposed change, please develop the code/fix and add new test cases.
 Before submitting a pull request, run these local verifications to predict whether continuous integration will pass or fail:
 
 * Run `make build-in-docker`
+
+## Issue and PR Lifecycle
+
+To keep the project manageable, we apply the following policy to all open issues and pull requests:
+
+- If a maintainer or contributor leaves a comment or review requesting a response, the author has **two weeks** to reply.
+- If there is no response within two weeks, the issue or PR will be closed.
+- Closing is not permanent. If the issue is still relevant or the PR is still needed, it can be reopened or submitted again at any time.
+
+This policy helps us keep the backlog focused and avoids letting stale work block active contributors.
 
 ## Code Review
 
