@@ -170,6 +170,7 @@ int load_env_from_file(char *filename) {
             }
         }
     }
+    fclose(f);
     return 0;
 }
 
