@@ -98,6 +98,19 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
         }else{
             vgpulib = dlopen("/usr/local/vgpu/libvgpu.so",RTLD_LAZY);
         }
+        if (vgpulib == NULL) {
+            /* libvgpu was preloaded from a different path: recover our own
+             * handle via dladdr instead of falling back to a NULL handle,
+             * which glibc treats as RTLD_DEFAULT (global scope). A global
+             * lookup can resolve a "cu"-prefixed symbol to the CALLER's own
+             * export (cuDNN 9's dispatcher dlsym's cudnnCreate from its
+             * engine sub-library; global search returns the dispatcher
+             * itself) causing infinite self-recursion and stack overflow. */
+            Dl_info self_info;
+            if (dladdr((void*)&init_dlsym, &self_info) && self_info.dli_fname) {
+                vgpulib = dlopen(self_info.dli_fname, RTLD_LAZY | RTLD_NOLOAD);
+            }
+        }
         if (real_dlsym == NULL) {
             LOG_ERROR("real dlsym not found");
             void *libc_handle = dlopen("libc.so.6", RTLD_LAZY);
@@ -120,12 +133,21 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
         return h;
     }
     if (symbol[0] == 'c' && symbol[1] == 'u') {
-        //Compatible with cuda 12.8+ fix
-        if (strcmp(symbol,"cuGetExportTable")!=0)
-            pthread_once(&pre_cuinit_flag,(void(*)(void))preInit);
-        void *f = real_dlsym(vgpulib,symbol);
-        if (f!=NULL)
+        /* Resolve against libvgpu's own exports FIRST and run preInit only
+         * on a hit. The "cu" prefix also matches CUDA *library* symbols
+         * (cudnnCreate, cublas*, cufft*, ...) that libvgpu does not export:
+         * for those, firing preInit here reenters the dynamic loader while
+         * the caller is mid-dlopen (LibTorch >= 2.5 cu12x lazily dlopens
+         * cuDNN 9 and resolves cudnnCreate at its first convolution) and
+         * segfaults. Symbols libvgpu actually hooks keep the original
+         * behavior: preInit fires, the hook is returned. */
+        void *f = (vgpulib != NULL) ? real_dlsym(vgpulib,symbol) : NULL;
+        if (f!=NULL) {
+            //Compatible with cuda 12.8+ fix
+            if (strcmp(symbol,"cuGetExportTable")!=0)
+                pthread_once(&pre_cuinit_flag,(void(*)(void))preInit);
             return f;
+        }
     }
     #ifdef HOOK_NVML_ENABLE
     if (symbol[0] == 'n' && symbol[1] == 'v' &&
