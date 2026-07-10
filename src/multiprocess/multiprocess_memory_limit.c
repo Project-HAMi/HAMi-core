@@ -1075,8 +1075,30 @@ void try_create_shrreg() {
     umask(0);
 
     char* shr_reg_file = getenv(MULTIPROCESS_SHARED_REGION_CACHE_ENV);
+    static char synthesized_cache_path[PATH_MAX];
     if (shr_reg_file == NULL) {
-        shr_reg_file = MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT;
+        const char* hook_path      = getenv(MULTIPROCESS_SHARED_REGION_HOOK_PATH_ENV);
+        const char* pod_uid        = getenv(MULTIPROCESS_SHARED_REGION_POD_UID_ENV);
+        const char* container_name = getenv(MULTIPROCESS_SHARED_REGION_CONTAINER_NAME_ENV);
+
+        if (hook_path == NULL || hook_path[0] == '\0') {
+            hook_path = MULTIPROCESS_SHARED_REGION_HOOK_PATH_DEFAULT;
+        }
+
+        if (pod_uid != NULL && pod_uid[0] != '\0' &&
+            container_name != NULL && container_name[0] != '\0') {
+            snprintf(synthesized_cache_path, sizeof(synthesized_cache_path),
+                     "%s/containers/%s_%s",
+                     hook_path, pod_uid, container_name);
+            shr_reg_file = synthesized_cache_path;
+            LOG_INFO("CUDA_DEVICE_MEMORY_SHARED_CACHE not set, "
+                     "synthesized: %s", shr_reg_file);
+        } else {
+            shr_reg_file = MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT;
+            LOG_WARN("CUDA_DEVICE_MEMORY_SHARED_CACHE not set and "
+                     "POD_UID/CONTAINER_NAME unavailable, "
+                     "using default: %s", shr_reg_file);
+        }
     }
     // Initialize NVML BEFORE!! open it
     //nvmlInit();
