@@ -438,7 +438,10 @@ nvmlReturn_t nvmlInitWithFlags( unsigned int  flags ) {
     LOG_DEBUG("nvmlInitWithFlags")
     pthread_once(&init_virtual_map_pre_flag, (void(*) (void))nvml_preInit);
     nvmlReturn_t res =  NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInitWithFlags,flags);
-    pthread_once(&init_virtual_map_post_flag,(void (*)(void))nvml_postInit);
+
+    if (res == NVML_SUCCESS) {
+        pthread_once(&init_virtual_map_post_flag,(void (*)(void))nvml_postInit);
+    }
     return res;
 }
 
@@ -446,7 +449,10 @@ nvmlReturn_t nvmlInit(void) {
     LOG_DEBUG("nvmlInit")
     pthread_once(&init_virtual_map_pre_flag,(void (*)(void))nvml_preInit);
     nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInit_v2);
-    pthread_once(&init_virtual_map_post_flag,(void (*)(void))nvml_postInit);
+
+    if (res == NVML_SUCCESS) {
+        pthread_once(&init_virtual_map_post_flag,(void (*)(void))nvml_postInit);
+    }
     return res;
 }
 
@@ -454,7 +460,10 @@ nvmlReturn_t nvmlInit_v2(void) {
     LOG_DEBUG("nvmlInit_v2");
     pthread_once(&init_virtual_map_pre_flag,(void (*)(void))nvml_preInit);
     nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlInit_v2);
-    pthread_once(&init_virtual_map_post_flag,(void (*)(void))nvml_postInit);
+
+    if (res == NVML_SUCCESS) {
+        pthread_once(&init_virtual_map_post_flag,(void (*)(void))nvml_postInit);
+    }
     return res;
 }
 
