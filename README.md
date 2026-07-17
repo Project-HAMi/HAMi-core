@@ -1,10 +1,28 @@
-# HAMi-core —— Hook library for CUDA Environments
+# HAMi-core: Hook library for CUDA Environments
+
+[![build-src](https://github.com/Project-HAMi/HAMi-core/actions/workflows/build-src.yml/badge.svg)](https://github.com/Project-HAMi/HAMi-core/actions/workflows/build-src.yml)
+[![style](https://github.com/Project-HAMi/HAMi-core/actions/workflows/style.yaml/badge.svg)](https://github.com/Project-HAMi/HAMi-core/actions/workflows/style.yaml)
 
 English | [中文](README_CN.md) | [日本語](README_JA.md)
 
+## Table of Contents
+
+- [Introduction](#introduction)
+- [Features](#features)
+- [Design](#design)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Build in Docker](#build-in-docker)
+  - [Build Locally](#build-locally)
+- [Usage](#usage)
+- [Docker Images](#docker-images)
+- [Log](#log)
+- [Test Raw APIs](#test-raw-apis)
+- [Contributing](#contributing)
+
 ## Introduction
 
-HAMi-core is the in-container gpu resource controller, it has been adopted by [HAMi](https://github.com/Project-HAMi/HAMi), [volcano](https://github.com/volcano-sh/devices)
+HAMi-core is the in-container GPU resource controller. It intercepts CUDA calls to enforce per-container device memory limits and compute utilization limits, without requiring changes to the application or the driver. It has been adopted by [HAMi](https://github.com/Project-HAMi/HAMi) and [volcano](https://github.com/volcano-sh/devices).
 
 <img src="./docs/images/hami-arch.png" width = "600" /> 
 
@@ -19,15 +37,31 @@ HAMi-core has the following features:
 
 ## Design
 
-HAMi-core operates by Hijacking the API-call between CUDA-Runtime(libcudart.so) and CUDA-Driver(libcuda.so), as the figure below:
+HAMi-core operates by hijacking the API calls between CUDA-Runtime (libcudart.so) and CUDA-Driver (libcuda.so), as shown below:
 
 <img src="./docs/images/hami-core-position.png" width = "400" />
 
-## Build in Docker
+## Getting Started
+
+### Prerequisites
+
+- CMake >= 2.8.11
+- A working CUDA toolkit (`CUDA_HOME`, default `/usr/local/cuda`)
+- Docker, if you prefer the containerized build
+
+### Build in Docker
 
 ```bash
 make build-in-docker
 ```
+
+### Build Locally
+
+```bash
+./build.sh
+```
+
+The resulting `libvgpu.so` is written to the `build/` directory.
 
 ## Usage
 
@@ -115,3 +149,7 @@ Use environment variable LIBCUDA_LOG_LEVEL to set the visibility of logs
 ```bash
 ./test/test_alloc
 ```
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow, code of conduct, and review process before opening a pull request.
