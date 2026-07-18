@@ -24,7 +24,7 @@
 
 HAMi-coreはコンテナ内GPUリソースコントローラーです。アプリケーションやドライバーを変更することなく、CUDA呼び出しをフックしてコンテナ単位のデバイスメモリ制限と使用率制限を実現します。[HAMi](https://github.com/Project-HAMi/HAMi)や[volcano](https://github.com/volcano-sh/devices)で採用されています。
 
-<img src="./docs/images/hami-arch.png" width = "600" />
+<img src="./docs/images/hami-arch.png" width = "600" alt="HAMi-core アーキテクチャ図" />
 
 ## 機能
 
@@ -39,13 +39,13 @@ HAMi-coreには以下の機能があります：
 
 HAMi-coreは、以下の図のようにCUDAランタイム(libcudart.so)とCUDAドライバー(libcuda.so)間のAPI呼び出しをフックすることで動作します：
 
-<img src="./docs/images/hami-core-position.png" width = "400" />
+<img src="./docs/images/hami-core-position.png" width = "400" alt="HAMi-core フック位置図" />
 
 ## はじめ方
 
 ### 前提条件
 
-- CMake >= 2.8.11
+- CMake >= 2.8.12
 - 有効なCUDAツールチェーン（`CUDA_HOME`、デフォルトは`/usr/local/cuda`）
 - コンテナ化ビルドを行う場合はDockerも必要
 

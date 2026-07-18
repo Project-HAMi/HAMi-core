@@ -24,7 +24,7 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 HAMi-core is the in-container GPU resource controller. It intercepts CUDA calls to enforce per-container device memory limits and compute utilization limits, without requiring changes to the application or the driver. It has been adopted by [HAMi](https://github.com/Project-HAMi/HAMi) and [volcano](https://github.com/volcano-sh/devices).
 
-<img src="./docs/images/hami-arch.png" width = "600" /> 
+<img src="./docs/images/hami-arch.png" width = "600" alt="HAMi-core architecture diagram" /> 
 
 ## Features
 
@@ -39,13 +39,13 @@ HAMi-core has the following features:
 
 HAMi-core operates by hijacking the API calls between CUDA-Runtime (libcudart.so) and CUDA-Driver (libcuda.so), as shown below:
 
-<img src="./docs/images/hami-core-position.png" width = "400" />
+<img src="./docs/images/hami-core-position.png" width = "400" alt="HAMi-core hook position diagram" />
 
 ## Getting Started
 
 ### Prerequisites
 
-- CMake >= 2.8.11
+- CMake >= 2.8.12
 - A working CUDA toolkit (`CUDA_HOME`, default `/usr/local/cuda`)
 - Docker, if you prefer the containerized build
 

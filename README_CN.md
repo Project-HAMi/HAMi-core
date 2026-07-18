@@ -24,7 +24,7 @@
 
 HAMi-core 是一个容器内的 GPU 资源控制器，在不修改应用或驱动的前提下，通过拦截 CUDA 调用来实现按容器的设备显存限制和算力限制。已被 [HAMi](https://github.com/Project-HAMi/HAMi) 和 [volcano](https://github.com/volcano-sh/devices) 等项目采用。
 
-<img src="./docs/images/hami-arch.png" width = "600" /> 
+<img src="./docs/images/hami-arch.png" width = "600" alt="HAMi-core 架构图" /> 
 
 ## 特性
 
@@ -39,13 +39,13 @@ HAMi-core 具有以下特性：
 
 HAMi-core 通过劫持 CUDA-Runtime(libcudart.so) 和 CUDA-Driver(libcuda.so) 之间的 API 调用来实现功能，如下图所示：
 
-<img src="./docs/images/hami-core-position.png" width = "400" />
+<img src="./docs/images/hami-core-position.png" width = "400" alt="HAMi-core Hook 位置示意图" />
 
 ## 快速开始
 
 ### 环境依赖
 
-- CMake >= 2.8.11
+- CMake >= 2.8.12
 - 可用的 CUDA 工具链（`CUDA_HOME`，默认 `/usr/local/cuda`）
 - 如需容器化编译，还需要 Docker
 
