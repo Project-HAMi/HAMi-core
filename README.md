@@ -5,26 +5,9 @@
 
 English | [中文](README_CN.md) | [日本語](README_JA.md)
 
-## Table of Contents
-
-- [Introduction](#introduction)
-- [Features](#features)
-- [Design](#design)
-- [Getting Started](#getting-started)
-  - [Prerequisites](#prerequisites)
-  - [Build in Docker](#build-in-docker)
-  - [Build Locally](#build-locally)
-- [Usage](#usage)
-- [Docker Images](#docker-images)
-- [Log](#log)
-- [Test Raw APIs](#test-raw-apis)
-- [Contributing](#contributing)
-
 ## Introduction
 
-HAMi-core is the in-container GPU resource controller. It intercepts CUDA calls to enforce per-container device memory limits and compute utilization limits, without requiring changes to the application or the driver. It has been adopted by [HAMi](https://github.com/Project-HAMi/HAMi) and [volcano](https://github.com/volcano-sh/devices).
-
-<img src="./docs/images/hami-arch.png" width = "600" alt="HAMi-core architecture diagram" /> 
+HAMi-core is the in-container GPU resource controller. It intercepts CUDA calls to enforce per-container device memory limits and compute utilization limits, without requiring changes to the application or the driver. It has been adopted by [HAMi](https://github.com/Project-HAMi/HAMi) and [volcano](https://github.com/volcano-sh/devices). For the overall HAMi architecture and how HAMi-core fits into it, see the [HAMi project](https://github.com/Project-HAMi/HAMi).
 
 ## Features
 
@@ -39,7 +22,16 @@ HAMi-core has the following features:
 
 HAMi-core operates by hijacking the API calls between CUDA-Runtime (libcudart.so) and CUDA-Driver (libcuda.so), as shown below:
 
-<img src="./docs/images/hami-core-position.png" width = "400" alt="HAMi-core hook position diagram" />
+```mermaid
+flowchart TD
+    A[CUDA Application] --> B[CUDA Library]
+    B --> C["CUDA Runtime<br>(libcudart.so)"]
+    C --> H[HAMi-core]
+    H --> D["CUDA Driver<br>(libcuda.so)"]
+    D --> E[NVIDIA Driver]
+    E --> F[NVIDIA GPU]
+    style H fill:#eeeeee,stroke:#333333
+```
 
 ## Getting Started
 

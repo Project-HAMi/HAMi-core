@@ -5,26 +5,9 @@
 
 [English](README.md) | 中文 | [日本語](README_JA.md)
 
-## 目录
-
-- [介绍](#介绍)
-- [特性](#特性)
-- [设计原理](#设计原理)
-- [快速开始](#快速开始)
-  - [环境依赖](#环境依赖)
-  - [在Docker中编译](#在docker中编译)
-  - [本地编译](#本地编译)
-- [使用方法](#使用方法)
-- [Docker镜像使用](#docker镜像使用)
-- [日志级别](#日志级别)
-- [测试原始API](#测试原始api)
-- [参与贡献](#参与贡献)
-
 ## 介绍
 
-HAMi-core 是一个容器内的 GPU 资源控制器，在不修改应用或驱动的前提下，通过拦截 CUDA 调用来实现按容器的设备显存限制和算力限制。已被 [HAMi](https://github.com/Project-HAMi/HAMi) 和 [volcano](https://github.com/volcano-sh/devices) 等项目采用。
-
-<img src="./docs/images/hami-arch.png" width = "600" alt="HAMi-core 架构图" /> 
+HAMi-core 是一个容器内的 GPU 资源控制器，在不修改应用或驱动的前提下，通过拦截 CUDA 调用来实现按容器的设备显存限制和算力限制。已被 [HAMi](https://github.com/Project-HAMi/HAMi) 和 [volcano](https://github.com/volcano-sh/devices) 等项目采用。关于 HAMi 整体架构以及 HAMi-core 在其中的位置，请参阅 [HAMi 项目](https://github.com/Project-HAMi/HAMi)。
 
 ## 特性
 
@@ -39,7 +22,16 @@ HAMi-core 具有以下特性：
 
 HAMi-core 通过劫持 CUDA-Runtime(libcudart.so) 和 CUDA-Driver(libcuda.so) 之间的 API 调用来实现功能，如下图所示：
 
-<img src="./docs/images/hami-core-position.png" width = "400" alt="HAMi-core Hook 位置示意图" />
+```mermaid
+flowchart TD
+    A[CUDA Application] --> B[CUDA Library]
+    B --> C["CUDA Runtime<br>(libcudart.so)"]
+    C --> H[HAMi-core]
+    H --> D["CUDA Driver<br>(libcuda.so)"]
+    D --> E[NVIDIA Driver]
+    E --> F[NVIDIA GPU]
+    style H fill:#eeeeee,stroke:#333333
+```
 
 ## 快速开始
 

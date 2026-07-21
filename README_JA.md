@@ -5,26 +5,9 @@
 
 [English](README.md) | [中文](README_CN.md) | 日本語
 
-## 目次
-
-- [はじめに](#はじめに)
-- [機能](#機能)
-- [設計](#設計)
-- [はじめ方](#はじめ方)
-  - [前提条件](#前提条件)
-  - [Dockerでのビルド](#dockerでのビルド)
-  - [ローカルビルド](#ローカルビルド)
-- [使用方法](#使用方法)
-- [Dockerイメージ](#dockerイメージ)
-- [ログ](#ログ)
-- [Raw APIのテスト](#raw-apiのテスト)
-- [コントリビューション](#コントリビューション)
-
 ## はじめに
 
-HAMi-coreはコンテナ内GPUリソースコントローラーです。アプリケーションやドライバーを変更することなく、CUDA呼び出しをフックしてコンテナ単位のデバイスメモリ制限と使用率制限を実現します。[HAMi](https://github.com/Project-HAMi/HAMi)や[volcano](https://github.com/volcano-sh/devices)で採用されています。
-
-<img src="./docs/images/hami-arch.png" width = "600" alt="HAMi-core アーキテクチャ図" />
+HAMi-coreはコンテナ内GPUリソースコントローラーです。アプリケーションやドライバーを変更することなく、CUDA呼び出しをフックしてコンテナ単位のデバイスメモリ制限と使用率制限を実現します。[HAMi](https://github.com/Project-HAMi/HAMi)や[volcano](https://github.com/volcano-sh/devices)で採用されています。HAMi全体のアーキテクチャとその中でのHAMi-coreの位置づけについては、[HAMiプロジェクト](https://github.com/Project-HAMi/HAMi)を参照してください。
 
 ## 機能
 
@@ -39,7 +22,16 @@ HAMi-coreには以下の機能があります：
 
 HAMi-coreは、以下の図のようにCUDAランタイム(libcudart.so)とCUDAドライバー(libcuda.so)間のAPI呼び出しをフックすることで動作します：
 
-<img src="./docs/images/hami-core-position.png" width = "400" alt="HAMi-core フック位置図" />
+```mermaid
+flowchart TD
+    A[CUDA Application] --> B[CUDA Library]
+    B --> C["CUDA Runtime<br>(libcudart.so)"]
+    C --> H[HAMi-core]
+    H --> D["CUDA Driver<br>(libcuda.so)"]
+    D --> E[NVIDIA Driver]
+    E --> F[NVIDIA GPU]
+    style H fill:#eeeeee,stroke:#333333
+```
 
 ## はじめ方
 
