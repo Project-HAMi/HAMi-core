@@ -111,6 +111,7 @@ nvmlReturn_t set_task_pid() {
     CHECK_NVML_API(nvmlDeviceGetCount(&nvmlCounts));
     
     int cudaDev;
+    int probeDev = 0;
     for (i=0;i<nvmlCounts;i++){
         cudaDev=nvml_to_cuda_map(i);
         if (cudaDev<0) {
@@ -123,14 +124,15 @@ nvmlReturn_t set_task_pid() {
                 LOG_ERROR("Device2GetComputeRunningProcesses failed %d,%d\n",res,i);
                 return res;
             }
-        }while(res==NVML_ERROR_INSUFFICIENT_SIZE); 
+        }while(res==NVML_ERROR_INSUFFICIENT_SIZE);
         mergepid(&previous,&merged_num,(nvmlProcessInfo_t1 *)tmp_pids_on_device,pre_pids_on_device);
+        probeDev = cudaDev;
         break;
     }
     previous = merged_num;
     merged_num = 0;
     memset(tmp_pids_on_device,0,sizeof(nvmlProcessInfo_v1_t)*SHARED_REGION_MAX_PROCESS_NUM);
-    CHECK_CU_RESULT(cuDevicePrimaryCtxRetain(&pctx,0));
+    CHECK_CU_RESULT(cuDevicePrimaryCtxRetain(&pctx,probeDev));
     for (i=0;i<nvmlCounts;i++) {
         cudaDev=nvml_to_cuda_map(i);
         if (cudaDev<0) {
@@ -168,7 +170,7 @@ nvmlReturn_t set_task_pid() {
             }
         }
     }
-    CHECK_CU_RESULT(cuDevicePrimaryCtxRelease(0));
+    CHECK_CU_RESULT(cuDevicePrimaryCtxRelease(probeDev));
     return NVML_SUCCESS; 
 }
 
