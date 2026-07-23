@@ -101,7 +101,7 @@ nvmlReturn_t set_task_pid() {
     nvmlProcessInfo_t1 pre_pids_on_device[SHARED_REGION_MAX_PROCESS_NUM];
     nvmlProcessInfo_t1 pids_on_device[SHARED_REGION_MAX_PROCESS_NUM];
     nvmlDevice_t device;
-    nvmlReturn_t res;
+    nvmlReturn_t res = NVML_SUCCESS;
     CUcontext pctx;
     int i;
     CHECK_NVML_API(nvmlInit());
@@ -111,65 +111,82 @@ nvmlReturn_t set_task_pid() {
     CHECK_NVML_API(nvmlDeviceGetCount(&nvmlCounts));
     
     int cudaDev;
+    int probeDev = -1;
     for (i=0;i<nvmlCounts;i++){
         cudaDev=nvml_to_cuda_map(i);
         if (cudaDev<0) {
             continue;
         }
         CHECK_NVML_API(nvmlDeviceGetHandleByIndex(i, &device));
-        do{
+        do {
             res = nvmlDeviceGetComputeRunningProcesses(device, &previous, tmp_pids_on_device);
             if ((res != NVML_SUCCESS) && (res != NVML_ERROR_INSUFFICIENT_SIZE)) {
                 LOG_ERROR("Device2GetComputeRunningProcesses failed %d,%d\n",res,i);
                 return res;
             }
-        }while(res==NVML_ERROR_INSUFFICIENT_SIZE); 
-        mergepid(&previous,&merged_num,(nvmlProcessInfo_t1 *)tmp_pids_on_device,pre_pids_on_device);
+        } while (res == NVML_ERROR_INSUFFICIENT_SIZE);
+        mergepid(&previous, &merged_num, (nvmlProcessInfo_t1 *)tmp_pids_on_device, pre_pids_on_device);
+        probeDev = cudaDev;
         break;
     }
+
+    if (probeDev < 0) {
+        LOG_ERROR("No mapped CUDA device found for host PID detection!");
+        return NVML_ERROR_DRIVER_NOT_LOADED;
+    }
+
     previous = merged_num;
     merged_num = 0;
-    memset(tmp_pids_on_device,0,sizeof(nvmlProcessInfo_v1_t)*SHARED_REGION_MAX_PROCESS_NUM);
-    CHECK_CU_RESULT(cuDevicePrimaryCtxRetain(&pctx,0));
+    memset(tmp_pids_on_device, 0, sizeof(nvmlProcessInfo_v1_t) * SHARED_REGION_MAX_PROCESS_NUM);
+    CHECK_CU_RESULT(cuDevicePrimaryCtxRetain(&pctx, probeDev));
     for (i=0;i<nvmlCounts;i++) {
         cudaDev=nvml_to_cuda_map(i);
         if (cudaDev<0) {
             continue;
         }
-        CHECK_NVML_API(nvmlDeviceGetHandleByIndex (i, &device)); 
-        do{
+        res = nvmlDeviceGetHandleByIndex (i, &device);
+        if (res != NVML_SUCCESS) {
+            LOG_WARN("NVML error at line %d: %d", __LINE__, res);
+            goto cleanup;
+        }
+        do {
             res = nvmlDeviceGetComputeRunningProcesses(device, &running_processes, tmp_pids_on_device);
             if ((res != NVML_SUCCESS) && (res != NVML_ERROR_INSUFFICIENT_SIZE)) {
                 LOG_ERROR("Device2GetComputeRunningProcesses failed %d\n",res);
-                return res;
+                goto cleanup;
             }
-        }while(res == NVML_ERROR_INSUFFICIENT_SIZE);
-        mergepid(&running_processes,&merged_num,(nvmlProcessInfo_t1 *)tmp_pids_on_device,pids_on_device);
+        } while (res == NVML_ERROR_INSUFFICIENT_SIZE);
+        mergepid(&running_processes, &merged_num, (nvmlProcessInfo_t1 *)tmp_pids_on_device, pids_on_device);
         break;
     }
     running_processes = merged_num;
-    LOG_INFO("current processes num = %u %u",previous,running_processes);
+    LOG_INFO("current processes num = %u %u", previous, running_processes);
     for (i=0;i<merged_num;i++){
-        LOG_INFO("current pid in use is %d %d",i,pids_on_device[i].pid);
+        LOG_INFO("current pid in use is %d %d", i, pids_on_device[i].pid);
         //tmp_pids_on_device[i].pid=0;
     }
-    unsigned int hostpid = getextrapid(previous,running_processes,pre_pids_on_device,pids_on_device); 
-    if (hostpid==0) {
+    unsigned int hostpid = getextrapid(previous, running_processes, pre_pids_on_device, pids_on_device);
+    if (hostpid == 0) {
         LOG_ERROR("host pid is error!");
-        return NVML_ERROR_DRIVER_NOT_LOADED;
+        res = NVML_ERROR_DRIVER_NOT_LOADED;
+        goto cleanup;
     }
-    LOG_INFO("hostPid=%d",hostpid);
-    if (set_host_pid(hostpid)==0) {
+    LOG_INFO("hostPid=%d", hostpid);
+    if (set_host_pid(hostpid) == 0) {
         for (i=0;i<running_processes;i++) {
-            if (pids_on_device[i].pid==hostpid) {
-                LOG_INFO("Primary Context Size==%lld",tmp_pids_on_device[i].usedGpuMemory);
-                context_size = tmp_pids_on_device[i].usedGpuMemory; 
+            if (pids_on_device[i].pid == hostpid) {
+                LOG_INFO("Primary Context Size==%lld", tmp_pids_on_device[i].usedGpuMemory);
+                context_size = tmp_pids_on_device[i].usedGpuMemory;
                 break;
             }
         }
     }
-    CHECK_CU_RESULT(cuDevicePrimaryCtxRelease(0));
-    return NVML_SUCCESS; 
+
+cleanup:
+    if (cuDevicePrimaryCtxRelease(probeDev) != CUDA_SUCCESS) {
+        LOG_WARN("Failed to release primary context on device %d", probeDev);
+    }
+    return res;
 }
 
 int parse_cuda_visible_env() {
