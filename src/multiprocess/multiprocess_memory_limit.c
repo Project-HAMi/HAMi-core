@@ -1235,14 +1235,14 @@ int set_host_pid(int hostpid) {
     return 0;
 }
 
-int set_current_device_sm_limit_scale(int dev, int scale) {
+int set_current_device_sm_limit(int dev, int limit) {
     ensure_initialized();
     if (region_info.shared_region->sm_init_flag==1) return 0;
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
     }
-    LOG_INFO("dev %d new sm limit set mul by %d",dev,scale);
-    region_info.shared_region->sm_limit[dev]=region_info.shared_region->sm_limit[dev]*scale;
+    LOG_INFO("dev %d new sm limit set to %d",dev,limit);
+    region_info.shared_region->sm_limit[dev]=limit;
     region_info.shared_region->sm_init_flag = 1;
     return 0;
 }
