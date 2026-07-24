@@ -354,6 +354,9 @@ nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,void* memory,int versi
         }
     } else {
         size_t clamped = (usage > limit) ? limit : usage;
+        if (usage > limit) {
+            LOG_WARN("NVML meminfo: usage %lu exceeds limit %lu, clamping", usage, limit);
+        }
         switch (version) {
         case 1:
              ((nvmlMemory_t*)memory)->free = limit - clamped;
