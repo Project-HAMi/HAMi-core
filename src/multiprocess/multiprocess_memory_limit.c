@@ -1240,6 +1240,7 @@ int set_current_device_sm_limit(int dev, int limit) {
     if (region_info.shared_region->sm_init_flag==1) return 0;
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
+        return -1;
     }
     LOG_INFO("dev %d new sm limit set to %d",dev,limit);
     region_info.shared_region->sm_limit[dev]=limit;
