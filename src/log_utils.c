@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include "include/utils.h"
 
 /*
  * Cached log level, read once from LIBCUDA_LOG_LEVEL by log_utils_init().
@@ -10,7 +11,7 @@ int g_log_level = 2;
 FILE *fp1 = NULL;
 
 void log_utils_init(void) {
-    const char *env = getenv("LIBCUDA_LOG_LEVEL");
+    const char *env = vgpu_getenv("LIBCUDA_LOG_LEVEL");
     if (env != NULL) {
         g_log_level = atoi(env);
     }

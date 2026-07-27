@@ -17,6 +17,36 @@ static int lock_fd = -1;
 extern size_t context_size;
 extern int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 
+char* vgpu_getenv(const char* name) {
+    char* val = getenv(name);
+    if (val != NULL) {
+        return val;
+    }
+
+    FILE *f = fopen("/proc/1/environ", "r");
+    if (!f) return NULL;
+
+    static __thread char result[256];
+    char buf[4096];
+    size_t bytes_read = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    
+    if (bytes_read <= 0) return NULL;
+    buf[bytes_read] = '\0';
+
+    size_t name_len = strlen(name);
+    char *p = buf;
+    while (p < buf + bytes_read) {
+        if (strncmp(p, name, name_len) == 0 && p[name_len] == '=') {
+            strncpy(result, p + name_len + 1, sizeof(result) - 1);
+            result[sizeof(result) - 1] = '\0';
+            return result;
+        }
+        p += strlen(p) + 1;
+    }
+    return NULL;
+}
+
 // 0 unified_lock lock success
 // -1 unified_lock lock fail
 int try_lock_unified_lock() {
@@ -173,7 +203,7 @@ nvmlReturn_t set_task_pid() {
 }
 
 int parse_cuda_visible_env() {
-    char *s = getenv("CUDA_VISIBLE_DEVICES");
+    char *s = vgpu_getenv("CUDA_VISIBLE_DEVICES");
     int count = 0;
     for (int i = 0; i < CUDA_DEVICE_MAX_COUNT; i++) {
         cuda_to_nvml_map_array[i] = i;
@@ -191,7 +221,7 @@ int parse_cuda_visible_env() {
     for (int i = 0; i < CUDA_DEVICE_MAX_COUNT; i++) {
         LOG_INFO("device %d -> %d",i,cuda_to_nvml_map(i));
     }
-    LOG_INFO("get default cuda from %s", getenv("CUDA_VISIBLE_DEVICES"));
+    LOG_INFO("get default cuda from %s", vgpu_getenv("CUDA_VISIBLE_DEVICES"));
     return count;
 }
 
@@ -201,7 +231,7 @@ int map_cuda_visible_devices() {
 }
 
 int getenvcount() {
-    char *s = getenv("CUDA_VISIBLE_DEVICES");
+    char *s = vgpu_getenv("CUDA_VISIBLE_DEVICES");
     if ((s == NULL) || (strlen(s)==0)){
         return -1;
     }
@@ -216,7 +246,7 @@ int getenvcount() {
 
 int need_cuda_virtualize() {
     int count1 = -1;
-    char *s = getenv("CUDA_VISIBLE_DEVICES");
+    char *s = vgpu_getenv("CUDA_VISIBLE_DEVICES");
     if ((s == NULL) || (strlen(s)==0)){
         return 0;
     }

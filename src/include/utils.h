@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 
+char* vgpu_getenv(const char* name);
 int try_lock_unified_lock();
 int try_unlock_unified_lock();
 

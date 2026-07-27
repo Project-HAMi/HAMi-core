@@ -20,6 +20,7 @@
 #include "include/process_utils.h"
 #include "include/memory_limit.h"
 #include "multiprocess/multiprocess_memory_limit.h"
+#include "../include/utils.h"
 
 
 #ifndef SEM_WAIT_TIME
@@ -93,7 +94,7 @@ void sig_swap_stub(int signo){
 
 // get device memory from env
 size_t get_limit_from_env(const char* env_name) {
-    char* env_limit = getenv(env_name);
+    char* env_limit = vgpu_getenv(env_name);
     if (env_limit == NULL) {
         // fprintf(stderr, "No %s set in environment\n", env_name);
         return 0;
@@ -1028,7 +1029,7 @@ void child_reinit_flag() {
 
 int set_active_oom_killer() {
     char *oom_killer_env;
-    oom_killer_env = getenv("ACTIVE_OOM_KILLER");
+    oom_killer_env = vgpu_getenv("ACTIVE_OOM_KILLER");
     if (oom_killer_env!=NULL){
         if (strcmp(oom_killer_env,"false") == 0)
             return 0;
@@ -1044,7 +1045,7 @@ int set_active_oom_killer() {
 
 int set_env_utilization_switch() {
     char *utilization_env;
-    utilization_env = getenv("GPU_CORE_UTILIZATION_POLICY");
+    utilization_env = vgpu_getenv("GPU_CORE_UTILIZATION_POLICY");
     if (utilization_env!=NULL){
         if ((strcmp(utilization_env,"FORCE") ==0 ) || (strcmp(utilization_env,"force") ==0))
             return 1;
@@ -1074,7 +1075,7 @@ void try_create_shrreg() {
 
     umask(0);
 
-    char* shr_reg_file = getenv(MULTIPROCESS_SHARED_REGION_CACHE_ENV);
+    char* shr_reg_file = vgpu_getenv(MULTIPROCESS_SHARED_REGION_CACHE_ENV);
     if (shr_reg_file == NULL) {
         shr_reg_file = MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT;
     }
@@ -1137,7 +1138,7 @@ void try_create_shrreg() {
         atomic_store_explicit(&region->recent_kernel, 2, memory_order_relaxed);
         atomic_store_explicit(&region->proc_num, 0, memory_order_relaxed);
         region->priority = 1;
-        char *_priority_env = getenv(CUDA_TASK_PRIORITY_ENV);
+        char *_priority_env = vgpu_getenv(CUDA_TASK_PRIORITY_ENV);
         if (_priority_env != NULL)
             region->priority = atoi(_priority_env);
 
@@ -1193,7 +1194,7 @@ fail:
 
 void initialized() {
     pthread_mutex_init(&_kernel_mutex, NULL);
-    char* _record_kernel_interval_env = getenv("RECORD_KERNEL_INTERVAL");
+    char* _record_kernel_interval_env = vgpu_getenv("RECORD_KERNEL_INTERVAL");
     if (_record_kernel_interval_env) {
         _record_kernel_interval = atoi(_record_kernel_interval_env);
     }

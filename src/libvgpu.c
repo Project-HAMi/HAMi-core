@@ -92,7 +92,7 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
                 break;
             }
         }
-        char *path_search=getenv("CUDA_REDIRECT");
+        char *path_search=vgpu_getenv("CUDA_REDIRECT");
         if ((path_search!=NULL) && (strlen(path_search)>0)){
             vgpulib = dlopen(path_search,RTLD_LAZY);
         }else{
