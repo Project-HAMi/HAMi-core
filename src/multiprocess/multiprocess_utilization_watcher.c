@@ -330,7 +330,9 @@ void init_utilization_watcher() {
     }
 
     pthread_t tid;
-    pthread_create(&tid, NULL, utilization_watcher, NULL);
+    if (pthread_create(&tid, NULL, utilization_watcher, NULL) != 0) {
+        LOG_WARN("pthread_create failed for utilization watcher thread");
+    }
     return;
 }
 
