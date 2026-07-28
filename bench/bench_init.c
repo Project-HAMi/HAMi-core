@@ -47,6 +47,8 @@ limitations under the License.
 #include <sys/wait.h>
 #include <stdatomic.h>
 #include <limits.h>
+#include <math.h>
+#include <signal.h>
 #include <cuda.h>
 
 #define MAX_WORKERS 512
@@ -100,7 +102,8 @@ static int cmp_double(const void *a, const void *b) {
  * honest than interpolating between samples we did not observe. */
 static double pct(double *sorted, int n, double p) {
     if (n <= 0) return 0.0;
-    int idx = (int)(p / 100.0 * n);
+    int idx = (int)ceil(p / 100.0 * n) - 1;
+    if (idx < 0) idx = 0;
     if (idx >= n) idx = n - 1;
     return sorted[idx];
 }
@@ -152,6 +155,12 @@ int main(int argc, char **argv) {
     }
     memset(sh, 0, sizeof(*sh));
     atomic_store(&sh->ready, 0);
+    /* rc defaults to CUDA_SUCCESS (0) after memset, which would make a worker
+     * that dies before writing its result look like a 0ms success. Mark every
+     * slot as failed up front; a worker overwrites this only once it finishes. */
+    for (int i = 0; i < n; i++) {
+        sh->slots[i].rc = -1;
+    }
 
     int pipefd[2];
     if (pipe(pipefd) != 0) {
@@ -195,15 +204,47 @@ int main(int argc, char **argv) {
     }
     close(pipefd[0]);
 
-    /* Wait for every worker to reach the barrier before releasing any. */
-    while (atomic_load(&sh->ready) < n)
+    /* Wait for every worker to reach the barrier before releasing any, but
+     * don't spin forever if a worker dies before it gets there (exec/loader
+     * failure, killed, etc.). Reap early exits as they happen so a dead
+     * worker can't stall the barrier, and give up after a generous timeout. */
+    int reaped[MAX_WORKERS];
+    memset(reaped, 0, sizeof(reaped));
+    int early_exits = 0;
+    double ready_deadline = now_ms() + 30000.0; /* 30s */
+
+    for (;;) {
+        int ready_n = atomic_load(&sh->ready);
+        if (ready_n + early_exits >= n) break;
+        if (now_ms() > ready_deadline) {
+            fprintf(stderr,
+                    "bench_init: timed out waiting for workers to reach barrier "
+                    "(%d/%d ready); aborting\n", ready_n, n);
+            for (int i = 0; i < n; i++) {
+                if (!reaped[i]) kill(pids[i], SIGKILL);
+            }
+            for (int i = 0; i < n; i++) {
+                if (!reaped[i]) waitpid(pids[i], NULL, 0);
+            }
+            return 1;
+        }
+        for (int i = 0; i < n; i++) {
+            if (reaped[i]) continue;
+            int st = 0;
+            if (waitpid(pids[i], &st, WNOHANG) == pids[i]) {
+                reaped[i] = 1;
+                early_exits++;
+            }
+        }
         usleep(200);
+    }
 
     double t_release = now_ms();
     close(pipefd[1]);                 /* broadcast: all workers wake here */
 
-    int failed = 0;
+    int failed = early_exits;
     for (int i = 0; i < n; i++) {
+        if (reaped[i]) continue;
         int st = 0;
         waitpid(pids[i], &st, 0);
         if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) failed++;

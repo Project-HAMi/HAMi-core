@@ -51,15 +51,20 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    if (strcmp(mode, "nonprimary") == 0) {
+    if (strcmp(mode, "primary") == 0) {
+        if ((r = cuDevicePrimaryCtxRetain(&ctx, 0)) != CUDA_SUCCESS) {
+            fprintf(stderr, "warm_holder: ctx retain failed: %d\n", r);
+            return 1;
+        }
+    } else if (strcmp(mode, "nonprimary") == 0) {
         if ((r = cuDeviceGet(&dev, 0)) != CUDA_SUCCESS ||
             (r = cuCtxCreate_v2(&ctx, 0, dev)) != CUDA_SUCCESS) {
             fprintf(stderr, "warm_holder: ctx create failed: %d\n", r);
             return 1;
         }
-    } else if ((r = cuDevicePrimaryCtxRetain(&ctx, 0)) != CUDA_SUCCESS) {
-        fprintf(stderr, "warm_holder: ctx retain failed: %d\n", r);
-        return 1;
+    } else {
+        fprintf(stderr, "warm_holder: unknown mode '%s' (expected 'primary' or 'nonprimary')\n", mode);
+        return 2;
     }
 
     printf("warm_holder ready mode=%s pid=%d\n", mode, getpid());

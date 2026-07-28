@@ -59,16 +59,29 @@ int main(int argc, char **argv) {
 
     /* Warmup: wakes the GPU if it was runtime-suspended, so the numbers below
      * reflect steady state rather than a one-off power transition. */
+    CUresult r;
     a = now_ms();
-    cuDevicePrimaryCtxRetain(&ctx, 0);
-    cuDevicePrimaryCtxRelease(0);
+    if ((r = cuDevicePrimaryCtxRetain(&ctx, 0)) != CUDA_SUCCESS) {
+        fprintf(stderr, "warmup retain failed: %d\n", r);
+        return 1;
+    }
+    if ((r = cuDevicePrimaryCtxRelease(0)) != CUDA_SUCCESS) {
+        fprintf(stderr, "warmup release failed: %d\n", r);
+        return 1;
+    }
     double warmup_ms = now_ms() - a;
 
     for (int i = 0; i < 3; i++) {
         a = now_ms();
-        cuDevicePrimaryCtxRetain(&ctx, 0);
+        if ((r = cuDevicePrimaryCtxRetain(&ctx, 0)) != CUDA_SUCCESS) {
+            fprintf(stderr, "retain %d failed: %d\n", i + 1, r);
+            return 1;
+        }
         b = now_ms();
-        cuDevicePrimaryCtxRelease(0);
+        if ((r = cuDevicePrimaryCtxRelease(0)) != CUDA_SUCCESS) {
+            fprintf(stderr, "release %d failed: %d\n", i + 1, r);
+            return 1;
+        }
         ret[i] = b - a;
         rel[i] = now_ms() - b;
     }

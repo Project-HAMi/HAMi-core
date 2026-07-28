@@ -41,6 +41,20 @@ static double now_ms(void) {
     return ts.tv_sec * 1e3 + ts.tv_nsec / 1e6;
 }
 
+/* nvmlDeviceGetComputeRunningProcesses reports NVML_ERROR_INSUFFICIENT_SIZE
+ * (and sets *count to the required size) when the buffer is too small.
+ * Reissue with a right-sized buffer instead of silently truncating results. */
+static nvmlReturn_t get_compute_procs(nvmlDevice_t dev, unsigned int *count,
+                                       nvmlProcessInfo_t *procs, unsigned int cap) {
+    *count = cap;
+    nvmlReturn_t r = nvmlDeviceGetComputeRunningProcesses(dev, count, procs);
+    if (r == NVML_ERROR_INSUFFICIENT_SIZE && *count <= cap) {
+        /* Driver reported a required size within our static buffer; retry once. */
+        r = nvmlDeviceGetComputeRunningProcesses(dev, count, procs);
+    }
+    return r;
+}
+
 int main(void) {
     nvmlProcessInfo_t procs[MAX_PROC];
     nvmlDevice_t dev;
@@ -48,6 +62,8 @@ int main(void) {
     CUcontext ctx;
     double t[8];
     int i = 0;
+    CUresult cr;
+    nvmlReturn_t nr;
 
     /* cuInit first: set_task_pid runs inside postInit, after the real
      * cuInit has already returned, so the driver is warm at this point. */
@@ -64,21 +80,35 @@ int main(void) {
     }
 
     t[i++] = now_ms();
-    nvmlDeviceGetHandleByIndex(0, &dev);
+    if ((nr = nvmlDeviceGetHandleByIndex(0, &dev)) != NVML_SUCCESS) {
+        fprintf(stderr, "nvmlDeviceGetHandleByIndex failed: %d\n", nr);
+        return 1;
+    }
 
     t[i++] = now_ms();
-    count = MAX_PROC;
-    nvmlDeviceGetComputeRunningProcesses(dev, &count, procs);   /* snapshot A */
+    if ((nr = get_compute_procs(dev, &count, procs, MAX_PROC)) != NVML_SUCCESS) {
+        fprintf(stderr, "nvmlDeviceGetComputeRunningProcesses (snapshot A) failed: %d\n", nr);
+        return 1;
+    }
 
     t[i++] = now_ms();
-    cuDevicePrimaryCtxRetain(&ctx, 0);                          /* the probe */
+    if ((cr = cuDevicePrimaryCtxRetain(&ctx, 0)) != CUDA_SUCCESS) {
+        fprintf(stderr, "cuDevicePrimaryCtxRetain failed: %d\n", cr);
+        return 1;
+    }
 
     t[i++] = now_ms();
-    count = MAX_PROC;
-    nvmlDeviceGetComputeRunningProcesses(dev, &count, procs);   /* snapshot B */
+    if ((nr = get_compute_procs(dev, &count, procs, MAX_PROC)) != NVML_SUCCESS) {
+        fprintf(stderr, "nvmlDeviceGetComputeRunningProcesses (snapshot B) failed: %d\n", nr);
+        cuDevicePrimaryCtxRelease(0);
+        return 1;
+    }
 
     t[i++] = now_ms();
-    cuDevicePrimaryCtxRelease(0);
+    if ((cr = cuDevicePrimaryCtxRelease(0)) != CUDA_SUCCESS) {
+        fprintf(stderr, "cuDevicePrimaryCtxRelease failed: %d\n", cr);
+        return 1;
+    }
 
     t[i++] = now_ms();
 

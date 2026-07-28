@@ -41,6 +41,7 @@ int main(void) {
     CUcontext c1, c2, c3;
     double a;
     double first, nested, after_release;
+    CUresult r;
 
     if (cuInit(0) != CUDA_SUCCESS) {
         fprintf(stderr, "cuInit failed\n");
@@ -48,29 +49,53 @@ int main(void) {
     }
 
     /* Warmup so GPU wake latency is not attributed to the first retain. */
-    cuDevicePrimaryCtxRetain(&c1, 0);
-    cuDevicePrimaryCtxRelease(0);
+    if ((r = cuDevicePrimaryCtxRetain(&c1, 0)) != CUDA_SUCCESS) {
+        fprintf(stderr, "warmup retain failed: %d\n", r);
+        return 1;
+    }
+    if ((r = cuDevicePrimaryCtxRelease(0)) != CUDA_SUCCESS) {
+        fprintf(stderr, "warmup release failed: %d\n", r);
+        return 1;
+    }
 
     /* Cold retain: nothing held by this process. */
     a = now_ms();
-    cuDevicePrimaryCtxRetain(&c1, 0);
+    if ((r = cuDevicePrimaryCtxRetain(&c1, 0)) != CUDA_SUCCESS) {
+        fprintf(stderr, "cold retain failed: %d\n", r);
+        return 1;
+    }
     first = now_ms() - a;
 
     /* Nested retain: context still held, so this should be refcount only. */
     a = now_ms();
-    cuDevicePrimaryCtxRetain(&c2, 0);
+    if ((r = cuDevicePrimaryCtxRetain(&c2, 0)) != CUDA_SUCCESS) {
+        fprintf(stderr, "nested retain failed: %d\n", r);
+        return 1;
+    }
     nested = now_ms() - a;
 
-    cuDevicePrimaryCtxRelease(0);   /* drop to refcount 1, context stays alive */
+    if ((r = cuDevicePrimaryCtxRelease(0)) != CUDA_SUCCESS) {   /* drop to refcount 1, context stays alive */
+        fprintf(stderr, "release failed: %d\n", r);
+        return 1;
+    }
 
     /* Retain again while still held. Models the application acquiring a
      * context after the probe finished but did not fully release. */
     a = now_ms();
-    cuDevicePrimaryCtxRetain(&c3, 0);
+    if ((r = cuDevicePrimaryCtxRetain(&c3, 0)) != CUDA_SUCCESS) {
+        fprintf(stderr, "retain-while-held failed: %d\n", r);
+        return 1;
+    }
     after_release = now_ms() - a;
 
-    cuDevicePrimaryCtxRelease(0);
-    cuDevicePrimaryCtxRelease(0);
+    if ((r = cuDevicePrimaryCtxRelease(0)) != CUDA_SUCCESS) {
+        fprintf(stderr, "final release (1/2) failed: %d\n", r);
+        return 1;
+    }
+    if ((r = cuDevicePrimaryCtxRelease(0)) != CUDA_SUCCESS) {
+        fprintf(stderr, "final release (2/2) failed: %d\n", r);
+        return 1;
+    }
 
     printf("{\"cold_retain_ms\":%.3f,\"nested_retain_ms\":%.3f,"
            "\"retain_while_held_ms\":%.3f,\"same_ctx\":%s}\n",
