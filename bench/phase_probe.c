@@ -52,10 +52,16 @@ int main(void) {
     /* cuInit first: set_task_pid runs inside postInit, after the real
      * cuInit has already returned, so the driver is warm at this point. */
     t[i++] = now_ms();
-    if (cuInit(0) != CUDA_SUCCESS) { fprintf(stderr, "cuInit failed\n"); return 1; }
+    if (cuInit(0) != CUDA_SUCCESS) {
+        fprintf(stderr, "cuInit failed\n");
+        return 1;
+    }
 
     t[i++] = now_ms();
-    if (nvmlInit() != NVML_SUCCESS) { fprintf(stderr, "nvmlInit failed\n"); return 1; }
+    if (nvmlInit() != NVML_SUCCESS) {
+        fprintf(stderr, "nvmlInit failed\n");
+        return 1;
+    }
 
     t[i++] = now_ms();
     nvmlDeviceGetHandleByIndex(0, &dev);

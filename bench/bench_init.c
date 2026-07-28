@@ -77,8 +77,8 @@ static int run_worker(shared_t *sh, int slot, int readfd) {
     atomic_fetch_add(&sh->ready, 1);
 
     /* Blocks until the parent closes the write end. Returns 0 on EOF. */
-    while (read(readfd, buf, 1) < 0 && errno == EINTR)
-        ;
+    while (read(readfd, buf, 1) < 0 && errno == EINTR) {
+    }
 
     double t0 = now_ms();
     CUresult r = cuInit(0);
@@ -107,13 +107,19 @@ static double pct(double *sorted, int n, double p) {
 
 int main(int argc, char **argv) {
     if (argc >= 2 && strcmp(argv[1], "--worker") == 0) {
-        if (argc != 4) { fprintf(stderr, "bad --worker invocation\n"); return 2; }
+        if (argc != 4) {
+            fprintf(stderr, "bad --worker invocation\n");
+            return 2;
+        }
         int slot   = atoi(argv[2]);
         int readfd = atoi(argv[3]);
         int shmfd  = atoi(getenv("BENCH_SHM_FD"));
         shared_t *sh = mmap(NULL, sizeof(shared_t), PROT_READ | PROT_WRITE,
                             MAP_SHARED, shmfd, 0);
-        if (sh == MAP_FAILED) { perror("mmap(worker)"); return 2; }
+        if (sh == MAP_FAILED) {
+            perror("mmap(worker)");
+            return 2;
+        }
         return run_worker(sh, slot, readfd);
     }
 
@@ -129,17 +135,29 @@ int main(int argc, char **argv) {
 
     /* Anonymous shared file, inherited by the workers across exec. */
     int shmfd = memfd_create("bench_shm", 0);
-    if (shmfd < 0) { perror("memfd_create"); return 1; }
-    if (ftruncate(shmfd, sizeof(shared_t)) != 0) { perror("ftruncate"); return 1; }
+    if (shmfd < 0) {
+        perror("memfd_create");
+        return 1;
+    }
+    if (ftruncate(shmfd, sizeof(shared_t)) != 0) {
+        perror("ftruncate");
+        return 1;
+    }
 
     shared_t *sh = mmap(NULL, sizeof(shared_t), PROT_READ | PROT_WRITE,
                         MAP_SHARED, shmfd, 0);
-    if (sh == MAP_FAILED) { perror("mmap"); return 1; }
+    if (sh == MAP_FAILED) {
+        perror("mmap");
+        return 1;
+    }
     memset(sh, 0, sizeof(*sh));
     atomic_store(&sh->ready, 0);
 
     int pipefd[2];
-    if (pipe(pipefd) != 0) { perror("pipe"); return 1; }
+    if (pipe(pipefd) != 0) {
+        perror("pipe");
+        return 1;
+    }
 
     /* Both fds must survive exec, so clear FD_CLOEXEC. */
     fcntl(pipefd[0], F_SETFD, 0);
@@ -151,13 +169,19 @@ int main(int argc, char **argv) {
 
     char self[PATH_MAX];
     ssize_t sl = readlink("/proc/self/exe", self, sizeof(self) - 1);
-    if (sl < 0) { perror("readlink"); return 1; }
+    if (sl < 0) {
+        perror("readlink");
+        return 1;
+    }
     self[sl] = '\0';
 
     pid_t pids[MAX_WORKERS];
     for (int i = 0; i < n; i++) {
         pid_t p = fork();
-        if (p < 0) { perror("fork"); return 1; }
+        if (p < 0) {
+            perror("fork");
+            return 1;
+        }
         if (p == 0) {
             close(pipefd[1]);
             char slot_s[16], rfd_s[16];

@@ -42,7 +42,10 @@ int main(void) {
     double a;
     double first, nested, after_release;
 
-    if (cuInit(0) != CUDA_SUCCESS) { fprintf(stderr, "cuInit failed\n"); return 1; }
+    if (cuInit(0) != CUDA_SUCCESS) {
+        fprintf(stderr, "cuInit failed\n");
+        return 1;
+    }
 
     /* Warmup so GPU wake latency is not attributed to the first retain. */
     cuDevicePrimaryCtxRetain(&c1, 0);

@@ -52,7 +52,10 @@ int main(int argc, char **argv) {
     double a, b;
     double ret[3], rel[3];
 
-    if (cuInit(0) != CUDA_SUCCESS) { fprintf(stderr, "cuInit failed\n"); return 1; }
+    if (cuInit(0) != CUDA_SUCCESS) {
+        fprintf(stderr, "cuInit failed\n");
+        return 1;
+    }
 
     /* Warmup: wakes the GPU if it was runtime-suspended, so the numbers below
      * reflect steady state rather than a one-off power transition. */
