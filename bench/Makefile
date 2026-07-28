@@ -6,7 +6,13 @@ LIBS = -L$(CUDA_HOME)/lib64 -lcuda -lpthread -lm
 CORE_TARGETS = bench_init nested_retain warm_holder abi_check
 OPTIONAL_TARGETS = phase_probe
 
-HAVE_NVML := $(shell ldconfig -p | grep -q libnvidia-ml && echo 1)
+# Probe with the exact header path and link flags phase_probe itself uses,
+# not just ldconfig -p: the runtime .so.1 can be present via the driver
+# package while the dev symlink (-lnvidia-ml) and/or nvml.h (from the CUDA
+# toolkit) are still missing, which would make phase_probe a chosen target
+# that then fails to link.
+HAVE_NVML := $(shell printf '#include <nvml.h>\nint main(void){return 0;}\n' | \
+	gcc -x c - $(INCLUDES) $(LIBS) -lnvidia-ml -o /dev/null >/dev/null 2>&1 && echo 1)
 
 TARGETS = $(CORE_TARGETS)
 ifeq ($(HAVE_NVML),1)
