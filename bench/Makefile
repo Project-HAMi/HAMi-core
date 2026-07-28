@@ -21,7 +21,12 @@ endif
 
 .PHONY: all clean check-cuda-home print-targets
 
-all: check-cuda-home $(TARGETS)
+all: $(TARGETS)
+
+# Order-only prerequisite on every binary (not just `all`'s prerequisite
+# list), so the preflight also runs under `make -j` and when a target is
+# built directly, e.g. `make bench_init`, not just via `make all`.
+$(CORE_TARGETS) $(OPTIONAL_TARGETS): | check-cuda-home
 
 # Machine-readable list of targets actually built this run, so callers like
 # run_benchmarks.sh can tell whether phase_probe was skipped (no NVML) rather
