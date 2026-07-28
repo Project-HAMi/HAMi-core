@@ -1121,10 +1121,18 @@ void try_create_shrreg() {
     if (init_flag != MULTIPROCESS_SHARED_REGION_MAGIC_FLAG) {
         region->major_version = MAJOR_VERSION;
         region->minor_version = MINOR_VERSION;
-        do_init_device_memory_limits(
-            region->limit, CUDA_DEVICE_MAX_COUNT);
-        do_init_device_sm_limits(
-            region->sm_limit,CUDA_DEVICE_MAX_COUNT);
+        {
+            uint64_t init_limits[CUDA_DEVICE_MAX_COUNT];
+            int i;
+            do_init_device_memory_limits(init_limits, CUDA_DEVICE_MAX_COUNT);
+            for (i = 0; i < CUDA_DEVICE_MAX_COUNT; ++i) {
+                atomic_store_explicit(&region->limit[i], init_limits[i], memory_order_relaxed);
+            }
+            do_init_device_sm_limits(init_limits, CUDA_DEVICE_MAX_COUNT);
+            for (i = 0; i < CUDA_DEVICE_MAX_COUNT; ++i) {
+                atomic_store_explicit(&region->sm_limit[i], init_limits[i], memory_order_relaxed);
+            }
+        }
         if (sem_init(&region->sem, 1, 1) != 0) {
             LOG_ERROR("Fail to init sem %s: errno=%d", shr_reg_file, errno);
         }
@@ -1240,6 +1248,7 @@ int set_current_device_sm_limit_scale(int dev, int scale) {
     if (region_info.shared_region->sm_init_flag==1) return 0;
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
+        return -1;
     }
     LOG_INFO("dev %d new sm limit set mul by %d",dev,scale);
     region_info.shared_region->sm_limit[dev]=region_info.shared_region->sm_limit[dev]*scale;
@@ -1251,26 +1260,29 @@ int get_current_device_sm_limit(int dev) {
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
+        return -1;
     }
-    return region_info.shared_region->sm_limit[dev];
+    return atomic_load_explicit(&region_info.shared_region->sm_limit[dev], memory_order_acquire);
 }
 
 int set_current_device_memory_limit(const int dev,size_t newlimit) {
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
+        return -1;
     }
     LOG_INFO("dev %d new limit set to %ld",dev,newlimit);
-    region_info.shared_region->limit[dev]=newlimit;
-    return 0; 
+    atomic_store_explicit(&region_info.shared_region->limit[dev], newlimit, memory_order_release);
+    return 0;
 }
 
 uint64_t get_current_device_memory_limit(const int dev) {
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
+        return 0;
     }
-    return region_info.shared_region->limit[dev];       
+    return atomic_load_explicit(&region_info.shared_region->limit[dev], memory_order_acquire);
 }
 
 uint64_t get_current_device_memory_monitor(const int dev) {

@@ -97,8 +97,8 @@ typedef struct {
     sem_t sem;  // Only for process slot add/remove
     uint64_t device_num;
     uuid uuids[CUDA_DEVICE_MAX_COUNT];
-    uint64_t limit[CUDA_DEVICE_MAX_COUNT];
-    uint64_t sm_limit[CUDA_DEVICE_MAX_COUNT];
+    _Atomic uint64_t limit[CUDA_DEVICE_MAX_COUNT];
+    _Atomic uint64_t sm_limit[CUDA_DEVICE_MAX_COUNT];
     shrreg_proc_slot_t procs[SHARED_REGION_MAX_PROCESS_NUM];
     _Atomic int proc_num;
     _Atomic int utilization_switch;
