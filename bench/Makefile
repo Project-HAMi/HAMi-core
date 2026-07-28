@@ -12,7 +12,7 @@ OPTIONAL_TARGETS = phase_probe
 # toolkit) are still missing, which would make phase_probe a chosen target
 # that then fails to link.
 HAVE_NVML := $(shell printf '#include <nvml.h>\nint main(void){return 0;}\n' | \
-	gcc -x c - $(INCLUDES) $(LIBS) -lnvidia-ml -o /dev/null >/dev/null 2>&1 && echo 1)
+	gcc $(CFLAGS) -x c - $(INCLUDES) $(LIBS) -lnvidia-ml -o /dev/null >/dev/null 2>&1 && echo 1)
 
 TARGETS = $(CORE_TARGETS)
 ifeq ($(HAVE_NVML),1)
