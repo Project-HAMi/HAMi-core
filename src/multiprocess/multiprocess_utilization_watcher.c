@@ -324,19 +324,13 @@ void init_utilization_watcher() {
     setspec();
 
     // Initialize cached_sm_limit for each device
-    int has_limit = 0;
     for (unsigned int dev = 0; dev < device_count && dev < CUDA_DEVICE_MAX_COUNT; dev++) {
         cached_sm_limit[dev] = get_current_device_sm_limit(dev);
         LOG_INFO("device %d: core utilization limit = %d", dev, cached_sm_limit[dev]);
-        if (cached_sm_limit[dev] > 0 && cached_sm_limit[dev] <= 100) {
-            has_limit = 1;
-        }
     }
 
     pthread_t tid;
-    if (has_limit) {
-        pthread_create(&tid, NULL, utilization_watcher, NULL);
-    }
+    pthread_create(&tid, NULL, utilization_watcher, NULL);
     return;
 }
 
