@@ -371,11 +371,11 @@ CUresult cuMemcpyDtoHAsync_v2 ( void* dstHost, CUdeviceptr srcDevice, size_t Byt
 }
 
 
-CUresult cuMemcpyHtoD_v2(CUdeviceptr srcDevice, const void* dstHost, size_t ByteCount) {
+CUresult cuMemcpyHtoD_v2(CUdeviceptr dstDevice, const void* srcHost, size_t ByteCount) {
     // TODO: compute bytesize
-    LOG_DEBUG("cuMemcpyHtoD_v2,srcDevice=%llx dstHost=%p count=%lu",srcDevice,dstHost,ByteCount);
+    LOG_DEBUG("cuMemcpyHtoD_v2,dstDevice=%llx srcHost=%p count=%lu",dstDevice,srcHost,ByteCount);
     ENSURE_RUNNING();
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemcpyHtoD_v2, srcDevice, dstHost, ByteCount);
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemcpyHtoD_v2, dstDevice, srcHost, ByteCount);
     return res;
 }
 
