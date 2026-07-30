@@ -45,7 +45,11 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
 add_test(NAME shared_region_concurrency
     COMMAND test_shared_region_concurrency)
-set_tests_properties(shared_region_concurrency PROPERTIES TIMEOUT 30)
+# The test waits on the start barrier and on registration in sequence, each
+# bounded by SHRREG_TEST_TIMEOUT_MS (20s default), so it can spend 40s before
+# printing which stage stalled. Keep this above that budget or ctest kills it
+# first and the diagnostic is lost.
+set_tests_properties(shared_region_concurrency PROPERTIES TIMEOUT 90)
 
 
 add_custom_target(python_test ALL
