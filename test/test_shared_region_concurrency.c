@@ -31,6 +31,7 @@
 typedef struct {
     pid_t pid;
     int completed;
+    int acquire_attempts;
     double start_ms;
     double acquire_begin_ms;
     double acquired_ms;
@@ -68,7 +69,17 @@ void shrreg_test_sequence_point(int sequence) {
     timestamp = now_ms();
     switch (sequence) {
         case SEQ_BEFORE_ACQUIRE_SEMLOCK:
-            result->acquire_begin_ms = timestamp;
+            /*
+             * lock_shrreg() marks this inside its retry loop, so a worker that
+             * times out and retries lands here more than once. Keeping the
+             * latest timestamp would measure only the final attempt and report
+             * a near zero wait for a worker that actually queued for a long
+             * time, which is backwards for a contention test. Keep the first.
+             */
+            if (result->acquire_attempts == 0) {
+                result->acquire_begin_ms = timestamp;
+            }
+            result->acquire_attempts++;
             break;
         case SEQ_ACQUIRE_SEMLOCK_OK:
             result->acquired_ms = timestamp;
@@ -224,6 +235,7 @@ static void print_results(int workers, double wall_ms) {
     double wait_sum = 0.0;
     double hold_sum = 0.0;
     double total_sum = 0.0;
+    int max_attempts = 0;
     int i;
 
     for (i = 0; i < workers; i++) {
@@ -237,6 +249,9 @@ static void print_results(int workers, double wall_ms) {
         wait_sum += wait[i];
         hold_sum += hold[i];
         total_sum += total[i];
+        if (result->acquire_attempts > max_attempts) {
+            max_attempts = result->acquire_attempts;
+        }
     }
     qsort(before_lock, workers, sizeof(double), compare_double);
     qsort(wait, workers, sizeof(double), compare_double);
@@ -247,12 +262,14 @@ static void print_results(int workers, double wall_ms) {
            "\"before_lock_mean_ms\":%.3f,\"before_lock_p99_ms\":%.3f,"
            "\"wait_mean_ms\":%.3f,\"wait_p99_ms\":%.3f,"
            "\"hold_mean_ms\":%.3f,\"hold_p99_ms\":%.3f,"
-           "\"total_mean_ms\":%.3f,\"total_p99_ms\":%.3f}\n",
+           "\"total_mean_ms\":%.3f,\"total_p99_ms\":%.3f,"
+           "\"max_acquire_attempts\":%d}\n",
            workers, wall_ms,
            before_lock_sum / workers, percentile(before_lock, workers, 99),
            wait_sum / workers, percentile(wait, workers, 99),
            hold_sum / workers, percentile(hold, workers, 99),
-           total_sum / workers, percentile(total, workers, 99));
+           total_sum / workers, percentile(total, workers, 99),
+           max_attempts);
 }
 
 int main(void) {
