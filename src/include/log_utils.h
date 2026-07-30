@@ -22,27 +22,33 @@ extern int g_log_level;
 /* Call once during early initialization to cache LIBCUDA_LOG_LEVEL. */
 void log_utils_init(void);
 
+/*
+ * Level accessor used by the macros below. Resolves LIBCUDA_LOG_LEVEL on first
+ * use, so messages emitted before log_utils_init() runs honour it as well.
+ */
+int log_level(void);
+
 #ifdef FILEDEBUG
 #define LOG_DEBUG(msg, ...) { \
-    if (g_log_level >= 4) {\
+    if (log_level() >= 4) {\
         if (fp1==NULL) fp1 = fopen ("/tmp/vgpulog", "a"); \
         fprintf(fp1, "[HAMI-core Debug(%d:%ld:%s:%d)]: "msg"\n",getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
         }\
     }
 #define LOG_INFO(msg, ...) { \
-    if (g_log_level >= 3) {\
+    if (log_level() >= 3) {\
         if (fp1==NULL) fp1 = fopen ("/tmp/vgpulog", "a"); \
         fprintf(fp1, "[HAMI-core Info(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
          }\
     }
 #define LOG_WARN(msg, ...) { \
-    if (g_log_level >= 2) {\
+    if (log_level() >= 2) {\
         if (fp1==NULL) fp1 = fopen ("/tmp/vgpulog", "a"); \
         fprintf(fp1, "[HAMI-core Warn(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
         }\
     }
 #define LOG_MSG(msg, ...) { \
-    if (g_log_level >= 2) {\
+    if (log_level() >= 2) {\
         if (fp1==NULL) fp1 = fopen ("/tmp/vgpulog", "a"); \
         fprintf(fp1, "[HAMI-core Msg(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
          }\
@@ -53,22 +59,22 @@ void log_utils_init(void);
 }
 #else
 #define LOG_DEBUG(msg, ...) { \
-    if (g_log_level >= 4) {\
+    if (log_level() >= 4) {\
         fprintf(stderr, "[HAMI-core Debug(%d:%ld:%s:%d)]: "msg"\n",getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
          }\
     }
 #define LOG_INFO(msg, ...) { \
-    if (g_log_level >= 3) {\
+    if (log_level() >= 3) {\
         fprintf(stderr, "[HAMI-core Info(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
         }\
     }
 #define LOG_WARN(msg, ...) { \
-    if (g_log_level >= 2) {\
+    if (log_level() >= 2) {\
         fprintf(stderr, "[HAMI-core Warn(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
         }\
     }
 #define LOG_MSG(msg, ...) { \
-    if (g_log_level >= 2) {\
+    if (log_level() >= 2) {\
         fprintf(stderr, "[HAMI-core Msg(%d:%ld:%s:%d)]: "msg"\n", getpid(),pthread_self(),basename(__FILE__),__LINE__,##__VA_ARGS__); \
          }\
     }
