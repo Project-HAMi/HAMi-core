@@ -90,10 +90,12 @@ static int compare_double(const void *a, const void *b) {
     return 0;
 }
 
-/* Nearest-rank percentile over a sorted array. */
+/* Nearest-rank percentile: 0-based index = ceil(p/100 * n) - 1. */
 static double percentile(const double *sorted, int n, double p) {
     if (n <= 0) return 0.0;
-    int rank = (int)(p / 100.0 * (double)n);
+    double pos = p / 100.0 * (double)n;
+    int rank = (int)pos - 1;
+    if ((double)(rank + 1) < pos) rank++;
     if (rank >= n) rank = n - 1;
     if (rank < 0) rank = 0;
     return sorted[rank];
@@ -107,8 +109,9 @@ static void run_child(bench_shared_t *shared, int index) {
 
     r->pid = getpid();
 
-    /* Release together so the processes contend, matching the real case
-     * where many pods start at once. */
+    /* Phase 1: signal readiness. Phase 2: wait for the timed release.
+     * cuInit() is called only after the parent has recorded wall_start. */
+    pthread_barrier_wait(&shared->barrier);
     pthread_barrier_wait(&shared->barrier);
 
     getrusage(RUSAGE_SELF, &ru_start);
@@ -203,7 +206,13 @@ int main(int argc, char **argv) {
     const char *label = "run";
 
     if (argc >= 2) {
-        proc_num = atoi(argv[1]);
+        char *end;
+        long val = strtol(argv[1], &end, 10);
+        if (*end != '\0' || val < 1 || val > MAX_PROC_NUM) {
+            fprintf(stderr, "process count must be between 1 and %d\n", MAX_PROC_NUM);
+            return 1;
+        }
+        proc_num = (int)val;
     }
     if (argc >= 3) {
         label = argv[2];
@@ -271,10 +280,12 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    /* Release all children together and time from here. */
+    /* Phase 1: wait until every child is ready (none has called cuInit() yet). */
     pthread_barrier_wait(&shared->barrier);
     struct timespec wall_start, wall_end;
     clock_gettime(CLOCK_MONOTONIC, &wall_start);
+    /* Phase 2: release all children together; wall_start is already recorded. */
+    pthread_barrier_wait(&shared->barrier);
 
     for (int i = 0; i < proc_num; i++) {
         wait(NULL);
