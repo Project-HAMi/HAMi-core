@@ -903,7 +903,7 @@ void postInit(){
         unlock_postinit();
     } else {
         LOG_WARN("Skipped host PID detection because the postinit lock failed");
-        res = NVML_ERROR_TIMEOUT;
+        res = NVML_ERROR_UNKNOWN;
     }
 
     LOG_MSG("Initialized");
