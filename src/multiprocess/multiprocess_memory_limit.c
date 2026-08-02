@@ -35,6 +35,8 @@
 #endif
 
 #define POSTINIT_FILE_LOCK_OFFSET ((off_t)UINT64_C(0x40000000))
+#define POSTINIT_FILE_LOCK_INITIAL_RETRY_US 10000U
+#define POSTINIT_FILE_LOCK_MAX_RETRY_US 1000000U
 
 _Static_assert(POSTINIT_FILE_LOCK_OFFSET > (off_t)sizeof(shared_region_t),
                "postinit file lock must remain outside the shared region");
@@ -609,7 +611,33 @@ void get_timespec(int seconds, struct timespec* spec) {
  * byte.  Processes sharing one cache must all use this protocol; a sem-only
  * binary does not participate in the record lock.
  */
-static int postinit_file_lock(int lock_type) {
+static void postinit_file_lock_backoff(unsigned int backoff_us,
+                                       uint32_t* jitter_state) {
+    struct timespec delay;
+    unsigned int minimum_us = backoff_us / 2;
+    unsigned int jitter_range_us = backoff_us - minimum_us;
+
+    *jitter_state = *jitter_state * UINT32_C(1103515245) + UINT32_C(12345);
+    unsigned int delay_us = minimum_us +
+                            *jitter_state % (jitter_range_us + 1);
+    delay.tv_sec = delay_us / 1000000U;
+    delay.tv_nsec = (long)(delay_us % 1000000U) * 1000L;
+    while (nanosleep(&delay, &delay) != 0 && errno == EINTR) {
+    }
+}
+
+static uint32_t postinit_file_lock_jitter_seed(void) {
+    struct timespec now;
+    uint32_t seed = (uint32_t)getpid();
+
+    if (clock_gettime(CLOCK_MONOTONIC, &now) == 0) {
+        seed ^= (uint32_t)now.tv_sec;
+        seed ^= (uint32_t)now.tv_nsec;
+    }
+    return seed;
+}
+
+static int postinit_file_lock(short lock_type) {
     struct flock lock = {
         .l_type = lock_type,
         .l_whence = SEEK_SET,
@@ -619,24 +647,42 @@ static int postinit_file_lock(int lock_type) {
     int status;
 
     if (lock_type == F_WRLCK) {
-        do {
-            status = fcntl(region_info.fd, F_SETLK, &lock);
-        } while (status != 0 && errno == EINTR);
-        if (status == 0) {
-            return 1;
-        }
-        if (errno != EACCES && errno != EAGAIN) {
-            LOG_ERROR("Failed to acquire postinit file lock: errno=%d", errno);
-            return 0;
-        }
-        LOG_MSG("Waiting for postinit file lock (PID %d)", getpid());
+        unsigned int retry_delay_us = POSTINIT_FILE_LOCK_INITIAL_RETRY_US;
+        uint32_t retry_jitter = postinit_file_lock_jitter_seed();
+        int waiting_logged = 0;
+
         /*
          * A live owner is never bypassed: skipping host PID detection also
          * skips SM rate limiting for the process.
+         *
+         * Use nonblocking requests instead of F_SETLKW.  Some NFS lock
+         * managers defer grants to blocked requests for tens of seconds
+         * after the owner exits even though fresh requests can acquire the
+         * released lock immediately.
          */
-        do {
-            status = fcntl(region_info.fd, F_SETLKW, &lock);
-        } while (status != 0 && errno == EINTR);
+        for (;;) {
+            do {
+                status = fcntl(region_info.fd, F_SETLK, &lock);
+            } while (status != 0 && errno == EINTR);
+            if (status == 0) {
+                return 1;
+            }
+            if (errno != EACCES && errno != EAGAIN) {
+                LOG_ERROR("Failed to acquire postinit file lock: errno=%d",
+                          errno);
+                return 0;
+            }
+            if (!waiting_logged) {
+                LOG_MSG("Waiting for postinit file lock (PID %d)", getpid());
+                waiting_logged = 1;
+            }
+            postinit_file_lock_backoff(retry_delay_us, &retry_jitter);
+            if (retry_delay_us < POSTINIT_FILE_LOCK_MAX_RETRY_US / 2) {
+                retry_delay_us *= 2;
+            } else {
+                retry_delay_us = POSTINIT_FILE_LOCK_MAX_RETRY_US;
+            }
+        }
     } else {
         do {
             status = fcntl(region_info.fd, F_SETLK, &lock);
