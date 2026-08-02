@@ -894,19 +894,15 @@ void postInit(){
     allocator_init();
     map_cuda_visible_devices();
 
-    // Use shared memory semaphore to serialize host PID detection
-    // Returns 1 if lock acquired, 0 if timeout (skip detection)
+    // Use the process-death-safe shared file lock to serialize host PID detection
     int lock_acquired = lock_postinit();
     nvmlReturn_t res = NVML_SUCCESS;
 
     if (lock_acquired) {
-        // Lock acquired - safe to call set_task_pid()
         res = set_task_pid();
         unlock_postinit();
     } else {
-        // Timeout - another process likely crashed holding the lock
-        // Skip host PID detection for this process
-        LOG_WARN("Skipped host PID detection due to lock timeout");
+        LOG_WARN("Skipped host PID detection because the postinit lock failed");
         res = NVML_ERROR_TIMEOUT;
     }
 

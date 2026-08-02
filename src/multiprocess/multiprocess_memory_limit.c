@@ -34,20 +34,18 @@
 #define SEM_WAIT_RETRY_TIMES 30
 #endif
 
-// Longer timeout for postinit since set_task_pid() with adaptive polling can take several seconds
-#ifndef SEM_WAIT_TIME_POSTINIT
-#define SEM_WAIT_TIME_POSTINIT 30
-#endif
+#define POSTINIT_FILE_LOCK_OFFSET ((off_t)UINT64_C(0x40000000))
 
-#ifndef SEM_WAIT_RETRY_TIMES_POSTINIT
-#define SEM_WAIT_RETRY_TIMES_POSTINIT 10
-#endif
+_Static_assert(POSTINIT_FILE_LOCK_OFFSET > (off_t)sizeof(shared_region_t),
+               "postinit file lock must remain outside the shared region");
 
 int pidfound;
 
 int ctx_activate[32];
 
 static shared_region_info_t region_info = {0, -1, PTHREAD_ONCE_INIT, NULL, 0, NULL};
+static atomic_flag postinit_local_lock = ATOMIC_FLAG_INIT;
+static _Thread_local int postinit_lock_held;
 // size_t initial_offset=117440512;
 int env_utilization_switch;
 int enable_active_oom_killer;
@@ -600,6 +598,69 @@ void get_timespec(int seconds, struct timespec* spec) {
     spec->tv_nsec = 0;
 }
 
+/*
+ * sem_postinit remains in shared_region_t to preserve its layout, but an
+ * unnamed semaphore cannot recover when its holder dies.  Serialize postInit
+ * with a POSIX record lock instead: the kernel releases it when the process
+ * exits, including on SIGKILL, and does not inherit it across fork.
+ *
+ * The byte is outside the mapped shared-region layout.  Its fixed offset does
+ * not depend on sizeof(shared_region_t), so future layouts address the same
+ * byte.  Processes sharing one cache must all use this protocol; a sem-only
+ * binary does not participate in the record lock.
+ */
+static int postinit_file_lock(int lock_type) {
+    struct flock lock = {
+        .l_type = lock_type,
+        .l_whence = SEEK_SET,
+        .l_start = POSTINIT_FILE_LOCK_OFFSET,
+        .l_len = 1,
+    };
+    int status;
+
+    if (lock_type == F_WRLCK) {
+        do {
+            status = fcntl(region_info.fd, F_SETLK, &lock);
+        } while (status != 0 && errno == EINTR);
+        if (status == 0) {
+            return 1;
+        }
+        if (errno != EACCES && errno != EAGAIN) {
+            LOG_ERROR("Failed to acquire postinit file lock: errno=%d", errno);
+            return 0;
+        }
+        LOG_MSG("Waiting for postinit file lock (PID %d)", getpid());
+        /*
+         * A live owner is never bypassed: skipping host PID detection also
+         * skips SM rate limiting for the process.
+         */
+        do {
+            status = fcntl(region_info.fd, F_SETLKW, &lock);
+        } while (status != 0 && errno == EINTR);
+    } else {
+        do {
+            status = fcntl(region_info.fd, F_SETLK, &lock);
+        } while (status != 0 && errno == EINTR);
+    }
+    if (status != 0) {
+        LOG_ERROR("Failed to %s postinit file lock: errno=%d",
+                  lock_type == F_UNLCK ? "release" : "acquire", errno);
+        return 0;
+    }
+    return 1;
+}
+
+static void lock_postinit_local(void) {
+    while (atomic_flag_test_and_set_explicit(&postinit_local_lock,
+                                              memory_order_acquire)) {
+        usleep(1000);
+    }
+}
+
+static void unlock_postinit_local(void) {
+    atomic_flag_clear_explicit(&postinit_local_lock, memory_order_release);
+}
+
 int fix_lock_shrreg() {
     int res = 1;
     if (region_info.fd == -1) {
@@ -818,45 +879,34 @@ void unlock_shrreg() {
 }
 
 int lock_postinit() {
-    shared_region_t* region = region_info.shared_region;
-    int trials = 0;
-    while (1) {
-        // CRITICAL: Create fresh timeout for each iteration!
-        // If created outside loop, timestamp becomes stale after first timeout
-        // Use longer timeout for postinit since set_task_pid() can take several seconds
-        struct timespec sem_ts;
-        get_timespec(SEM_WAIT_TIME_POSTINIT, &sem_ts);
-
-        int status = sem_timedwait(&region->sem_postinit, &sem_ts);
-        if (status == 0) {
-            // Lock acquired successfully
-            LOG_DEBUG("Acquired postinit lock after %d waits (PID %d)", trials, getpid());
-            return 1;  // Success
-        } else if (errno == ETIMEDOUT) {
-            trials++;
-            LOG_MSG("Waiting for postinit lock (trial %d/%d, waited %ds, PID %d)",
-                    trials, SEM_WAIT_RETRY_TIMES_POSTINIT, trials * SEM_WAIT_TIME_POSTINIT, getpid());
-
-            // After many retries, give up
-            if (trials > SEM_WAIT_RETRY_TIMES_POSTINIT) {
-                LOG_ERROR("Postinit lock timeout after %d seconds - another process may have crashed",
-                          SEM_WAIT_RETRY_TIMES_POSTINIT * SEM_WAIT_TIME_POSTINIT);
-                LOG_ERROR("Skipping host PID detection for this process (will use container PID)");
-                return 0;  // Timeout - didn't acquire lock
-            }
-            continue;
-        } else {
-            LOG_ERROR("Failed to lock postinit semaphore: errno=%d", errno);
-            // Don't give up - keep retrying
-            trials++;
-            continue;
-        }
+    if (postinit_lock_held) {
+        LOG_ERROR("Postinit lock cannot be acquired recursively");
+        return 0;
     }
+    lock_postinit_local();
+    if (!postinit_file_lock(F_WRLCK)) {
+        unlock_postinit_local();
+        return 0;
+    }
+    postinit_lock_held = 1;
+    LOG_DEBUG("Acquired postinit file lock (PID %d)", getpid());
+    return 1;
 }
 
 void unlock_postinit() {
-    shared_region_t* region = region_info.shared_region;
-    sem_post(&region->sem_postinit);
+    if (!postinit_lock_held) {
+        LOG_ERROR("Postinit unlock attempted by a thread that does not hold the lock");
+        return;
+    }
+    if (!postinit_file_lock(F_UNLCK)) {
+        /*
+         * Keep the local guard held.  POSIX record locks are process-wide, so
+         * letting another thread proceed could overlap the still-held lock.
+         */
+        return;
+    }
+    postinit_lock_held = 0;
+    unlock_postinit_local();
 }
 
 
@@ -1024,6 +1074,8 @@ void print_all() {
 void child_reinit_flag() {
     LOG_DEBUG("Detect child pid: %d -> %d", region_info.pid, getpid());   
     region_info.init_status = PTHREAD_ONCE_INIT;
+    postinit_lock_held = 0;
+    atomic_flag_clear_explicit(&postinit_local_lock, memory_order_release);
 }
 
 int set_active_oom_killer() {
