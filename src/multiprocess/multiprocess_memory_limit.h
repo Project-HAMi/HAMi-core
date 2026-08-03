@@ -109,7 +109,7 @@ typedef struct {
     _Atomic int recent_kernel;
     int priority;
     _Atomic uint64_t last_kernel_time;
-    sem_t sem_postinit;  // For serializing postInit() host PID detection
+    sem_t sem_postinit;  // Retained for shared-region layout compatibility
 } shared_region_t;
 
 typedef struct {
@@ -170,7 +170,7 @@ int init_device_info();
 void lock_shrreg();
 void unlock_shrreg();
 
-int lock_postinit();  // Returns 1 on success, 0 on timeout
+int lock_postinit();  // Returns 1 on success, 0 on lock error
 void unlock_postinit();
 
 //Setspec of the corresponding device
