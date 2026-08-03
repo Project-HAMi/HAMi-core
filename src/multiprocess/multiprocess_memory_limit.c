@@ -1075,8 +1075,54 @@ void try_create_shrreg() {
     umask(0);
 
     char* shr_reg_file = getenv(MULTIPROCESS_SHARED_REGION_CACHE_ENV);
+    static char synthesized_container_dir[PATH_MAX];
+    static char synthesized_cache_path[PATH_MAX];
+    int shr_reg_file_synthesized = 0;
     if (shr_reg_file == NULL) {
-        shr_reg_file = MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT;
+        const char* hook_path      = getenv(MULTIPROCESS_SHARED_REGION_HOOK_PATH_ENV);
+        const char* pod_uid        = getenv(MULTIPROCESS_SHARED_REGION_POD_UID_ENV);
+        const char* container_name = getenv(MULTIPROCESS_SHARED_REGION_CONTAINER_NAME_ENV);
+
+        if (hook_path == NULL || hook_path[0] == '\0') {
+            hook_path = MULTIPROCESS_SHARED_REGION_HOOK_PATH_DEFAULT;
+        }
+
+        if (pod_uid != NULL && pod_uid[0] != '\0' &&
+            container_name != NULL && container_name[0] != '\0') {
+            int dir_written = snprintf(synthesized_container_dir, sizeof(synthesized_container_dir),
+                                        "%s/containers/%s_%s",
+                                        hook_path, pod_uid, container_name);
+            int file_written = -1;
+            if (dir_written >= 0 && (size_t)dir_written < sizeof(synthesized_container_dir)) {
+                file_written = snprintf(synthesized_cache_path, sizeof(synthesized_cache_path),
+                                         "%s/usage.cache", synthesized_container_dir);
+            }
+            if (dir_written < 0 || (size_t)dir_written >= sizeof(synthesized_container_dir) ||
+                file_written < 0 || (size_t)file_written >= sizeof(synthesized_cache_path)) {
+                LOG_WARN("Synthesized shrreg cache path was truncated or invalid "
+                         "(hook_path=%s, pod_uid=%s, container_name=%s), "
+                         "using default: %s",
+                         hook_path, pod_uid, container_name,
+                         MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT);
+                shr_reg_file = MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT;
+            } else if (mkdir(synthesized_container_dir, 0777) != 0 && errno != EEXIST) {
+                LOG_WARN("Fail to create synthesized container dir %s: errno=%d, "
+                         "using default cache path: %s",
+                         synthesized_container_dir, errno,
+                         MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT);
+                shr_reg_file = MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT;
+            } else {
+                shr_reg_file = synthesized_cache_path;
+                shr_reg_file_synthesized = 1;
+                LOG_INFO("CUDA_DEVICE_MEMORY_SHARED_CACHE not set, "
+                         "synthesized: %s", shr_reg_file);
+            }
+        } else {
+            shr_reg_file = MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT;
+            LOG_WARN("CUDA_DEVICE_MEMORY_SHARED_CACHE not set and "
+                     "POD_UID/CONTAINER_NAME unavailable, "
+                     "using default: %s", shr_reg_file);
+        }
     }
     // Initialize NVML BEFORE!! open it
     //nvmlInit();
@@ -1085,6 +1131,13 @@ void try_create_shrreg() {
     /* ... set_sm_scale */
 
     int fd = open(shr_reg_file, O_RDWR | O_CREAT, 0666);
+    if (fd == -1 && shr_reg_file_synthesized) {
+        LOG_WARN("Fail to open synthesized shrreg %s: errno=%d, "
+                 "falling back to default cache path: %s",
+                 shr_reg_file, errno, MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT);
+        shr_reg_file = MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT;
+        fd = open(shr_reg_file, O_RDWR | O_CREAT, 0666);
+    }
     if (fd == -1) {
         LOG_ERROR("Fail to open shrreg %s: errno=%d", shr_reg_file, errno);
         goto fail;
