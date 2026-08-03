@@ -90,6 +90,9 @@ static int wait_for_fd(int fd, short events,
         if (result < 0) {
             return -1;
         }
+        if (remaining_ms(deadline) < 0) {
+            return -1;
+        }
         if ((descriptor.revents & POLLNVAL) != 0) {
             errno = EBADF;
             return -1;
@@ -104,15 +107,24 @@ static int connect_before_deadline(int fd,
                                    const struct sockaddr_un *address,
                                    socklen_t address_length,
                                    const struct timespec *deadline) {
-    int result = connect(fd, (const struct sockaddr *)address,
-                         address_length);
+    int result;
     int socket_error = 0;
     socklen_t error_length = sizeof(socket_error);
 
+    do {
+        if (remaining_ms(deadline) < 0) {
+            return -1;
+        }
+        result = connect(fd, (const struct sockaddr *)address,
+                         address_length);
+    } while (result < 0 && errno == EINTR);
     if (result == 0) {
-        return 0;
+        return remaining_ms(deadline) < 0 ? -1 : 0;
     }
-    if (errno != EINPROGRESS && errno != EAGAIN) {
+    if (errno == EISCONN) {
+        return remaining_ms(deadline) < 0 ? -1 : 0;
+    }
+    if (errno != EINPROGRESS && errno != EALREADY && errno != EAGAIN) {
         return -1;
     }
     if (wait_for_fd(fd, POLLOUT, deadline) != 0) {
@@ -126,13 +138,16 @@ static int connect_before_deadline(int fd,
         errno = socket_error;
         return -1;
     }
-    return 0;
+    return remaining_ms(deadline) < 0 ? -1 : 0;
 }
 
 static int write_before_deadline(int fd, const unsigned char *buffer,
                                  size_t length,
                                  const struct timespec *deadline) {
     while (length > 0) {
+        if (remaining_ms(deadline) < 0) {
+            return -1;
+        }
         ssize_t written = send(fd, buffer, length,
                                MSG_DONTWAIT | MSG_NOSIGNAL);
 
@@ -155,12 +170,15 @@ static int write_before_deadline(int fd, const unsigned char *buffer,
         }
         return -1;
     }
-    return 0;
+    return remaining_ms(deadline) < 0 ? -1 : 0;
 }
 
 static int read_before_deadline(int fd, unsigned char *buffer, size_t length,
                                 const struct timespec *deadline) {
     while (length > 0) {
+        if (remaining_ms(deadline) < 0) {
+            return -1;
+        }
         ssize_t received = recv(fd, buffer, length, MSG_DONTWAIT);
 
         if (received > 0) {
@@ -182,7 +200,7 @@ static int read_before_deadline(int fd, unsigned char *buffer, size_t length,
         }
         return -1;
     }
-    return 0;
+    return remaining_ms(deadline) < 0 ? -1 : 0;
 }
 
 static uint16_t read_u16(const unsigned char *buffer) {

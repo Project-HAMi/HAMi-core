@@ -174,13 +174,15 @@ static int make_listener(char *socket_path, size_t socket_path_size,
     return listener;
 }
 
-static void run_query_case(server_action_t action, int expected_result,
+static long run_query_case(server_action_t action, int expected_result,
                            int expected_errno, pid_t expected_pid) {
     char directory[PATH_MAX];
     char socket_path[PATH_MAX];
     pid_t child;
     pid_t host_pid = 99;
     int status;
+    struct timespec query_begin;
+    struct timespec query_end;
     int listener = make_listener(socket_path, sizeof(socket_path),
                                  directory, sizeof(directory));
 
@@ -196,7 +198,9 @@ static void run_query_case(server_action_t action, int expected_result,
     }
 
     errno = 0;
+    assert(clock_gettime(CLOCK_MONOTONIC, &query_begin) == 0);
     assert(hostpid_broker_query(socket_path, &host_pid) == expected_result);
+    assert(clock_gettime(CLOCK_MONOTONIC, &query_end) == 0);
     if (expected_result == 0) {
         assert(host_pid == expected_pid);
     } else {
@@ -210,6 +214,8 @@ static void run_query_case(server_action_t action, int expected_result,
     assert(WEXITSTATUS(status) == 0);
     assert(unlink(socket_path) == 0);
     assert(rmdir(directory) == 0);
+    return (query_end.tv_sec - query_begin.tv_sec) * 1000L +
+           (query_end.tv_nsec - query_begin.tv_nsec) / 1000000L;
 }
 
 static void test_protocol(void) {
@@ -223,17 +229,12 @@ static void test_protocol(void) {
 }
 
 static void test_absolute_timeout(void) {
-    struct timespec begin;
-    struct timespec end;
     long elapsed_ms;
 
-    assert(clock_gettime(CLOCK_MONOTONIC, &begin) == 0);
-    run_query_case(serve_trickle_response, -1, ETIMEDOUT, 0);
-    assert(clock_gettime(CLOCK_MONOTONIC, &end) == 0);
-    elapsed_ms = (end.tv_sec - begin.tv_sec) * 1000L +
-                 (end.tv_nsec - begin.tv_nsec) / 1000000L;
+    elapsed_ms = run_query_case(serve_trickle_response, -1,
+                                ETIMEDOUT, 0);
     assert(elapsed_ms >= 80);
-    assert(elapsed_ms < 500);
+    assert(elapsed_ms < 300);
 }
 
 static void test_missing_socket(void) {
@@ -250,6 +251,16 @@ static void test_missing_socket(void) {
     assert(hostpid_broker_query(NULL, &host_pid) == -1);
     assert(host_pid == 0);
     assert(errno == EINVAL);
+
+    char long_path[sizeof(((struct sockaddr_un *)0)->sun_path) + 2];
+    memset(long_path, 'a', sizeof(long_path));
+    long_path[0] = '/';
+    long_path[sizeof(long_path) - 1] = '\0';
+    host_pid = 99;
+    errno = 0;
+    assert(hostpid_broker_query(long_path, &host_pid) == -1);
+    assert(host_pid == 0);
+    assert(errno == ENAMETOOLONG);
 }
 
 static void test_trust_validation(void) {

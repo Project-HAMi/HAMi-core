@@ -62,6 +62,13 @@ add_test(NAME postinit_owner_death
     COMMAND test_postinit_owner_death)
 set_tests_properties(postinit_owner_death PROPERTIES TIMEOUT 20)
 
+add_test(NAME context_accounting
+    COMMAND test_context_accounting)
+add_test(NAME hostpid_broker
+    COMMAND test_hostpid_broker)
+set_tests_properties(context_accounting hostpid_broker
+    PROPERTIES TIMEOUT 5)
+
 
 add_custom_target(python_test ALL
     COMMAND cp -r ${CMAKE_CURRENT_SOURCE_DIR}/python ${CMAKE_CURRENT_BINARY_DIR})
