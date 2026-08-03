@@ -136,6 +136,7 @@ int set_current_device_sm_limit(int dev,int scale);
 int set_current_device_sm_limit_scale(int dev,int scale);
 int update_host_pid();
 int set_host_pid(int hostpid);
+int get_current_host_pid(void);
 
 uint64_t get_current_device_memory_monitor(const int dev);
 uint64_t get_current_device_memory_usage(const int dev);

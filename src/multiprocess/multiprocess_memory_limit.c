@@ -1367,6 +1367,36 @@ int update_host_pid() {
     return 0;
 }
 
+int get_current_host_pid(void) {
+    int32_t current_pid = getpid();
+    int proc_num;
+    int i;
+
+    if (region_info.shared_region == NULL ||
+        region_info.shared_region == MAP_FAILED) {
+        return 0;
+    }
+
+    if (region_info.my_slot != NULL &&
+        atomic_load_explicit(&region_info.my_slot->pid,
+                             memory_order_acquire) == current_pid) {
+        return atomic_load_explicit(&region_info.my_slot->hostpid,
+                                    memory_order_acquire);
+    }
+
+    proc_num = atomic_load_explicit(&region_info.shared_region->proc_num,
+                                    memory_order_acquire);
+    for (i = 0; i < proc_num; i++) {
+        if (atomic_load_explicit(&region_info.shared_region->procs[i].pid,
+                                 memory_order_acquire) == current_pid) {
+            return atomic_load_explicit(
+                &region_info.shared_region->procs[i].hostpid,
+                memory_order_acquire);
+        }
+    }
+    return 0;
+}
+
 int set_host_pid(int hostpid) {
     int i,j,found=0;
     for (i=0;i<region_info.shared_region->proc_num;i++){

@@ -2,6 +2,7 @@
 #include <string.h>
 #include <dirent.h>
 #include <ctype.h>
+#include <stdlib.h>
 #include <time.h>
 #include <sys/file.h>
 #include "include/utils.h"
@@ -93,6 +94,67 @@ int getextrapid(unsigned int prev, unsigned int current, nvmlProcessInfo_t1 *pre
             return pids_on_device[i].pid;
     }
     return 0;
+}
+
+nvmlReturn_t get_used_gpu_memory_by_pid(unsigned int process_pid, int cudadev,
+                                        unsigned long long *used) {
+    nvmlProcessInfo_v1_t *processes = NULL;
+    nvmlDevice_t device;
+    nvmlReturn_t result;
+    unsigned int count = SHARED_REGION_MAX_PROCESS_NUM;
+    unsigned int i;
+    int nvmldev;
+
+    if (used == NULL || process_pid == 0) {
+        return NVML_ERROR_INVALID_ARGUMENT;
+    }
+    *used = 0;
+    nvmldev = cuda_to_nvml_map(cudadev);
+    if (nvmldev < 0) {
+        return NVML_ERROR_INVALID_ARGUMENT;
+    }
+
+    result = nvmlInit();
+    if (result != NVML_SUCCESS) {
+        return result;
+    }
+    result = nvmlDeviceGetHandleByIndex(nvmldev, &device);
+    if (result != NVML_SUCCESS) {
+        return result;
+    }
+
+    processes = calloc(count, sizeof(*processes));
+    if (processes == NULL) {
+        return NVML_ERROR_MEMORY;
+    }
+    result = nvmlDeviceGetComputeRunningProcesses(device, &count, processes);
+    if (result == NVML_ERROR_INSUFFICIENT_SIZE && count > 0) {
+        nvmlProcessInfo_v1_t *larger =
+            realloc(processes, count * sizeof(*processes));
+        if (larger == NULL) {
+            free(processes);
+            return NVML_ERROR_MEMORY;
+        }
+        processes = larger;
+        result =
+            nvmlDeviceGetComputeRunningProcesses(device, &count, processes);
+    }
+    if (result != NVML_SUCCESS) {
+        free(processes);
+        return result;
+    }
+
+    result = NVML_ERROR_NOT_FOUND;
+    for (i = 0; i < count; i++) {
+        if (processes[i].pid == process_pid &&
+            processes[i].usedGpuMemory != NVML_VALUE_NOT_AVAILABLE) {
+            *used = processes[i].usedGpuMemory;
+            result = NVML_SUCCESS;
+            break;
+        }
+    }
+    free(processes);
+    return result;
 }
 
 nvmlReturn_t set_task_pid() {
