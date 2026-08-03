@@ -15,6 +15,11 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     if (TEST_TARGET_NAME STREQUAL "test_context_accounting")
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/context_accounting.c)
+    elseif (TEST_TARGET_NAME STREQUAL "test_hostpid_broker")
+        add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_broker.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE HOSTPID_TIMEOUT_MS=100)
     elseif (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
         # Build this focused regression test with the production shared-region
         # implementation.  It does not invoke any CUDA/NVML entry point at
@@ -37,7 +42,9 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     endif()
 
     list(APPEND TEST_TARGET_NAMES_LIST ${TEST_TARGET_NAME})
-    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
+    if (TEST_TARGET_NAME STREQUAL "test_context_accounting" OR
+        TEST_TARGET_NAME STREQUAL "test_hostpid_broker" OR
+        TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     else()
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread
