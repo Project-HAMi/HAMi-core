@@ -12,7 +12,10 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     get_filename_component(TEST_TARGET_NAME ${RELATIVE_TEST_PATH} NAME_WE)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${TEST_TARGET_DIR})
 
-    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
+    if (TEST_TARGET_NAME STREQUAL "test_context_accounting")
+        add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/context_accounting.c)
+    elseif (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
         # Build this focused regression test with the production shared-region
         # implementation.  It does not invoke any CUDA/NVML entry point at
         # runtime.  Section garbage collection drops unrelated GPU-facing
