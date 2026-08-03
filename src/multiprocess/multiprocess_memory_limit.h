@@ -26,6 +26,10 @@
 #define MULTIPROCESS_SHARED_REGION_MAGIC_FLAG  19920718
 #define MULTIPROCESS_SHARED_REGION_CACHE_ENV   "CUDA_DEVICE_MEMORY_SHARED_CACHE"
 #define MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT  "/tmp/cudevshr.cache"
+#define MULTIPROCESS_SHARED_REGION_HOOK_PATH_ENV     "CONTAINER_VGPU_MOUNT"
+#define MULTIPROCESS_SHARED_REGION_HOOK_PATH_DEFAULT "/usr/local/vgpu"
+#define MULTIPROCESS_SHARED_REGION_POD_UID_ENV        "POD_UID"
+#define MULTIPROCESS_SHARED_REGION_CONTAINER_NAME_ENV "CONTAINER_NAME"
 #define ENV_OVERRIDE_FILE "/overrideEnv"
 #define CUDA_TASK_PRIORITY_ENV "CUDA_TASK_PRIORITY"
 
@@ -109,7 +113,7 @@ typedef struct {
     _Atomic int recent_kernel;
     int priority;
     _Atomic uint64_t last_kernel_time;
-    sem_t sem_postinit;  // For serializing postInit() host PID detection
+    sem_t sem_postinit;  // Retained for shared-region layout compatibility
 } shared_region_t;
 
 typedef struct {
@@ -170,7 +174,7 @@ int init_device_info();
 void lock_shrreg();
 void unlock_shrreg();
 
-int lock_postinit();  // Returns 1 on success, 0 on timeout
+int lock_postinit();  // Returns 1 on success, 0 on lock error
 void unlock_postinit();
 
 //Setspec of the corresponding device

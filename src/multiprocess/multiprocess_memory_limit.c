@@ -34,20 +34,20 @@
 #define SEM_WAIT_RETRY_TIMES 30
 #endif
 
-// Longer timeout for postinit since set_task_pid() with adaptive polling can take several seconds
-#ifndef SEM_WAIT_TIME_POSTINIT
-#define SEM_WAIT_TIME_POSTINIT 30
-#endif
+#define POSTINIT_FILE_LOCK_OFFSET ((off_t)UINT64_C(0x40000000))
+#define POSTINIT_FILE_LOCK_INITIAL_RETRY_US 10000U
+#define POSTINIT_FILE_LOCK_MAX_RETRY_US 1000000U
 
-#ifndef SEM_WAIT_RETRY_TIMES_POSTINIT
-#define SEM_WAIT_RETRY_TIMES_POSTINIT 10
-#endif
+_Static_assert(POSTINIT_FILE_LOCK_OFFSET > (off_t)sizeof(shared_region_t),
+               "postinit file lock must remain outside the shared region");
 
 int pidfound;
 
 int ctx_activate[32];
 
 static shared_region_info_t region_info = {0, -1, PTHREAD_ONCE_INIT, NULL, 0, NULL};
+static atomic_flag postinit_local_lock = ATOMIC_FLAG_INIT;
+static _Thread_local int postinit_lock_held;
 // size_t initial_offset=117440512;
 int env_utilization_switch;
 int enable_active_oom_killer;
@@ -600,6 +600,113 @@ void get_timespec(int seconds, struct timespec* spec) {
     spec->tv_nsec = 0;
 }
 
+/*
+ * sem_postinit remains in shared_region_t to preserve its layout, but an
+ * unnamed semaphore cannot recover when its holder dies.  Serialize postInit
+ * with a POSIX record lock instead: the kernel releases it when the process
+ * exits, including on SIGKILL, and does not inherit it across fork.
+ *
+ * The byte is outside the mapped shared-region layout.  Its fixed offset does
+ * not depend on sizeof(shared_region_t), so future layouts address the same
+ * byte.  Processes sharing one cache must all use this protocol; a sem-only
+ * binary does not participate in the record lock.
+ */
+static void postinit_file_lock_backoff(unsigned int backoff_us,
+                                       uint32_t* jitter_state) {
+    struct timespec delay;
+    unsigned int minimum_us = backoff_us / 2;
+    unsigned int jitter_range_us = backoff_us - minimum_us;
+
+    *jitter_state = *jitter_state * UINT32_C(1103515245) + UINT32_C(12345);
+    unsigned int delay_us = minimum_us +
+                            *jitter_state % (jitter_range_us + 1);
+    delay.tv_sec = delay_us / 1000000U;
+    delay.tv_nsec = (long)(delay_us % 1000000U) * 1000L;
+    while (nanosleep(&delay, &delay) != 0 && errno == EINTR) {
+    }
+}
+
+static uint32_t postinit_file_lock_jitter_seed(void) {
+    struct timespec now;
+    uint32_t seed = (uint32_t)getpid();
+
+    if (clock_gettime(CLOCK_MONOTONIC, &now) == 0) {
+        seed ^= (uint32_t)now.tv_sec;
+        seed ^= (uint32_t)now.tv_nsec;
+    }
+    return seed;
+}
+
+static int postinit_file_lock(short lock_type) {
+    struct flock lock = {
+        .l_type = lock_type,
+        .l_whence = SEEK_SET,
+        .l_start = POSTINIT_FILE_LOCK_OFFSET,
+        .l_len = 1,
+    };
+    int status;
+
+    if (lock_type == F_WRLCK) {
+        unsigned int retry_delay_us = POSTINIT_FILE_LOCK_INITIAL_RETRY_US;
+        uint32_t retry_jitter = postinit_file_lock_jitter_seed();
+        int waiting_logged = 0;
+
+        /*
+         * A live owner is never bypassed: skipping host PID detection also
+         * skips SM rate limiting for the process.
+         *
+         * Use nonblocking requests instead of F_SETLKW.  Some NFS lock
+         * managers defer grants to blocked requests for tens of seconds
+         * after the owner exits even though fresh requests can acquire the
+         * released lock immediately.
+         */
+        for (;;) {
+            do {
+                status = fcntl(region_info.fd, F_SETLK, &lock);
+            } while (status != 0 && errno == EINTR);
+            if (status == 0) {
+                return 1;
+            }
+            if (errno != EACCES && errno != EAGAIN) {
+                LOG_ERROR("Failed to acquire postinit file lock: errno=%d",
+                          errno);
+                return 0;
+            }
+            if (!waiting_logged) {
+                LOG_MSG("Waiting for postinit file lock (PID %d)", getpid());
+                waiting_logged = 1;
+            }
+            postinit_file_lock_backoff(retry_delay_us, &retry_jitter);
+            if (retry_delay_us < POSTINIT_FILE_LOCK_MAX_RETRY_US / 2) {
+                retry_delay_us *= 2;
+            } else {
+                retry_delay_us = POSTINIT_FILE_LOCK_MAX_RETRY_US;
+            }
+        }
+    } else {
+        do {
+            status = fcntl(region_info.fd, F_SETLK, &lock);
+        } while (status != 0 && errno == EINTR);
+    }
+    if (status != 0) {
+        LOG_ERROR("Failed to %s postinit file lock: errno=%d",
+                  lock_type == F_UNLCK ? "release" : "acquire", errno);
+        return 0;
+    }
+    return 1;
+}
+
+static void lock_postinit_local(void) {
+    while (atomic_flag_test_and_set_explicit(&postinit_local_lock,
+                                              memory_order_acquire)) {
+        usleep(1000);
+    }
+}
+
+static void unlock_postinit_local(void) {
+    atomic_flag_clear_explicit(&postinit_local_lock, memory_order_release);
+}
+
 int fix_lock_shrreg() {
     int res = 1;
     if (region_info.fd == -1) {
@@ -819,45 +926,34 @@ void unlock_shrreg() {
 }
 
 int lock_postinit() {
-    shared_region_t* region = region_info.shared_region;
-    int trials = 0;
-    while (1) {
-        // CRITICAL: Create fresh timeout for each iteration!
-        // If created outside loop, timestamp becomes stale after first timeout
-        // Use longer timeout for postinit since set_task_pid() can take several seconds
-        struct timespec sem_ts;
-        get_timespec(SEM_WAIT_TIME_POSTINIT, &sem_ts);
-
-        int status = sem_timedwait(&region->sem_postinit, &sem_ts);
-        if (status == 0) {
-            // Lock acquired successfully
-            LOG_DEBUG("Acquired postinit lock after %d waits (PID %d)", trials, getpid());
-            return 1;  // Success
-        } else if (errno == ETIMEDOUT) {
-            trials++;
-            LOG_MSG("Waiting for postinit lock (trial %d/%d, waited %ds, PID %d)",
-                    trials, SEM_WAIT_RETRY_TIMES_POSTINIT, trials * SEM_WAIT_TIME_POSTINIT, getpid());
-
-            // After many retries, give up
-            if (trials > SEM_WAIT_RETRY_TIMES_POSTINIT) {
-                LOG_ERROR("Postinit lock timeout after %d seconds - another process may have crashed",
-                          SEM_WAIT_RETRY_TIMES_POSTINIT * SEM_WAIT_TIME_POSTINIT);
-                LOG_ERROR("Skipping host PID detection for this process (will use container PID)");
-                return 0;  // Timeout - didn't acquire lock
-            }
-            continue;
-        } else {
-            LOG_ERROR("Failed to lock postinit semaphore: errno=%d", errno);
-            // Don't give up - keep retrying
-            trials++;
-            continue;
-        }
+    if (postinit_lock_held) {
+        LOG_ERROR("Postinit lock cannot be acquired recursively");
+        return 0;
     }
+    lock_postinit_local();
+    if (!postinit_file_lock(F_WRLCK)) {
+        unlock_postinit_local();
+        return 0;
+    }
+    postinit_lock_held = 1;
+    LOG_DEBUG("Acquired postinit file lock (PID %d)", getpid());
+    return 1;
 }
 
 void unlock_postinit() {
-    shared_region_t* region = region_info.shared_region;
-    sem_post(&region->sem_postinit);
+    if (!postinit_lock_held) {
+        LOG_ERROR("Postinit unlock attempted by a thread that does not hold the lock");
+        return;
+    }
+    if (!postinit_file_lock(F_UNLCK)) {
+        /*
+         * Keep the local guard held.  POSIX record locks are process-wide, so
+         * letting another thread proceed could overlap the still-held lock.
+         */
+        return;
+    }
+    postinit_lock_held = 0;
+    unlock_postinit_local();
 }
 
 
@@ -1025,6 +1121,8 @@ void print_all() {
 void child_reinit_flag() {
     LOG_DEBUG("Detect child pid: %d -> %d", region_info.pid, getpid());   
     region_info.init_status = PTHREAD_ONCE_INIT;
+    postinit_lock_held = 0;
+    atomic_flag_clear_explicit(&postinit_local_lock, memory_order_release);
 }
 
 int set_active_oom_killer() {
@@ -1076,8 +1174,54 @@ void try_create_shrreg() {
     umask(0);
 
     char* shr_reg_file = getenv(MULTIPROCESS_SHARED_REGION_CACHE_ENV);
+    static char synthesized_container_dir[PATH_MAX];
+    static char synthesized_cache_path[PATH_MAX];
+    int shr_reg_file_synthesized = 0;
     if (shr_reg_file == NULL) {
-        shr_reg_file = MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT;
+        const char* hook_path      = getenv(MULTIPROCESS_SHARED_REGION_HOOK_PATH_ENV);
+        const char* pod_uid        = getenv(MULTIPROCESS_SHARED_REGION_POD_UID_ENV);
+        const char* container_name = getenv(MULTIPROCESS_SHARED_REGION_CONTAINER_NAME_ENV);
+
+        if (hook_path == NULL || hook_path[0] == '\0') {
+            hook_path = MULTIPROCESS_SHARED_REGION_HOOK_PATH_DEFAULT;
+        }
+
+        if (pod_uid != NULL && pod_uid[0] != '\0' &&
+            container_name != NULL && container_name[0] != '\0') {
+            int dir_written = snprintf(synthesized_container_dir, sizeof(synthesized_container_dir),
+                                        "%s/containers/%s_%s",
+                                        hook_path, pod_uid, container_name);
+            int file_written = -1;
+            if (dir_written >= 0 && (size_t)dir_written < sizeof(synthesized_container_dir)) {
+                file_written = snprintf(synthesized_cache_path, sizeof(synthesized_cache_path),
+                                         "%s/usage.cache", synthesized_container_dir);
+            }
+            if (dir_written < 0 || (size_t)dir_written >= sizeof(synthesized_container_dir) ||
+                file_written < 0 || (size_t)file_written >= sizeof(synthesized_cache_path)) {
+                LOG_WARN("Synthesized shrreg cache path was truncated or invalid "
+                         "(hook_path=%s, pod_uid=%s, container_name=%s), "
+                         "using default: %s",
+                         hook_path, pod_uid, container_name,
+                         MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT);
+                shr_reg_file = MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT;
+            } else if (mkdir(synthesized_container_dir, 0777) != 0 && errno != EEXIST) {
+                LOG_WARN("Fail to create synthesized container dir %s: errno=%d, "
+                         "using default cache path: %s",
+                         synthesized_container_dir, errno,
+                         MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT);
+                shr_reg_file = MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT;
+            } else {
+                shr_reg_file = synthesized_cache_path;
+                shr_reg_file_synthesized = 1;
+                LOG_INFO("CUDA_DEVICE_MEMORY_SHARED_CACHE not set, "
+                         "synthesized: %s", shr_reg_file);
+            }
+        } else {
+            shr_reg_file = MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT;
+            LOG_WARN("CUDA_DEVICE_MEMORY_SHARED_CACHE not set and "
+                     "POD_UID/CONTAINER_NAME unavailable, "
+                     "using default: %s", shr_reg_file);
+        }
     }
     // Initialize NVML BEFORE!! open it
     //nvmlInit();
@@ -1086,6 +1230,13 @@ void try_create_shrreg() {
     /* ... set_sm_scale */
 
     int fd = open(shr_reg_file, O_RDWR | O_CREAT, 0666);
+    if (fd == -1 && shr_reg_file_synthesized) {
+        LOG_WARN("Fail to open synthesized shrreg %s: errno=%d, "
+                 "falling back to default cache path: %s",
+                 shr_reg_file, errno, MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT);
+        shr_reg_file = MULTIPROCESS_SHARED_REGION_CACHE_DEFAULT;
+        fd = open(shr_reg_file, O_RDWR | O_CREAT, 0666);
+    }
     if (fd == -1) {
         LOG_ERROR("Fail to open shrreg %s: errno=%d", shr_reg_file, errno);
         goto fail;
