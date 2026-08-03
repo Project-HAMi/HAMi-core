@@ -23,6 +23,7 @@ void context_accounting_fork_parent() {
 void context_accounting_fork_child() {
     int dev;
 
+    context_size = 0;
     for (dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
         context_accounting[dev].retain_count = 0;
         context_accounting[dev].charged_bytes = 0;

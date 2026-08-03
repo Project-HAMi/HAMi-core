@@ -898,16 +898,18 @@ void postInit(){
     allocator_init();
     map_cuda_visible_devices();
 
-    // Use the process-death-safe shared file lock to serialize host PID detection
-    int lock_acquired = lock_postinit();
-    nvmlReturn_t res = NVML_SUCCESS;
-
-    if (lock_acquired) {
-        res = set_task_pid();
-        unlock_postinit();
-    } else {
-        LOG_WARN("Skipped host PID detection because the postinit lock failed");
-        res = NVML_ERROR_UNKNOWN;
+    nvmlReturn_t res = set_task_pid_from_broker();
+    if (res != NVML_SUCCESS) {
+        // Serialize the NVML fallback so each process sees its own new PID.
+        int lock_acquired = lock_postinit();
+        if (lock_acquired) {
+            res = set_task_pid();
+            unlock_postinit();
+        } else {
+            LOG_WARN("Skipped host PID detection because the postinit "
+                     "lock failed");
+            res = NVML_ERROR_UNKNOWN;
+        }
     }
 
     LOG_MSG("Initialized");
