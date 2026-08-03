@@ -108,7 +108,7 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
         }
     }
     ctx_activate[dev] = (int)context_accounting[dev].retain_count;
-    if (context_accounting[dev].retain_count == 1 &&
+    if (pidfound == 1 && context_accounting[dev].retain_count == 1 &&
         context_accounting[dev].charged_bytes == 0) {
         LOG_WARN("Primary context memory is not accounted for on device %d",
                  dev);
