@@ -20,7 +20,7 @@ NFS or other network filesystems.
 
 ## Build
 
-    gcc -O2 -Wall -Wextra owner_death_bench.c -o owner_death_bench
+    gcc -x c -O2 -Wall -Wextra owner_death_bench.c.txt -o owner_death_bench
 
 ## Run
 
