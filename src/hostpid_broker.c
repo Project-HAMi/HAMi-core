@@ -32,6 +32,10 @@
 
 static const unsigned char hostpid_magic[4] = {'H', 'P', 'I', 'D'};
 
+int hostpid_broker_enabled(const char *value) {
+    return value != NULL && strcmp(value, "1") == 0;
+}
+
 static int deadline_after_ms(struct timespec *deadline, long timeout_ms) {
     if (clock_gettime(CLOCK_MONOTONIC, deadline) != 0) {
         return -1;
@@ -323,7 +327,11 @@ static int query_broker(const char *socket_path, pid_t *host_pid,
         return -1;
     }
     path_length = strlen(socket_path);
-    if (path_length == 0 || path_length >= sizeof(address.sun_path)) {
+    if (path_length == 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (path_length >= sizeof(address.sun_path)) {
         errno = ENAMETOOLONG;
         return -1;
     }

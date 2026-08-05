@@ -137,7 +137,11 @@ CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
                                            &bytes_to_remove) != 0) {
             LOG_WARN("Unbalanced primary context release on device %d", dev);
         } else if (bytes_to_remove > 0) {
-            rm_gpu_device_memory_usage(getpid(), dev, bytes_to_remove, 0);
+            if (rm_gpu_device_memory_usage(getpid(), dev, bytes_to_remove,
+                                           0) != 0) {
+                primary_context_restore_charge(&context_accounting[dev],
+                                               bytes_to_remove);
+            }
         }
         ctx_activate[dev] = (int)context_accounting[dev].retain_count;
     }

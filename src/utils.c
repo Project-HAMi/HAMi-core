@@ -102,8 +102,7 @@ nvmlReturn_t set_task_pid_from_broker() {
     const char *enabled = getenv("LIBVGPU_HOSTPID_BROKER");
     pid_t hostpid = 0;
 
-    if (enabled == NULL || enabled[0] == '\0' ||
-        strcmp(enabled, "0") == 0) {
+    if (!hostpid_broker_enabled(enabled)) {
         return NVML_ERROR_NOT_SUPPORTED;
     }
     if (hostpid_broker_query_trusted(HOSTPID_BROKER_SOCKET_PATH,

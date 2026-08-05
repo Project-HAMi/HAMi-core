@@ -252,6 +252,12 @@ static void test_missing_socket(void) {
     assert(host_pid == 0);
     assert(errno == EINVAL);
 
+    host_pid = 99;
+    errno = 0;
+    assert(hostpid_broker_query("", &host_pid) == -1);
+    assert(host_pid == 0);
+    assert(errno == EINVAL);
+
     char long_path[sizeof(((struct sockaddr_un *)0)->sun_path) + 2];
     memset(long_path, 'a', sizeof(long_path));
     long_path[0] = '/';
@@ -263,9 +269,23 @@ static void test_missing_socket(void) {
     assert(errno == ENAMETOOLONG);
 }
 
+static void test_enable_gate(void) {
+    assert(hostpid_broker_enabled("1") == 1);
+    assert(hostpid_broker_enabled(NULL) == 0);
+    assert(hostpid_broker_enabled("") == 0);
+    assert(hostpid_broker_enabled("0") == 0);
+    assert(hostpid_broker_enabled("true") == 0);
+    assert(hostpid_broker_enabled("false") == 0);
+    assert(hostpid_broker_enabled("01") == 0);
+    assert(hostpid_broker_enabled(" 1") == 0);
+}
+
 static void test_trust_validation(void) {
     char directory[PATH_MAX];
+    char directory_link[PATH_MAX];
+    char linked_socket_path[PATH_MAX];
     char socket_path[PATH_MAX];
+    int written;
     int listener = make_listener(socket_path, sizeof(socket_path),
                                  directory, sizeof(directory));
     uid_t owner = geteuid();
@@ -286,6 +306,18 @@ static void test_trust_validation(void) {
     errno = 0;
     assert(hostpid_broker_validate_trust(socket_path, owner, 1) == -1);
     assert(errno == EPERM);
+
+    written = snprintf(directory_link, sizeof(directory_link), "%s-link",
+                       directory);
+    assert(written > 0 && (size_t)written < sizeof(directory_link));
+    written = snprintf(linked_socket_path, sizeof(linked_socket_path),
+                       "%s/broker.sock", directory_link);
+    assert(written > 0 && (size_t)written < sizeof(linked_socket_path));
+    assert(symlink(directory, directory_link) == 0);
+    errno = 0;
+    assert(hostpid_broker_validate_trust(linked_socket_path, owner, 0) == -1);
+    assert(errno == ENOTSOCK);
+    assert(unlink(directory_link) == 0);
 
     close(listener);
     assert(unlink(socket_path) == 0);
@@ -319,6 +351,7 @@ int main(void) {
     test_protocol();
     test_absolute_timeout();
     test_missing_socket();
+    test_enable_gate();
     test_trust_validation();
     puts("host PID broker client tests passed");
     return 0;

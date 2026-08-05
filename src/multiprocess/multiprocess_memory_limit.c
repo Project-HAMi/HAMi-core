@@ -1386,6 +1386,12 @@ int get_current_host_pid(void) {
 
     proc_num = atomic_load_explicit(&region_info.shared_region->proc_num,
                                     memory_order_acquire);
+    if (proc_num < 0) {
+        return 0;
+    }
+    if (proc_num > SHARED_REGION_MAX_PROCESS_NUM) {
+        proc_num = SHARED_REGION_MAX_PROCESS_NUM;
+    }
     for (i = 0; i < proc_num; i++) {
         if (atomic_load_explicit(&region_info.shared_region->procs[i].pid,
                                  memory_order_acquire) == current_pid) {
@@ -1398,19 +1404,49 @@ int get_current_host_pid(void) {
 }
 
 int set_host_pid(int hostpid) {
-    int i,j,found=0;
-    for (i=0;i<region_info.shared_region->proc_num;i++){
-        if (region_info.shared_region->procs[i].pid == getpid()){
-            LOG_INFO("SET PID= %d",hostpid);
-            found=1;
-            region_info.shared_region->procs[i].hostpid = hostpid;
-            for (j=0;j<CUDA_DEVICE_MAX_COUNT;j++)
-                region_info.shared_region->procs[i].monitorused[j]=0;
+    shrreg_proc_slot_t *slot = NULL;
+    int32_t current_pid = getpid();
+    int proc_num;
+    int i;
+    int j;
+
+    if (hostpid <= 0 || region_info.shared_region == NULL ||
+        region_info.shared_region == MAP_FAILED) {
+        return -1;
+    }
+
+    if (region_info.my_slot != NULL &&
+        atomic_load_explicit(&region_info.my_slot->pid,
+                             memory_order_acquire) == current_pid) {
+        slot = region_info.my_slot;
+    } else {
+        proc_num = atomic_load_explicit(&region_info.shared_region->proc_num,
+                                        memory_order_acquire);
+        if (proc_num < 0) {
+            proc_num = 0;
+        } else if (proc_num > SHARED_REGION_MAX_PROCESS_NUM) {
+            proc_num = SHARED_REGION_MAX_PROCESS_NUM;
+        }
+        for (i = 0; i < proc_num; i++) {
+            if (atomic_load_explicit(
+                    &region_info.shared_region->procs[i].pid,
+                    memory_order_acquire) == current_pid) {
+                slot = &region_info.shared_region->procs[i];
+                break;
+            }
         }
     }
-    if (!found) {
+
+    if (slot == NULL) {
         LOG_ERROR("HOST PID NOT FOUND. %d",hostpid);
         return -1;
+    }
+
+    LOG_INFO("SET PID= %d", hostpid);
+    atomic_store_explicit(&slot->hostpid, hostpid, memory_order_release);
+    for (j = 0; j < CUDA_DEVICE_MAX_COUNT; j++) {
+        atomic_store_explicit(&slot->monitorused[j], 0,
+                              memory_order_release);
     }
     setspec();
     return 0;

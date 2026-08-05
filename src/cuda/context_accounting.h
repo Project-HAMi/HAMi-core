@@ -27,4 +27,8 @@ int primary_context_record_release(primary_context_accounting_t *state,
 /* Keep the retain count but forget a charge that could not be applied. */
 void primary_context_cancel_charge(primary_context_accounting_t *state);
 
+/* Restore a charge that could not be removed from shared accounting. */
+void primary_context_restore_charge(primary_context_accounting_t *state,
+                                    size_t context_bytes);
+
 #endif  // SRC_CUDA_CONTEXT_ACCOUNTING_H_
