@@ -43,7 +43,7 @@ _Static_assert(POSTINIT_FILE_LOCK_OFFSET > (off_t)sizeof(shared_region_t),
 
 int pidfound;
 
-int ctx_activate[32];
+int ctx_activate[CUDA_DEVICE_MAX_COUNT];
 
 static shared_region_info_t region_info = {0, -1, PTHREAD_ONCE_INIT, NULL, 0, NULL};
 static atomic_flag postinit_local_lock = ATOMIC_FLAG_INIT;
@@ -64,13 +64,20 @@ void exit_withlock(int exitcode);
 
 void set_current_gpu_status(int status){
     // Fast path: use cached slot if available
-    if (region_info.my_slot != NULL) {
+    if (region_info.my_slot != NULL &&
+        atomic_load_explicit(&region_info.my_slot->pid,
+                             memory_order_acquire) == getpid()) {
         atomic_store_explicit(&region_info.my_slot->status, status, memory_order_release);
         return;
     }
 
     // Slow path: search for our slot
     int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
+    if (proc_num < 0) {
+        proc_num = 0;
+    } else if (proc_num > SHARED_REGION_MAX_PROCESS_NUM) {
+        proc_num = SHARED_REGION_MAX_PROCESS_NUM;
+    }
     int i;
     int32_t my_pid = getpid();
     for (i = 0; i < proc_num; i++) {
@@ -450,13 +457,25 @@ uint64_t nvml_get_device_memory_usage(const int dev) {
 
 // Lock-free memory add using atomics with seqlock for consistent reads
 int add_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type) {
-    LOG_INFO("add_gpu_device_memory_lockfree:%d %d->%d %lu", pid, cudadev, cuda_to_nvml_map(cudadev), usage);
+    int dev;
 
-    int dev = cuda_to_nvml_map(cudadev);
     ensure_initialized();
+    if (cudadev < 0 || cudadev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_WARN("Invalid CUDA device %d", cudadev);
+        return -1;
+    }
+    dev = (int)cuda_to_nvml_map((unsigned int)cudadev);
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_WARN("Invalid NVML device mapping for CUDA device %d", cudadev);
+        return -1;
+    }
+    LOG_INFO("add_gpu_device_memory_lockfree:%d %d->%d %lu", pid,
+             cudadev, dev, usage);
 
     // Fast path: use cached slot pointer for our own process
-    if (pid == getpid() && region_info.my_slot != NULL) {
+    if (pid == getpid() && region_info.my_slot != NULL &&
+        atomic_load_explicit(&region_info.my_slot->pid,
+                             memory_order_acquire) == pid) {
         shrreg_proc_slot_t* slot = region_info.my_slot;
 
         // Seqlock protocol: increment to odd (write in progress)
@@ -485,6 +504,11 @@ int add_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type
 
     // Slow path: find slot for other process (still lock-free)
     int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
+    if (proc_num < 0) {
+        proc_num = 0;
+    } else if (proc_num > SHARED_REGION_MAX_PROCESS_NUM) {
+        proc_num = SHARED_REGION_MAX_PROCESS_NUM;
+    }
     int i;
     for (i=0; i < proc_num; i++) {
         int32_t slot_pid = atomic_load_explicit(&region_info.shared_region->procs[i].pid, memory_order_acquire);
@@ -522,12 +546,25 @@ int add_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type
 
 // Lock-free memory remove using atomics with seqlock for consistent reads
 int rm_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type) {
-    LOG_INFO("rm_gpu_device_memory_lockfree:%d %d->%d %d:%lu", pid, cudadev, cuda_to_nvml_map(cudadev), type, usage);
-    int dev = cuda_to_nvml_map(cudadev);
+    int dev;
+
     ensure_initialized();
+    if (cudadev < 0 || cudadev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_WARN("Invalid CUDA device %d", cudadev);
+        return -1;
+    }
+    dev = (int)cuda_to_nvml_map((unsigned int)cudadev);
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_WARN("Invalid NVML device mapping for CUDA device %d", cudadev);
+        return -1;
+    }
+    LOG_INFO("rm_gpu_device_memory_lockfree:%d %d->%d %d:%lu", pid,
+             cudadev, dev, type, usage);
 
     // Fast path: use cached slot pointer for our own process
-    if (pid == getpid() && region_info.my_slot != NULL) {
+    if (pid == getpid() && region_info.my_slot != NULL &&
+        atomic_load_explicit(&region_info.my_slot->pid,
+                             memory_order_acquire) == pid) {
         shrreg_proc_slot_t* slot = region_info.my_slot;
 
         // Seqlock protocol: increment to odd (write in progress)
@@ -557,6 +594,11 @@ int rm_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type)
 
     // Slow path: find slot for other process (still lock-free)
     int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
+    if (proc_num < 0) {
+        proc_num = 0;
+    } else if (proc_num > SHARED_REGION_MAX_PROCESS_NUM) {
+        proc_num = SHARED_REGION_MAX_PROCESS_NUM;
+    }
     int i;
     for (i = 0; i < proc_num; i++) {
         int32_t slot_pid = atomic_load_explicit(&region_info.shared_region->procs[i].pid, memory_order_acquire);
@@ -1120,6 +1162,7 @@ void print_all() {
 void child_reinit_flag() {
     LOG_DEBUG("Detect child pid: %d -> %d", region_info.pid, getpid());   
     region_info.init_status = PTHREAD_ONCE_INIT;
+    region_info.my_slot = NULL;
     postinit_lock_held = 0;
     atomic_flag_clear_explicit(&postinit_local_lock, memory_order_release);
 }
@@ -1554,7 +1597,9 @@ void resume_all(){
 
 int wait_status_self(int status){
     // Fast path: use cached slot pointer (set during init_proc_slot_withlock)
-    if (region_info.my_slot != NULL) {
+    if (region_info.my_slot != NULL &&
+        atomic_load_explicit(&region_info.my_slot->pid,
+                             memory_order_acquire) == getpid()) {
         int32_t cur = atomic_load_explicit(&region_info.my_slot->status, memory_order_acquire);
         return (cur == status) ? 1 : 0;
     }
@@ -1562,6 +1607,11 @@ int wait_status_self(int status){
     // Slow path: linear scan (only if my_slot not yet cached)
     int i;
     int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
+    if (proc_num < 0) {
+        proc_num = 0;
+    } else if (proc_num > SHARED_REGION_MAX_PROCESS_NUM) {
+        proc_num = SHARED_REGION_MAX_PROCESS_NUM;
+    }
     int32_t my_pid = getpid();
     for (i=0; i < proc_num; i++) {
         int32_t slot_pid = atomic_load_explicit(&region_info.shared_region->procs[i].pid, memory_order_acquire);

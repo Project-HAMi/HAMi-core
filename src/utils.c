@@ -127,12 +127,13 @@ nvmlReturn_t get_used_gpu_memory_by_pid(unsigned int process_pid, int cudadev,
     unsigned int i;
     int nvmldev;
 
-    if (used == NULL || process_pid == 0) {
+    if (used == NULL || process_pid == 0 || cudadev < 0 ||
+        cudadev >= CUDA_DEVICE_MAX_COUNT) {
         return NVML_ERROR_INVALID_ARGUMENT;
     }
     *used = 0;
-    nvmldev = cuda_to_nvml_map(cudadev);
-    if (nvmldev < 0) {
+    nvmldev = (int)cuda_to_nvml_map((unsigned int)cudadev);
+    if (nvmldev < 0 || nvmldev >= CUDA_DEVICE_MAX_COUNT) {
         return NVML_ERROR_INVALID_ARGUMENT;
     }
 

@@ -38,7 +38,7 @@ If the gate is disabled or any trust, connection, deadline, or protocol check fa
 
 The old discovery path obtains both the host PID and the primary context size from a temporary context. The broker path does not create that context, so the client measures its memory when the application first retains the real primary context.
 
-Accounting state is kept per CUDA device. A nested retain adds one context charge, and the final successful release removes it. Failed shared accounting updates preserve enough local state to retry without adding or removing the same charge twice. Fork handlers clear inherited per process accounting state before the child repeats post init discovery.
+Accounting state is kept per CUDA device. A nested retain adds one context charge, and the final successful release removes it. A failed add can be retried by a later retain. A failed removal stays recorded so a later retain and final release cycle can retry without adding the same charge twice. Fork handlers clear inherited accounting state and the cached parent slot before the child repeats initialization.
 
 Hardware validation must prove that the context appears in NVML within the bounded measurement window and that the final shared region charge matches the observed primary context memory.
 
