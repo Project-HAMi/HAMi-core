@@ -458,17 +458,19 @@ uint64_t nvml_get_device_memory_usage(const int dev) {
 // Lock-free memory add using atomics with seqlock for consistent reads
 int add_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type) {
     int dev;
+    unsigned int mapped_dev;
 
     ensure_initialized();
     if (cudadev < 0 || cudadev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_WARN("Invalid CUDA device %d", cudadev);
         return -1;
     }
-    dev = (int)cuda_to_nvml_map((unsigned int)cudadev);
-    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+    mapped_dev = cuda_to_nvml_map((unsigned int)cudadev);
+    if (mapped_dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_WARN("Invalid NVML device mapping for CUDA device %d", cudadev);
         return -1;
     }
+    dev = (int)mapped_dev;
     LOG_INFO("add_gpu_device_memory_lockfree:%d %d->%d %lu", pid,
              cudadev, dev, usage);
 
@@ -547,17 +549,19 @@ int add_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type
 // Lock-free memory remove using atomics with seqlock for consistent reads
 int rm_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type) {
     int dev;
+    unsigned int mapped_dev;
 
     ensure_initialized();
     if (cudadev < 0 || cudadev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_WARN("Invalid CUDA device %d", cudadev);
         return -1;
     }
-    dev = (int)cuda_to_nvml_map((unsigned int)cudadev);
-    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+    mapped_dev = cuda_to_nvml_map((unsigned int)cudadev);
+    if (mapped_dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_WARN("Invalid NVML device mapping for CUDA device %d", cudadev);
         return -1;
     }
+    dev = (int)mapped_dev;
     LOG_INFO("rm_gpu_device_memory_lockfree:%d %d->%d %d:%lu", pid,
              cudadev, dev, type, usage);
 

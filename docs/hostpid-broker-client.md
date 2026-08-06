@@ -4,7 +4,7 @@ Status: local draft. The feature is disabled by default.
 
 ## Purpose
 
-The client lets HAMi-core learn its host PID without creating a temporary CUDA primary context during `postInit()`. It uses the version 1 Unix socket protocol documented by HAMi and preserves the existing NVML discovery path as its fallback.
+The client lets HAMi-core learn its host PID without creating a temporary CUDA primary context during `postInit()`. It uses the version 1 Unix socket protocol documented by HAMi and preserves the existing NVML discovery path as its fallback. A successful broker lookup still initializes NVML before utilization and context accounting use it.
 
 ## Enablement
 
@@ -36,7 +36,7 @@ If the gate is disabled or any trust, connection, deadline, or protocol check fa
 
 ## CUDA context accounting
 
-The old discovery path obtains both the host PID and the primary context size from a temporary context. The broker path does not create that context, so the client measures its memory when the application first retains the real primary context.
+The old discovery path obtains both the host PID and the primary context size from a temporary context. The broker path skips that retain and release probe, then measures memory when the application first retains the real primary context.
 
 Accounting state is kept per CUDA device. A nested retain adds one context charge, and the final successful release removes it. A failed add can be retried by a later retain. A failed removal stays recorded so a later retain and final release cycle can retry without adding the same charge twice. Fork handlers clear inherited accounting state and the cached parent slot before the child repeats initialization.
 

@@ -100,6 +100,7 @@ int getextrapid(unsigned int prev, unsigned int current, nvmlProcessInfo_t1 *pre
 
 nvmlReturn_t set_task_pid_from_broker() {
     const char *enabled = getenv("LIBVGPU_HOSTPID_BROKER");
+    nvmlReturn_t result;
     pid_t hostpid = 0;
 
     if (!hostpid_broker_enabled(enabled)) {
@@ -109,6 +110,12 @@ nvmlReturn_t set_task_pid_from_broker() {
                                      &hostpid) != 0) {
         LOG_DEBUG("Host PID broker unavailable: %s", strerror(errno));
         return NVML_ERROR_NOT_FOUND;
+    }
+    result = nvmlInit();
+    if (result != NVML_SUCCESS) {
+        LOG_WARN("NVML initialization failed after broker lookup: %d",
+                 result);
+        return result;
     }
     if (set_host_pid(hostpid) != 0) {
         return NVML_ERROR_NOT_FOUND;
@@ -126,21 +133,19 @@ nvmlReturn_t get_used_gpu_memory_by_pid(unsigned int process_pid, int cudadev,
     unsigned int count = SHARED_REGION_MAX_PROCESS_NUM;
     unsigned int i;
     int nvmldev;
+    unsigned int mapped_dev;
 
     if (used == NULL || process_pid == 0 || cudadev < 0 ||
         cudadev >= CUDA_DEVICE_MAX_COUNT) {
         return NVML_ERROR_INVALID_ARGUMENT;
     }
     *used = 0;
-    nvmldev = (int)cuda_to_nvml_map((unsigned int)cudadev);
-    if (nvmldev < 0 || nvmldev >= CUDA_DEVICE_MAX_COUNT) {
+    mapped_dev = cuda_to_nvml_map((unsigned int)cudadev);
+    if (mapped_dev >= CUDA_DEVICE_MAX_COUNT) {
         return NVML_ERROR_INVALID_ARGUMENT;
     }
+    nvmldev = (int)mapped_dev;
 
-    result = nvmlInit();
-    if (result != NVML_SUCCESS) {
-        return result;
-    }
     result = nvmlDeviceGetHandleByIndex(nvmldev, &device);
     if (result != NVML_SUCCESS) {
         return result;
@@ -247,8 +252,17 @@ nvmlReturn_t set_task_pid() {
     if (set_host_pid(hostpid)==0) {
         for (i=0;i<running_processes;i++) {
             if (pids_on_device[i].pid==hostpid) {
-                LOG_INFO("Primary Context Size==%lld",tmp_pids_on_device[i].usedGpuMemory);
-                context_size = tmp_pids_on_device[i].usedGpuMemory; 
+                unsigned long long measured =
+                    tmp_pids_on_device[i].usedGpuMemory;
+
+                if (measured == NVML_VALUE_NOT_AVAILABLE ||
+                    (unsigned long long)(size_t)measured != measured) {
+                    context_size = 0;
+                    LOG_WARN("Primary context memory is unavailable");
+                } else {
+                    context_size = (size_t)measured;
+                    LOG_INFO("Primary Context Size==%llu", measured);
+                }
                 break;
             }
         }

@@ -45,7 +45,7 @@ static size_t context_charge_for_device(CUdevice dev) {
         device_context_size[dev] > 0) {
         return device_context_size[dev];
     }
-    return context_size;
+    return dev == 0 ? context_size : 0;
 }
 
 CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
