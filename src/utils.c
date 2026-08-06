@@ -19,6 +19,7 @@ const char* unified_lock="/tmp/vgpulock/lock";
 static int lock_fd = -1;
 extern size_t context_size;
 extern int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
+static nvmlReturn_t map_cuda_devices_to_nvml_by_pci(void);
 
 // 0 unified_lock lock success
 // -1 unified_lock lock fail
@@ -114,6 +115,12 @@ nvmlReturn_t set_task_pid_from_broker() {
     result = nvmlInit();
     if (result != NVML_SUCCESS) {
         LOG_WARN("NVML initialization failed after broker lookup: %d",
+                 result);
+        return result;
+    }
+    result = map_cuda_devices_to_nvml_by_pci();
+    if (result != NVML_SUCCESS) {
+        LOG_WARN("CUDA to NVML PCI mapping failed after broker lookup: %d",
                  result);
         return result;
     }
@@ -297,6 +304,64 @@ int parse_cuda_visible_env() {
 int map_cuda_visible_devices() {
     parse_cuda_visible_env();
     return 0;
+}
+
+static nvmlReturn_t map_cuda_devices_to_nvml_by_pci(void) {
+    unsigned int mapped_devices[CUDA_DEVICE_MAX_COUNT];
+    int cuda_device_count = 0;
+    int ordinal;
+    CUresult cuda_result;
+
+    cuda_result = CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGetCount,
+                                     &cuda_device_count);
+    if (cuda_result != CUDA_SUCCESS || cuda_device_count < 0 ||
+        cuda_device_count > CUDA_DEVICE_MAX_COUNT) {
+        return NVML_ERROR_INVALID_ARGUMENT;
+    }
+
+    for (ordinal = 0; ordinal < cuda_device_count; ordinal++) {
+        char pci_bus_id[32] = {0};
+        CUdevice cuda_device;
+        nvmlDevice_t nvml_device;
+        nvmlReturn_t result;
+
+        cuda_result = CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGet,
+                                         &cuda_device, ordinal);
+        if (cuda_result != CUDA_SUCCESS) {
+            return NVML_ERROR_NOT_FOUND;
+        }
+        cuda_result = CUDA_OVERRIDE_CALL(cuda_library_entry,
+                                         cuDeviceGetPCIBusId,
+                                         pci_bus_id,
+                                         (int)sizeof(pci_bus_id),
+                                         cuda_device);
+        if (cuda_result != CUDA_SUCCESS) {
+            return NVML_ERROR_NOT_FOUND;
+        }
+        result = nvmlDeviceGetHandleByPciBusId_v2(pci_bus_id,
+                                                   &nvml_device);
+        if (result != NVML_SUCCESS) {
+            return result;
+        }
+        result = nvmlDeviceGetIndex(nvml_device,
+                                    &mapped_devices[ordinal]);
+        if (result != NVML_SUCCESS) {
+            return result;
+        }
+        if (mapped_devices[ordinal] >= CUDA_DEVICE_MAX_COUNT) {
+            return NVML_ERROR_INVALID_ARGUMENT;
+        }
+    }
+
+    for (ordinal = 0; ordinal < CUDA_DEVICE_MAX_COUNT; ordinal++) {
+        cuda_to_nvml_map_array[ordinal] = CUDA_DEVICE_MAX_COUNT;
+    }
+    for (ordinal = 0; ordinal < cuda_device_count; ordinal++) {
+        cuda_to_nvml_map_array[ordinal] = (int)mapped_devices[ordinal];
+        LOG_INFO("CUDA device %d maps to NVML device %u by PCI identity",
+                 ordinal, mapped_devices[ordinal]);
+    }
+    return NVML_SUCCESS;
 }
 
 int getenvcount() {

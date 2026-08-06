@@ -38,9 +38,11 @@ If the gate is disabled or any trust, connection, deadline, or protocol check fa
 
 The old discovery path obtains both the host PID and the primary context size from a temporary context. The broker path skips that retain and release probe, then measures memory when the application first retains the real primary context.
 
-Accounting state is kept per CUDA device. A nested retain adds one context charge, and the final successful release removes it. A failed add can be retried by a later retain. A failed removal stays recorded so a later retain and final release cycle can retry without adding the same charge twice. Fork handlers clear inherited accounting state and the cached parent slot before the child repeats initialization.
+After NVML starts, the broker path maps each visible CUDA device to its physical NVML index by PCI identity. This mapping does not parse `CUDA_VISIBLE_DEVICES`, so an index list and a GPU UUID use the same driver supplied identity. Devices outside the CUDA visibility set remain unmapped.
 
-Hardware validation must prove that the context appears in NVML within the bounded measurement window and that the final shared region charge matches the observed primary context memory.
+Accounting state is kept per visible CUDA device. A nested retain adds one context charge, and the final successful release removes it. A failed add can be retried by a later retain. A failed removal stays recorded so a later retain and final release cycle can retry without adding the same charge twice. Fork handlers clear inherited accounting state and the cached parent slot before the child repeats initialization.
+
+Hardware validation must prove that the context appears in NVML within the bounded measurement window and that the final shared region charge matches the observed primary context memory. The matrix must include a nonzero physical GPU selected by UUID and must verify the CUDA ordinal, NVML index, and shared accounting index.
 
 ## Compatibility
 
