@@ -485,11 +485,17 @@ CUresult cuMemAdvise_v2(CUdeviceptr devPtr, size_t count, CUmem_advise advice, C
 #ifdef HOOK_MEMINFO_ENABLE
 CUresult cuMemGetInfo_v2(size_t* free, size_t* total) {
     CUdevice dev;
+    unsigned int mapped_dev;
     LOG_DEBUG("cuMemGetInfo_v2");
     ENSURE_INITIALIZED();
     CHECK_DRV_API(cuCtxGetDevice(&dev));
-    size_t usage = get_current_device_memory_usage(cuda_to_nvml_map(dev));
-    size_t limit = get_current_device_memory_limit(cuda_to_nvml_map(dev));
+    mapped_dev = cuda_to_nvml_map((unsigned int)dev);
+    if (mapped_dev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_ERROR("Invalid NVML mapping for CUDA device %d", dev);
+        return CUDA_ERROR_INVALID_DEVICE;
+    }
+    size_t usage = get_current_device_memory_usage((int)mapped_dev);
+    size_t limit = get_current_device_memory_limit(dev);
     if (limit == 0) {
         CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
         LOG_INFO("orig free=%ld total=%ld", *free, *total);

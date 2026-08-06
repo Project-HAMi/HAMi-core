@@ -340,7 +340,7 @@ nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,void* memory,int versi
     if (cudadev < 0) {
         return NVML_SUCCESS;
     }
-    size_t usage = get_current_device_memory_usage(cudadev);
+    size_t usage = get_current_device_memory_usage((int)dev_id);
     size_t monitor = get_current_device_memory_monitor(cudadev);
     size_t limit = get_current_device_memory_limit(cudadev);
     LOG_DEBUG("usage=%ld limit=%ld monitor=%ld", usage, limit, monitor);

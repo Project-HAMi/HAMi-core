@@ -31,6 +31,7 @@ static volatile int64_t g_cur_cuda_cores[CUDA_DEVICE_MAX_COUNT] = {0};
 static volatile int64_t g_total_cuda_cores[CUDA_DEVICE_MAX_COUNT] = {0};
 extern int pidfound;
 int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
+int cuda_to_nvml_map_count = CUDA_DEVICE_MAX_COUNT;
 
 /* Cached at init — these values do not change at runtime */
 static int cached_sm_limit[CUDA_DEVICE_MAX_COUNT] = {0};
@@ -106,18 +107,24 @@ static int64_t delta(int up_limit, int user_current, int64_t share, int device_i
   return share;
 }
 
-unsigned int nvml_to_cuda_map(unsigned int nvmldev){
-    unsigned int devcount;
-    CHECK_NVML_API(nvmlDeviceGetCount_v2(&devcount));
-    int i=0;
-    for (i=0;i<devcount;i++){
-        if (cuda_to_nvml_map(i)==nvmldev)
+int nvml_to_cuda_map(unsigned int nvmldev){
+    int i;
+    int devcount = cuda_to_nvml_map_count;
+
+    if (devcount < 0 || devcount > CUDA_DEVICE_MAX_COUNT) {
+        return -1;
+    }
+    for (i = 0; i < devcount; i++) {
+        if (cuda_to_nvml_map((unsigned int)i) == nvmldev)
           return i;
     }
     return -1;
 }
 
 unsigned int cuda_to_nvml_map(unsigned int cudadev){
+    if (cudadev >= CUDA_DEVICE_MAX_COUNT) {
+        return CUDA_DEVICE_MAX_COUNT;
+    }
     return cuda_to_nvml_map_array[cudadev];
 }
 

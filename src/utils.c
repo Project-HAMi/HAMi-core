@@ -19,6 +19,7 @@ const char* unified_lock="/tmp/vgpulock/lock";
 static int lock_fd = -1;
 extern size_t context_size;
 extern int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
+extern int cuda_to_nvml_map_count;
 static nvmlReturn_t map_cuda_devices_to_nvml_by_pci(void);
 
 // 0 unified_lock lock success
@@ -302,7 +303,15 @@ int parse_cuda_visible_env() {
 }
 
 int map_cuda_visible_devices() {
+    int visible_count = 0;
+
     parse_cuda_visible_env();
+    if (CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGetCount,
+                           &visible_count) == CUDA_SUCCESS &&
+        visible_count >= 0 &&
+        visible_count <= CUDA_DEVICE_MAX_COUNT) {
+        cuda_to_nvml_map_count = visible_count;
+    }
     return 0;
 }
 
@@ -314,7 +323,7 @@ static nvmlReturn_t map_cuda_devices_to_nvml_by_pci(void) {
 
     cuda_result = CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGetCount,
                                      &cuda_device_count);
-    if (cuda_result != CUDA_SUCCESS || cuda_device_count < 0 ||
+    if (cuda_result != CUDA_SUCCESS || cuda_device_count <= 0 ||
         cuda_device_count > CUDA_DEVICE_MAX_COUNT) {
         return NVML_ERROR_INVALID_ARGUMENT;
     }
@@ -361,6 +370,7 @@ static nvmlReturn_t map_cuda_devices_to_nvml_by_pci(void) {
         LOG_INFO("CUDA device %d maps to NVML device %u by PCI identity",
                  ordinal, mapped_devices[ordinal]);
     }
+    cuda_to_nvml_map_count = cuda_device_count;
     return NVML_SUCCESS;
 }
 

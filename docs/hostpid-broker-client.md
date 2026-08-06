@@ -40,9 +40,11 @@ The old discovery path obtains both the host PID and the primary context size fr
 
 After NVML starts, the broker path maps each visible CUDA device to its physical NVML index by PCI identity. This mapping does not parse `CUDA_VISIBLE_DEVICES`, so an index list and a GPU UUID use the same driver supplied identity. Devices outside the CUDA visibility set remain unmapped.
 
+Per device limits, monitored memory, and utilization remain indexed by the visible CUDA ordinal because they describe the workload's device view. Allocation and primary context usage are indexed by physical NVML device so processes with different visibility orders still aggregate against the same GPU. Reverse lookup scans only visible CUDA devices, and an invalid or missing mapping fails closed before shared memory access.
+
 Accounting state is kept per visible CUDA device. A nested retain adds one context charge, and the final successful release removes it. A failed add can be retried by a later retain. A failed removal stays recorded so a later retain and final release cycle can retry without adding the same charge twice. Fork handlers clear inherited accounting state and the cached parent slot before the child repeats initialization.
 
-Hardware validation must prove that the context appears in NVML within the bounded measurement window and that the final shared region charge matches the observed primary context memory. The matrix must include a nonzero physical GPU selected by UUID and must verify the CUDA ordinal, NVML index, and shared accounting index.
+Hardware validation must prove that the context appears in NVML within the bounded measurement window and that the final shared region charge matches the observed primary context memory. The matrix must include a nonzero physical GPU selected by UUID and must verify the CUDA ordinal, NVML index, and primary context accounting index.
 
 ## Compatibility
 
