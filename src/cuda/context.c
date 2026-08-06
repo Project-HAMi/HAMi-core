@@ -24,9 +24,9 @@ void context_accounting_fork_child() {
     int dev;
 
     context_size = 0;
+    primary_context_accounting_reset(context_accounting,
+                                     CUDA_DEVICE_MAX_COUNT);
     for (dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
-        context_accounting[dev].retain_count = 0;
-        context_accounting[dev].charged_bytes = 0;
         device_context_size[dev] = 0;
         ctx_activate[dev] = 0;
     }
@@ -46,6 +46,27 @@ static size_t context_charge_for_device(CUdevice dev) {
         return device_context_size[dev];
     }
     return dev == 0 ? context_size : 0;
+}
+
+static CUresult rollback_unaccounted_retain(CUdevice dev,
+                                            int retain_recorded,
+                                            size_t bytes_to_add) {
+    CUresult release_result;
+
+    if (retain_recorded &&
+        primary_context_rollback_retain(&context_accounting[dev],
+                                        bytes_to_add) != 0) {
+        LOG_ERROR("Failed to roll back local context accounting on device %d",
+                  dev);
+    }
+    release_result = CUDA_OVERRIDE_CALL(cuda_library_entry,
+                                        cuDevicePrimaryCtxRelease_v2, dev);
+    if (release_result != CUDA_SUCCESS) {
+        LOG_ERROR("Failed to release an unaccounted primary context on "
+                  "device %d: %d", dev, release_result);
+    }
+    ctx_activate[dev] = (int)context_accounting[dev].retain_count;
+    return CUDA_ERROR_OUT_OF_MEMORY;
 }
 
 CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
@@ -99,20 +120,27 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
             usleep(1000);
         }
     }
-    if (primary_context_record_retain(&context_accounting[dev], charge,
-                                      &bytes_to_add) != 0) {
-        LOG_ERROR("Primary context retain count overflow on device %d", dev);
-    } else if (bytes_to_add > 0) {
+    if ((pidfound == 1
+             ? primary_context_record_accounted_retain(
+                   &context_accounting[dev], charge, &bytes_to_add)
+             : primary_context_record_retain(&context_accounting[dev], charge,
+                                             &bytes_to_add)) != 0) {
+        LOG_ERROR("Cannot account primary context retain on device %d",
+                  dev);
+        res = rollback_unaccounted_retain(dev, 0, 0);
+        pthread_mutex_unlock(&context_accounting_lock);
+        return res;
+    }
+    if (bytes_to_add > 0) {
         if (add_gpu_device_memory_usage(getpid(), dev, bytes_to_add, 0) != 0) {
-            primary_context_cancel_charge(&context_accounting[dev]);
+            LOG_ERROR("Failed to charge primary context memory on device %d",
+                      dev);
+            res = rollback_unaccounted_retain(dev, 1, bytes_to_add);
+            pthread_mutex_unlock(&context_accounting_lock);
+            return res;
         }
     }
     ctx_activate[dev] = (int)context_accounting[dev].retain_count;
-    if (pidfound == 1 && context_accounting[dev].retain_count == 1 &&
-        context_accounting[dev].charged_bytes == 0) {
-        LOG_WARN("Primary context memory is not accounted for on device %d",
-                 dev);
-    }
     pthread_mutex_unlock(&context_accounting_lock);
     return res;
 }
