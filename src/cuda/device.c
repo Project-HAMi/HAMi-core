@@ -90,6 +90,10 @@ CUresult cuDeviceGetLuid(char *luid, unsigned int *deviceNodeMask,
 CUresult cuDeviceTotalMem_v2 ( size_t* bytes, CUdevice dev ) {
     LOG_DEBUG("into cuDeviceTotalMem");
     ENSURE_INITIALIZED();
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_ERROR("Illegal device id: %d", dev);
+        return CUDA_ERROR_INVALID_DEVICE;
+    }
     size_t limit = get_current_device_memory_limit(dev);
     *bytes = limit;
     return CUDA_SUCCESS;
