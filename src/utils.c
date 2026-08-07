@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <ctype.h>
 #include <errno.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <time.h>
 #include <sys/file.h>
@@ -165,6 +166,10 @@ nvmlReturn_t get_used_gpu_memory_by_pid(unsigned int process_pid, int cudadev,
     }
     result = nvmlDeviceGetComputeRunningProcesses(device, &count, processes);
     if (result == NVML_ERROR_INSUFFICIENT_SIZE && count > 0) {
+        if ((size_t)count > SIZE_MAX / sizeof(*processes)) {
+            free(processes);
+            return NVML_ERROR_MEMORY;
+        }
         nvmlProcessInfo_v1_t *larger =
             realloc(processes, count * sizeof(*processes));
         if (larger == NULL) {
