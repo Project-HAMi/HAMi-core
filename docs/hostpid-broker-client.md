@@ -22,7 +22,7 @@ Before using a reply, the client verifies all of the following:
 
 3. The socket is a real Unix socket owned by root.
 
-4. The directory is visible through a read only mount.
+4. The directory is visible through a read-only mount.
 
 5. The connected server peer has UID 0 according to `SO_PEERCRED`.
 
@@ -38,7 +38,7 @@ If the gate is disabled or any trust, connection, deadline, or protocol check fa
 
 The old discovery path obtains both the host PID and the primary context size from a temporary context. The broker path skips that retain and release probe, then measures memory when the application first retains the real primary context.
 
-After NVML starts, the broker path maps each visible CUDA device to its physical NVML index by PCI identity. This mapping does not parse `CUDA_VISIBLE_DEVICES`, so an index list and a GPU UUID use the same driver supplied identity. Devices outside the CUDA visibility set remain unmapped.
+After NVML starts, the broker path maps each visible CUDA device to its physical NVML index by PCI identity. This mapping does not parse `CUDA_VISIBLE_DEVICES`, so an index list and a GPU UUID use the same driver-supplied identity. Devices outside the CUDA visibility set remain unmapped.
 
 Per device limits, monitored memory, and utilization remain indexed by the visible CUDA ordinal because they describe the workload's device view. Allocation and primary context usage are indexed by physical NVML device so processes with different visibility orders still aggregate against the same GPU. Reverse lookup scans only visible CUDA devices, and an invalid or missing mapping fails closed before shared memory access.
 
@@ -56,4 +56,4 @@ Hardware validation must prove that the context appears in NVML within the bound
 
 4. Existing workloads do not receive the broker mount until they are recreated.
 
-The separate post init lock migration from PR 248 has a different mixed binary constraint and is not changed by this client.
+The separate post-init lock migration from [PR 248](https://github.com/Project-HAMi/HAMi-core/pull/248) has a different mixed-binary constraint and is not changed by this client.
