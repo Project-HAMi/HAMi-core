@@ -4,6 +4,9 @@
  * Copyright (c) 2026 The HAMi Authors.
  */
 
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <assert.h>
 #include <errno.h>
 #include <limits.h>
