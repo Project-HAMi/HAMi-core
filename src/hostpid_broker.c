@@ -339,10 +339,15 @@ static int query_broker(const char *socket_path, pid_t *host_pid,
         return -1;
     }
 
+#ifdef __linux__
+    fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+#else
     fd = socket(AF_UNIX, SOCK_STREAM, 0);
+#endif
     if (fd < 0) {
         return -1;
     }
+#ifndef __linux__
     if (fcntl(fd, F_SETFD, FD_CLOEXEC) != 0 ||
         fcntl(fd, F_SETFL, O_NONBLOCK) != 0) {
         saved_errno = errno;
@@ -350,6 +355,7 @@ static int query_broker(const char *socket_path, pid_t *host_pid,
         errno = saved_errno;
         return -1;
     }
+#endif
     memset(&address, 0, sizeof(address));
     address.sun_family = AF_UNIX;
     memcpy(address.sun_path, socket_path, path_length + 1);
