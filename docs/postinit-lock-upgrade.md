@@ -14,6 +14,13 @@ semaphore while a new process holds the record lock, so both can execute host
 PID discovery at the same time. The cache version fields do not prevent this.
 Existing binaries only report a version mismatch and continue.
 
+The trusted broker path does not create a temporary CUDA context and does not
+take the post init lock. After validating the broker response, it initializes
+NVML, maps visible CUDA devices by PCI identity, and updates the process slot
+under the shared region lock. It can overlap with a locked NVML fallback because
+it does not enter the context probe section. A rejected broker response uses the
+fallback protected by the record lock described above.
+
 The local mixed protocol probe reproduces the overlap directly. It is under
 `evidence/issue-1662/lock-benchmark/mixed_protocol_probe.c` in the companion
 evidence tree.
