@@ -11,6 +11,16 @@ static size_t device_context_size[CUDA_DEVICE_MAX_COUNT];
 static primary_context_accounting_t
     context_accounting[CUDA_DEVICE_MAX_COUNT];
 static pthread_mutex_t context_accounting_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t context_device_locks[CUDA_DEVICE_MAX_COUNT] = {
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+};
 
 void context_accounting_fork_prepare() {
     pthread_mutex_lock(&context_accounting_lock);
@@ -29,6 +39,8 @@ void context_accounting_fork_child() {
     for (dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
         device_context_size[dev] = 0;
         ctx_activate[dev] = 0;
+        context_device_locks[dev] =
+            (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
     }
     pthread_mutex_unlock(&context_accounting_lock);
 }
@@ -75,6 +87,7 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
     int hostpid;
     int measure_context = 0;
     size_t charge;
+    size_t measured_charge = 0;
     size_t bytes_to_add = 0;
 
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
@@ -82,25 +95,32 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
                                   cuDevicePrimaryCtxRetain, pctx, dev);
     }
 
+    pthread_mutex_lock(&context_device_locks[dev]);
     pthread_mutex_lock(&context_accounting_lock);
     charge = context_charge_for_device(dev);
     hostpid = get_current_host_pid();
     if (charge == 0 && pidfound == 1 && hostpid > 0 &&
         context_accounting[dev].charged_bytes == 0) {
+        measure_context = 1;
+    }
+    pthread_mutex_unlock(&context_accounting_lock);
+
+    if (measure_context) {
         nvmlReturn_t result = get_used_gpu_memory_by_pid(
             (unsigned int)hostpid, dev, &before);
         if (result == NVML_SUCCESS || result == NVML_ERROR_NOT_FOUND) {
-            measure_context = 1;
             if (result == NVML_ERROR_NOT_FOUND) {
                 before = 0;
             }
+        } else {
+            measure_context = 0;
         }
     }
 
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,
                                       cuDevicePrimaryCtxRetain, pctx, dev);
     if (res != CUDA_SUCCESS) {
-        pthread_mutex_unlock(&context_accounting_lock);
+        pthread_mutex_unlock(&context_device_locks[dev]);
         return res;
     }
 
@@ -111,14 +131,18 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
             if (get_used_gpu_memory_by_pid((unsigned int)hostpid, dev,
                                            &after) == NVML_SUCCESS &&
                 after > before) {
-                device_context_size[dev] = after - before;
-                charge = device_context_size[dev];
-                LOG_INFO("Measured primary context size lazily: "
-                         "dev=%d size=%lu", dev, charge);
+                measured_charge = after - before;
                 break;
             }
             usleep(1000);
         }
+    }
+    pthread_mutex_lock(&context_accounting_lock);
+    if (measured_charge > 0) {
+        device_context_size[dev] = measured_charge;
+        charge = measured_charge;
+        LOG_INFO("Measured primary context size lazily: "
+                 "dev=%d size=%lu", dev, charge);
     }
     if ((pidfound == 1
              ? primary_context_record_accounted_retain(
@@ -129,6 +153,7 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
                   dev);
         res = rollback_unaccounted_retain(dev, 0, 0);
         pthread_mutex_unlock(&context_accounting_lock);
+        pthread_mutex_unlock(&context_device_locks[dev]);
         return res;
     }
     if (bytes_to_add > 0) {
@@ -137,11 +162,13 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
                       dev);
             res = rollback_unaccounted_retain(dev, 1, bytes_to_add);
             pthread_mutex_unlock(&context_accounting_lock);
+            pthread_mutex_unlock(&context_device_locks[dev]);
             return res;
         }
     }
     ctx_activate[dev] = (int)context_accounting[dev].retain_count;
     pthread_mutex_unlock(&context_accounting_lock);
+    pthread_mutex_unlock(&context_device_locks[dev]);
     return res;
 }
 
@@ -158,6 +185,7 @@ CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
         return CUDA_OVERRIDE_CALL(cuda_library_entry,
                                   cuDevicePrimaryCtxRelease_v2, dev);
     }
+    pthread_mutex_lock(&context_device_locks[dev]);
     pthread_mutex_lock(&context_accounting_lock);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRelease_v2,dev);
     if (res == CUDA_SUCCESS) {
@@ -174,6 +202,7 @@ CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
         ctx_activate[dev] = (int)context_accounting[dev].retain_count;
     }
     pthread_mutex_unlock(&context_accounting_lock);
+    pthread_mutex_unlock(&context_device_locks[dev]);
     return res;
 }
 
