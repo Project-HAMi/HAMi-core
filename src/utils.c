@@ -68,7 +68,7 @@ int mergepid(unsigned int *prev, unsigned int *current, nvmlProcessInfo_t1 *sub,
         }
         if (!found) {
             LOG_DEBUG("merged pid=%d\n",sub[i].pid);
-            merged[*current].pid = sub[i].pid;
+            merged[*current] = sub[i];
             (*current)++;
         }
     }
@@ -261,7 +261,7 @@ nvmlReturn_t set_task_pid() {
         for (i=0;i<running_processes;i++) {
             if (pids_on_device[i].pid==hostpid) {
                 unsigned long long measured =
-                    tmp_pids_on_device[i].usedGpuMemory;
+                    pids_on_device[i].usedGpuMemory;
 
                 if (measured == NVML_VALUE_NOT_AVAILABLE ||
                     (unsigned long long)(size_t)measured != measured) {
