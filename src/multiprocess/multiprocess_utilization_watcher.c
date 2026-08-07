@@ -304,6 +304,9 @@ void* utilization_watcher() {
         cached_util_switch = get_utilization_switch();
         LOG_INFO("init_utilization_watcher: util_switch=%d", cached_util_switch);
         init_gpu_device_utilization();
+        for (int dev = 0; dev < device_count; dev++) {
+            userutil[dev] = -1;
+        }
         get_used_gpu_utilization(userutil,&sysprocnum);
 
         // Calculate independently for each device
