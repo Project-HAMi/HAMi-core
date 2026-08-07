@@ -320,6 +320,11 @@ int map_cuda_visible_devices() {
     return 0;
 }
 
+/*
+ * Map each visible CUDA ordinal in [0, cuda_to_nvml_map_count) to its
+ * physical NVML index. Unused entries contain CUDA_DEVICE_MAX_COUNT.
+ * Build the map locally so a failed lookup preserves the previous map.
+ */
 static nvmlReturn_t map_cuda_devices_to_nvml_by_pci(void) {
     unsigned int mapped_devices[CUDA_DEVICE_MAX_COUNT];
     int cuda_device_count = 0;
