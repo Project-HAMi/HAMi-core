@@ -30,11 +30,12 @@ evidence tree.
 1. Cordon the node and stop every GPU workload that can map the affected
    shared cache.
 
-2. Confirm that no old HAMi-core process still has the cache open. Check every
-   effective `CUDA_DEVICE_MEMORY_SHARED_CACHE` path, including generated
-   per-container `usage.cache` files and the `/tmp/cudevshr.cache` fallback.
+2. Confirm that no HAMi-core process still maps any affected cache. Check active
+   memory mappings for every effective `CUDA_DEVICE_MEMORY_SHARED_CACHE` path,
+   including generated per-container `usage.cache` files and the
+   `/tmp/cudevshr.cache` fallback. An open descriptor check is not sufficient.
 
-3. Remove each cache only after all processes that mapped it have exited.
+3. Remove each cache only after every process retaining a mapping has exited.
 
 4. Install one HAMi-core revision across the node.
 
