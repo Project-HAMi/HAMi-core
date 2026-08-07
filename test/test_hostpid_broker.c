@@ -147,6 +147,7 @@ static int make_listener(char *socket_path, size_t socket_path_size,
                          char *directory, size_t directory_size) {
     struct sockaddr_un address;
     socklen_t address_length;
+    size_t socket_path_length;
     int listener;
 
     assert(directory_size >= sizeof("/tmp/hami-hostpid-test-XXXXXX"));
@@ -159,10 +160,15 @@ static int make_listener(char *socket_path, size_t socket_path_size,
     assert(listener >= 0);
     memset(&address, 0, sizeof(address));
     address.sun_family = AF_UNIX;
-    strcpy(address.sun_path, socket_path);
+    socket_path_length = strlen(socket_path);
+    if (socket_path_length >= sizeof(address.sun_path)) {
+        fprintf(stderr, "host PID broker test socket path is too long\n");
+        abort();
+    }
+    memcpy(address.sun_path, socket_path, socket_path_length + 1);
     address_length =
         (socklen_t)(offsetof(struct sockaddr_un, sun_path) +
-                    strlen(socket_path) + 1);
+                    socket_path_length + 1);
 #ifdef __APPLE__
     address.sun_len = address_length;
 #endif
