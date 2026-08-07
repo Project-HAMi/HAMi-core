@@ -1462,6 +1462,7 @@ int set_host_pid(int hostpid) {
         return -1;
     }
 
+    lock_shrreg();
     if (region_info.my_slot != NULL &&
         atomic_load_explicit(&region_info.my_slot->pid,
                              memory_order_acquire) == current_pid) {
@@ -1485,16 +1486,18 @@ int set_host_pid(int hostpid) {
     }
 
     if (slot == NULL) {
+        unlock_shrreg();
         LOG_ERROR("HOST PID NOT FOUND. %d",hostpid);
         return -1;
     }
 
     LOG_INFO("SET PID= %d", hostpid);
-    atomic_store_explicit(&slot->hostpid, hostpid, memory_order_release);
     for (j = 0; j < CUDA_DEVICE_MAX_COUNT; j++) {
         atomic_store_explicit(&slot->monitorused[j], 0,
-                              memory_order_release);
+                              memory_order_relaxed);
     }
+    atomic_store_explicit(&slot->hostpid, hostpid, memory_order_release);
+    unlock_shrreg();
     setspec();
     return 0;
 }
