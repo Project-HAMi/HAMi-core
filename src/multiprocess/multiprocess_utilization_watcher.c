@@ -107,7 +107,7 @@ static int64_t delta(int up_limit, int user_current, int64_t share, int device_i
   return share;
 }
 
-int nvml_to_cuda_map(unsigned int nvmldev){
+int nvml_to_cuda_map(unsigned int nvmldev) {
     int i;
     int devcount = cuda_to_nvml_map_count;
 
