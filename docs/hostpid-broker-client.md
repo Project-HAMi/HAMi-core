@@ -12,6 +12,8 @@ The client is enabled only when `LIBVGPU_HOSTPID_BROKER` is the exact string `1`
 
 The expected container socket is fixed at `/tmp/vgpulock/hostpid/broker.sock`. A caller cannot redirect the production client to another path.
 
+The companion HAMi device plugin must mount the root-owned broker directory read-only at `/tmp/vgpulock/hostpid`. If this ownership or mount contract is not met, the client rejects the path and uses the NVML fallback.
+
 ## Trust checks
 
 Before using a reply, the client verifies all of the following:
