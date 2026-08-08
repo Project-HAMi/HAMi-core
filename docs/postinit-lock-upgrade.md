@@ -15,7 +15,7 @@ PID discovery at the same time. The cache version fields do not prevent this.
 Existing binaries only report a version mismatch and continue.
 
 The trusted broker path does not create a temporary CUDA context and does not
-take the post init lock. After validating the broker response, it initializes
+take the post-init lock. After validating the broker response, it initializes
 NVML, maps visible CUDA devices by PCI identity, and updates the process slot
 under the shared region lock. It can overlap with a locked NVML fallback because
 it does not enter the context probe section. A rejected broker response uses the
