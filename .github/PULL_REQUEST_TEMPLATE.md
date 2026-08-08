@@ -21,6 +21,6 @@ Fixes #
 
 **Does this PR introduce a user-facing change?**:
 
-**AI Disclosure**
+**AI Disclosure**:
 
 <!-- Briefly disclose any AI assistance used. Do not add AI co-author or assistance trailers to commits. -->
