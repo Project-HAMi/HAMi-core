@@ -150,15 +150,20 @@ static int wait_until_child_opened(pid_t child, const char *path) {
             struct dirent *entry;
 
             while ((entry = readdir(directory)) != NULL) {
-                char fd_path[128];
+                char fd_path[PATH_MAX];
                 char target[4096];
+                int path_length;
                 ssize_t length;
 
                 if (entry->d_name[0] == '.') {
                     continue;
                 }
-                snprintf(fd_path, sizeof(fd_path), "%s/%s", fd_directory,
-                         entry->d_name);
+                path_length = snprintf(fd_path, sizeof(fd_path), "%s/%s",
+                                       fd_directory, entry->d_name);
+                if (path_length < 0 ||
+                    (size_t)path_length >= sizeof(fd_path)) {
+                    continue;
+                }
                 length = readlink(fd_path, target, sizeof(target) - 1U);
                 if (length < 0) {
                     continue;
