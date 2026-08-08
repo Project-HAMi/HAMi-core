@@ -40,6 +40,12 @@
 
 #define SHARED_REGION_SIZE_MAGIC  sizeof(shared_region_t)
 #define SHARED_REGION_MAX_PROCESS_NUM 1024
+// Slot-table occupancy at which joining a process performs a full liveness
+// sweep. See init_proc_slot_withlock(). Overridable at build time so the
+// regression test can reach the sweep without spawning 768 processes.
+#ifndef SHARED_REGION_SWEEP_THRESHOLD
+    #define SHARED_REGION_SWEEP_THRESHOLD ((SHARED_REGION_MAX_PROCESS_NUM * 3) / 4)
+#endif
 
 // macros for debugging
 #define SEQ_FIX_SHRREG_ACQUIRE_FLOCK_OK 0
