@@ -3,6 +3,7 @@
 
 #include <dlfcn.h>
 #include <cuda.h>
+#include <stdint.h>
 #include "include/nvml_prefix.h"
 #include <nvml.h>
 #include <pthread.h>
@@ -68,7 +69,7 @@ typedef void* (*fp_dlsym)(void*, const char*);
 nvmlReturn_t set_task_pid();
 nvmlReturn_t set_task_pid_from_broker();
 nvmlReturn_t get_used_gpu_memory_by_pid(unsigned int process_pid, int cudadev,
-                                        unsigned long long *used);
+                                        uint64_t *used);
 int map_cuda_visible_devices();
 void ensure_post_init();
 void context_accounting_fork_prepare();

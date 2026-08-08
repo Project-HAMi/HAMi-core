@@ -82,8 +82,8 @@ static CUresult rollback_unaccounted_retain(CUdevice dev,
 }
 
 CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
-    unsigned long long before = 0;
-    unsigned long long after = 0;
+    uint64_t before = 0;
+    uint64_t after = 0;
     int hostpid;
     int measure_context = 0;
     size_t charge;

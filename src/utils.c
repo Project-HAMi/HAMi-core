@@ -135,7 +135,7 @@ nvmlReturn_t set_task_pid_from_broker() {
 }
 
 nvmlReturn_t get_used_gpu_memory_by_pid(unsigned int process_pid, int cudadev,
-                                        unsigned long long *used) {
+                                        uint64_t *used) {
     nvmlProcessInfo_v1_t *processes = NULL;
     nvmlDevice_t device;
     nvmlReturn_t result;
@@ -265,11 +265,10 @@ nvmlReturn_t set_task_pid() {
     if (set_host_pid(hostpid)==0) {
         for (i=0;i<running_processes;i++) {
             if (pids_on_device[i].pid==hostpid) {
-                unsigned long long measured =
-                    pids_on_device[i].usedGpuMemory;
+                uint64_t measured = pids_on_device[i].usedGpuMemory;
 
                 if (measured == NVML_VALUE_NOT_AVAILABLE ||
-                    (unsigned long long)(size_t)measured != measured) {
+                    (uint64_t)(size_t)measured != measured) {
                     context_size = 0;
                     LOG_WARN("Primary context memory is unavailable");
                 } else {
