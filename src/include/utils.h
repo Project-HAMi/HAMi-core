@@ -5,9 +5,6 @@
 #include <unistd.h>
 
 
-int try_lock_unified_lock();
-int try_unlock_unified_lock();
-
 //Nvml part utils
 void sort(int vmap[16]);
 int initial_virtual_devices();

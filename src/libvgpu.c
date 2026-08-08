@@ -1,7 +1,9 @@
 //#include "memory_limit.h"
+#include <errno.h>
 #include <fcntl.h>
 #include <dlfcn.h>
 #include <pthread.h>
+#include <string.h>
 #include "include/nvml_prefix.h"
 #include <nvml.h>
 #include "include/nvml_prefix.h"
@@ -9,6 +11,7 @@
 #include "include/libcuda_hook.h"
 #include "include/libvgpu.h"
 #include "include/utils.h"
+#include "include/hostpid_fallback_lock.h"
 #include "include/nvml_override.h"
 #include "allocator/allocator.h"
 #include "multiprocess/multiprocess_memory_limit.h"
@@ -900,14 +903,30 @@ void postInit(){
 
     nvmlReturn_t res = set_task_pid_from_broker();
     if (res != NVML_SUCCESS) {
-        // Serialize the NVML fallback so each process sees its own new PID.
-        int lock_acquired = lock_postinit();
-        if (lock_acquired) {
-            res = set_task_pid();
-            unlock_postinit();
+        /*
+         * The cache record lock coordinates processes that share one cache.
+         * The directory lock also coordinates independent cache files on the
+         * node. Always take the node lock first so new processes use one lock
+         * order.
+         */
+        if (hostpid_fallback_lock_acquire() == 0) {
+            int cache_lock_acquired = lock_postinit();
+
+            if (cache_lock_acquired) {
+                res = set_task_pid();
+                unlock_postinit();
+            } else {
+                LOG_WARN("Skipped host PID detection because the cache "
+                         "postinit lock failed");
+                res = NVML_ERROR_UNKNOWN;
+            }
+            if (hostpid_fallback_lock_release() != 0) {
+                LOG_ERROR("Failed to release host PID fallback lock: %s",
+                          strerror(errno));
+            }
         } else {
-            LOG_WARN("Skipped host PID detection because the postinit "
-                     "lock failed");
+            LOG_WARN("Skipped host PID detection because the node fallback "
+                     "lock failed: %s", strerror(errno));
             res = NVML_ERROR_UNKNOWN;
         }
     }
@@ -926,6 +945,7 @@ void postInit(){
 }
 
 void childReinitPostInit() {
+    hostpid_fallback_lock_after_fork();
     context_accounting_fork_child();
     LOG_DEBUG("Reset postInit state after fork");
     post_cuinit_flag = PTHREAD_ONCE_INIT;

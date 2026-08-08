@@ -6,7 +6,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <time.h>
-#include <sys/file.h>
 #include "include/utils.h"
 #include "include/log_utils.h"
 #include "include/nvml_prefix.h"
@@ -16,44 +15,10 @@
 #include "include/hostpid_broker.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
-const char* unified_lock="/tmp/vgpulock/lock";
-static int lock_fd = -1;
 extern size_t context_size;
 extern int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 extern int cuda_to_nvml_map_count;
 static nvmlReturn_t map_cuda_devices_to_nvml_by_pci(void);
-
-// 0 unified_lock lock success
-// -1 unified_lock lock fail
-int try_lock_unified_lock() {
-    lock_fd = open(unified_lock, O_CREAT | O_RDWR, 0666);
-    if (lock_fd == -1) {
-        LOG_ERROR("failed to open unified_lock file: %s", unified_lock);
-        return -1;
-    }
-    if (flock(lock_fd, LOCK_EX) == -1) {
-        LOG_ERROR("flock failed on unified_lock");
-        close(lock_fd);
-        lock_fd = -1;
-        return -1;
-    }
-    LOG_INFO("try_lock_unified_lock: acquired");
-    return 0;
-}
-
-// 0 unified_lock unlock success
-// -1 unified_lock unlock fail
-int try_unlock_unified_lock() {
-    if (lock_fd == -1) {
-        LOG_ERROR("try_unlock_unified_lock: no lock held");
-        return -1;
-    }
-    int res = flock(lock_fd, LOCK_UN);
-    close(lock_fd);
-    lock_fd = -1;
-    LOG_INFO("try unlock_unified_lock:%d", res);
-    return res == 0 ? 0 : -1;
-}
 
 int mergepid(unsigned int *prev, unsigned int *current, nvmlProcessInfo_t1 *sub, nvmlProcessInfo_t1 *merged) {
     int i,j;
