@@ -1,6 +1,6 @@
 # Host PID broker client
 
-Status: local draft. The feature is disabled by default.
+The feature is disabled by default.
 
 ## Purpose
 
