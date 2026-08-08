@@ -180,8 +180,8 @@ static int make_listener(char *socket_path, size_t socket_path_size,
     return listener;
 }
 
-static long run_query_case(server_action_t action, int expected_result,
-                           int expected_errno, pid_t expected_pid) {
+static int64_t run_query_case(server_action_t action, int expected_result,
+                              int expected_errno, pid_t expected_pid) {
     char directory[PATH_MAX];
     char socket_path[PATH_MAX];
     pid_t child;
@@ -220,8 +220,8 @@ static long run_query_case(server_action_t action, int expected_result,
     assert(WEXITSTATUS(status) == 0);
     assert(unlink(socket_path) == 0);
     assert(rmdir(directory) == 0);
-    return (query_end.tv_sec - query_begin.tv_sec) * 1000L +
-           (query_end.tv_nsec - query_begin.tv_nsec) / 1000000L;
+    return (int64_t)(query_end.tv_sec - query_begin.tv_sec) * 1000 +
+           (int64_t)(query_end.tv_nsec - query_begin.tv_nsec) / 1000000;
 }
 
 static void test_protocol(void) {
@@ -235,7 +235,7 @@ static void test_protocol(void) {
 }
 
 static void test_absolute_timeout(void) {
-    long elapsed_ms;
+    int64_t elapsed_ms;
 
     elapsed_ms = run_query_case(serve_trickle_response, -1,
                                 ETIMEDOUT, 0);
