@@ -14,20 +14,31 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     get_filename_component(TEST_TARGET_NAME ${RELATIVE_TEST_PATH} NAME_WE)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${TEST_TARGET_DIR})
 
-    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
-        if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
-            add_executable(${TEST_TARGET_NAME}
-                ${TEST_SCRIPT}
-                ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_memory_limit.c
-                ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
-        else()
+    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR
+        TEST_TARGET_NAME STREQUAL "test_pid_discovery" OR
+        TEST_TARGET_NAME STREQUAL "test_proc_slot_reclaim")
+        # These focused regression tests build against production sources and do
+        # not invoke any CUDA/NVML entry point at runtime.  Section garbage
+        # collection drops the unrelated GPU-facing production functions.
+        if (TEST_TARGET_NAME STREQUAL "test_pid_discovery")
             add_executable(${TEST_TARGET_NAME}
                 ${TEST_SCRIPT}
                 ${CMAKE_CURRENT_SOURCE_DIR}/../src/utils.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        else()
+            add_executable(${TEST_TARGET_NAME}
+                ${TEST_SCRIPT}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_memory_limit.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
         endif()
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
             _GNU_SOURCE)
+        if (TEST_TARGET_NAME STREQUAL "test_proc_slot_reclaim")
+            # Reach the liveness sweep without spawning three quarters of the
+            # slot table.
+            target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+                SHARED_REGION_SWEEP_THRESHOLD=8)
+        endif()
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
@@ -41,7 +52,9 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     endif()
 
     list(APPEND TEST_TARGET_NAMES_LIST ${TEST_TARGET_NAME})
-    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
+    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR
+        TEST_TARGET_NAME STREQUAL "test_pid_discovery" OR
+        TEST_TARGET_NAME STREQUAL "test_proc_slot_reclaim")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         target_link_libraries(${TEST_TARGET_NAME} -ldl)
@@ -75,6 +88,10 @@ if (TARGET vgpu)
         ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:vgpu>"
         TIMEOUT 10)
 endif()
+
+add_test(NAME proc_slot_reclaim
+    COMMAND test_proc_slot_reclaim)
+set_tests_properties(proc_slot_reclaim PROPERTIES TIMEOUT 30)
 
 
 add_custom_target(python_test ALL
