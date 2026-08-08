@@ -36,7 +36,7 @@ int hostpid_broker_enabled(const char *value) {
     return value != NULL && strcmp(value, "1") == 0;
 }
 
-static int deadline_after_ms(struct timespec *deadline, long timeout_ms) {
+static int deadline_after_ms(struct timespec *deadline, int64_t timeout_ms) {
     if (clock_gettime(CLOCK_MONOTONIC, deadline) != 0) {
         return -1;
     }
@@ -69,7 +69,7 @@ static int remaining_ms(const struct timespec *deadline) {
     return (int)nanoseconds;
 }
 
-static int wait_for_fd(int fd, short events,
+static int wait_for_fd(int fd, int16_t events,
                        const struct timespec *deadline) {
     struct pollfd descriptor = {
         .fd = fd,
