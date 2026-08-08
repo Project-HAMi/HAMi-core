@@ -421,6 +421,10 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    check(strcmp(HOSTPID_FALLBACK_LOCK_PATH,
+                 "/tmp/vgpulock/hostpid") == 0,
+          "default lock uses the trusted broker mount");
+
     test_basic_contract(path);
     test_path_trust(path);
     test_live_holder_timeout(path);

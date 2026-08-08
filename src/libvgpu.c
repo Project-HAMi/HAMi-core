@@ -11,6 +11,7 @@
 #include "include/libcuda_hook.h"
 #include "include/libvgpu.h"
 #include "include/utils.h"
+#include "include/hostpid_broker.h"
 #include "include/hostpid_fallback_lock.h"
 #include "include/nvml_override.h"
 #include "allocator/allocator.h"
@@ -898,11 +899,25 @@ void preInit(){
 }
 
 void postInit(){
+    int broker_enabled = hostpid_broker_enabled(
+        getenv("LIBVGPU_HOSTPID_BROKER"));
+
     allocator_init();
     map_cuda_visible_devices();
 
     nvmlReturn_t res = set_task_pid_from_broker();
-    if (res != NVML_SUCCESS) {
+    if (res != NVML_SUCCESS && !broker_enabled) {
+        int cache_lock_acquired = lock_postinit();
+
+        if (cache_lock_acquired) {
+            res = set_task_pid();
+            unlock_postinit();
+        } else {
+            LOG_WARN("Skipped host PID detection because the cache postinit "
+                     "lock failed");
+            res = NVML_ERROR_UNKNOWN;
+        }
+    } else if (res != NVML_SUCCESS) {
         /*
          * The cache record lock coordinates processes that share one cache.
          * The directory lock also coordinates independent cache files on the

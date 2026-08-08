@@ -13,6 +13,7 @@
 #include <string.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -77,8 +78,10 @@ static int sleep_before_retry(unsigned int delay_us) {
 
 static int validate_lock_object(int fd, const char *path,
                                 uid_t trusted_owner,
-                                const struct stat *opened_stat) {
+                                const struct stat *opened_stat,
+                                int require_readonly) {
     struct stat current_stat;
+    struct statvfs filesystem_stat;
 
     if (!S_ISDIR(opened_stat->st_mode) ||
         opened_stat->st_uid != trusted_owner) {
@@ -98,6 +101,15 @@ static int validate_lock_object(int fd, const char *path,
     if (fcntl(fd, F_GETFD) < 0) {
         return -1;
     }
+    if (require_readonly) {
+        if (fstatvfs(fd, &filesystem_stat) != 0) {
+            return -1;
+        }
+        if ((filesystem_stat.f_flag & ST_RDONLY) == 0) {
+            errno = EACCES;
+            return -1;
+        }
+    }
     return 0;
 }
 
@@ -110,8 +122,8 @@ static void discard_active_fd(int fd) {
     close(fd);
 }
 
-int hostpid_fallback_lock_acquire_at(const char *path, uid_t trusted_owner,
-                                     unsigned int timeout_ms) {
+static int acquire_at(const char *path, uid_t trusted_owner,
+                      unsigned int timeout_ms, int require_readonly) {
     struct timespec deadline;
     struct stat opened_stat;
     unsigned int retry_us = HOSTPID_FALLBACK_LOCK_INITIAL_RETRY_US;
@@ -199,7 +211,8 @@ int hostpid_fallback_lock_acquire_at(const char *path, uid_t trusted_owner,
         }
     }
 
-    if (validate_lock_object(fd, path, trusted_owner, &opened_stat) != 0) {
+    if (validate_lock_object(fd, path, trusted_owner, &opened_stat,
+                             require_readonly) != 0) {
         int saved_errno = errno;
 
         flock(fd, LOCK_UN);
@@ -210,9 +223,14 @@ int hostpid_fallback_lock_acquire_at(const char *path, uid_t trusted_owner,
     return 0;
 }
 
+int hostpid_fallback_lock_acquire_at(const char *path, uid_t trusted_owner,
+                                     unsigned int timeout_ms) {
+    return acquire_at(path, trusted_owner, timeout_ms, 0);
+}
+
 int hostpid_fallback_lock_acquire(void) {
-    return hostpid_fallback_lock_acquire_at(HOSTPID_FALLBACK_LOCK_PATH, 0,
-                                            HOSTPID_FALLBACK_LOCK_TIMEOUT_MS);
+    return acquire_at(HOSTPID_FALLBACK_LOCK_PATH, 0,
+                      HOSTPID_FALLBACK_LOCK_TIMEOUT_MS, 1);
 }
 
 int hostpid_fallback_lock_release(void) {

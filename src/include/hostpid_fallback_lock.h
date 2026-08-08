@@ -9,7 +9,7 @@
 
 #include <sys/types.h>
 
-#define HOSTPID_FALLBACK_LOCK_PATH "/tmp/vgpulock"
+#define HOSTPID_FALLBACK_LOCK_PATH "/tmp/vgpulock/hostpid"
 
 int hostpid_fallback_lock_acquire(void);
 int hostpid_fallback_lock_acquire_at(const char *path, uid_t trusted_owner,

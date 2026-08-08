@@ -4,7 +4,7 @@ The feature is disabled by default.
 
 ## Purpose
 
-The client lets HAMi-core learn its host PID without creating a temporary CUDA primary context during `postInit()`. It uses the version 1 Unix socket protocol documented by HAMi and preserves the existing NVML discovery path as its fallback. A successful broker lookup still initializes NVML before utilization and context accounting use it.
+The client lets HAMi-core learn its host PID without creating a temporary CUDA primary context during `postInit()`. It uses the version 1 Unix socket protocol documented by HAMi and keeps the NVML discovery path as its fallback. A successful broker lookup still initializes NVML before utilization and context accounting use it.
 
 ## Enablement
 
@@ -12,7 +12,7 @@ The client is enabled only when `LIBVGPU_HOSTPID_BROKER` is the exact string `1`
 
 The expected container socket is fixed at `/tmp/vgpulock/hostpid/broker.sock`. A caller cannot redirect the production client to another path.
 
-The companion HAMi device plugin must mount the root-owned broker directory read-only at `/tmp/vgpulock/hostpid`. If this ownership or mount contract is not met, the client rejects the path and uses the NVML fallback.
+The companion HAMi device plugin must mount the root-owned broker directory read-only at `/tmp/vgpulock/hostpid`. If this ownership or mount contract is not met, the broker lookup and node-wide fallback lock both fail safely.
 
 ## Trust checks
 
@@ -34,7 +34,7 @@ One monotonic deadline covers connect, request write, and response read. A trick
 
 ## Fallback
 
-If the gate is disabled or any trust, connection, deadline, or protocol check fails, `postInit()` acquires the existing process death safe lock and runs the current NVML discovery path. The broker failure does not supply a PID and does not bypass the fallback.
+If the gate is disabled, `postInit()` keeps the existing cache-local NVML fallback. If the gate is enabled and any trust, connection, deadline, or protocol check fails, `postInit()` locks the trusted `/tmp/vgpulock/hostpid` directory before the cache record lock and runs the NVML discovery path. The node-wide lock coordinates independent cache files. A missing or untrusted broker mount causes a clear discovery failure instead of returning to cache-local discovery.
 
 ## CUDA context accounting
 
@@ -50,12 +50,16 @@ Hardware validation must prove that the context appears in NVML within the bound
 
 ## Compatibility
 
-1. New HAMi-core with no server uses the existing fallback.
+1. New HAMi-core with the broker disabled keeps the existing cache-local NVML fallback.
 
-2. Old HAMi-core ignores the new environment value and mount.
+2. New HAMi-core with the trusted mount but no running server uses the node-wide NVML fallback.
 
-3. A rejected or unknown protocol version uses the existing fallback.
+3. New HAMi-core with the broker enabled but without the trusted mount fails host PID discovery safely.
 
-4. Existing workloads do not receive the broker mount until they are recreated.
+4. Old HAMi-core ignores the new environment value and mount.
+
+5. A rejected or unknown protocol version uses the node-wide fallback when the trusted mount exists.
+
+6. Existing workloads do not receive the broker mount until they are recreated.
 
 The separate post-init lock migration from [PR 248](https://github.com/Project-HAMi/HAMi-core/pull/248) has a different mixed-binary constraint and is not changed by this client.
