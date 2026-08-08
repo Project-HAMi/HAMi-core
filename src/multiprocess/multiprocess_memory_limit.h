@@ -46,6 +46,12 @@
 #ifndef SHARED_REGION_SWEEP_THRESHOLD
     #define SHARED_REGION_SWEEP_THRESHOLD ((SHARED_REGION_MAX_PROCESS_NUM * 3) / 4)
 #endif
+// Past capacity the sweep could never run, so a table full of dead slots would
+// reach the capacity check and exit. At zero every join sweeps again.
+#if SHARED_REGION_SWEEP_THRESHOLD < 1 || \
+    SHARED_REGION_SWEEP_THRESHOLD > SHARED_REGION_MAX_PROCESS_NUM
+    #error "SHARED_REGION_SWEEP_THRESHOLD must be between 1 and SHARED_REGION_MAX_PROCESS_NUM"
+#endif
 
 // macros for debugging
 #define SEQ_FIX_SHRREG_ACQUIRE_FLOCK_OK 0
