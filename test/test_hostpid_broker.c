@@ -149,9 +149,14 @@ static int make_listener(char *socket_path, size_t socket_path_size,
     socklen_t address_length;
     size_t socket_path_length;
     int listener;
+    int written;
 
     assert(directory_size >= sizeof("/tmp/hami-hostpid-test-XXXXXX"));
-    strcpy(directory, "/tmp/hami-hostpid-test-XXXXXX");
+    written = snprintf(directory, directory_size,
+                       "/tmp/hami-hostpid-test-XXXXXX");
+    if (written < 0 || (size_t)written >= directory_size) {
+        abort();
+    }
     assert(mkdtemp(directory) != NULL);
     assert(snprintf(socket_path, socket_path_size, "%s/broker.sock",
                     directory) > 0);
