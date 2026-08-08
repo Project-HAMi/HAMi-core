@@ -26,6 +26,11 @@
 #define REQUEST_SIZE 8
 #define RESPONSE_SIZE 12
 
+enum {
+    kOverlongSocketPathSize =
+        sizeof(((struct sockaddr_un *)0)->sun_path) + 2,
+};
+
 typedef void (*server_action_t)(int connection);
 
 static void read_request(int connection) {
@@ -269,7 +274,7 @@ static void test_missing_socket(void) {
     assert(host_pid == 0);
     assert(errno == EINVAL);
 
-    char long_path[sizeof(((struct sockaddr_un *)0)->sun_path) + 2];
+    char long_path[kOverlongSocketPathSize];
     memset(long_path, 'a', sizeof(long_path));
     long_path[0] = '/';
     long_path[sizeof(long_path) - 1] = '\0';
