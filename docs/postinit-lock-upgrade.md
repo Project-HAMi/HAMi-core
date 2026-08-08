@@ -18,8 +18,9 @@ The trusted broker path does not create a temporary CUDA context and does not
 take the post-init lock. After validating the broker response, it initializes
 NVML, maps visible CUDA devices by PCI identity, and updates the process slot
 under the shared region lock. It can overlap with a locked NVML fallback because
-it does not enter the context probe section. A rejected broker response uses the
-fallback protected by the record lock described above.
+it does not enter the context probe section. If the broker is disabled,
+unavailable, untrusted, too slow, or returns an invalid response, `postInit()`
+uses the NVML fallback protected by the record lock described above.
 
 The local mixed protocol probe reproduces the overlap directly. It is under
 `evidence/issue-1662/lock-benchmark/mixed_protocol_probe.c` in the companion
