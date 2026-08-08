@@ -16,7 +16,7 @@ labels: bug
 **Anything else we need to know?**:
 
 - The output of `nvidia-smi -a` on your host
-- Your Docker or containerd configuration file
+- Relevant Docker or containerd configuration sections. Omit credentials, tokens, passwords, private keys, certificates, and unrelated host data.
 - The HAMi-core logs and relevant `LIBCUDA_LOG_LEVEL`
 - The build and workload reproduction commands
 - Relevant `CUDA_DEVICE_MEMORY_LIMIT`, `CUDA_DEVICE_SM_LIMIT`, and `LD_PRELOAD` values
