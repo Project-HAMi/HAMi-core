@@ -26,6 +26,10 @@
 #define HOSTPID_REQUEST_SIZE 8
 #define HOSTPID_RESPONSE_SIZE 12
 
+enum {
+    kUnixSocketPathCapacity = sizeof(((struct sockaddr_un *)0)->sun_path),
+};
+
 #ifndef HOSTPID_TIMEOUT_MS
 #define HOSTPID_TIMEOUT_MS 500
 #endif
@@ -248,7 +252,7 @@ int hostpid_broker_validate_trust(const char *socket_path,
     struct stat socket_stat;
     struct stat directory_stat;
     struct statvfs filesystem_stat;
-    char directory[sizeof(((struct sockaddr_un *)0)->sun_path)];
+    char directory[kUnixSocketPathCapacity];
 
     if (socket_directory(socket_path, directory, sizeof(directory)) != 0) {
         return -1;
