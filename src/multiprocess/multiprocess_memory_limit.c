@@ -1055,7 +1055,20 @@ int set_env_utilization_switch() {
     }
     return 0;
 }
-
+ //  returns 1 if any is present, 0 if all are missing.
+int env_limit_family_present(const char* base_name) {
+    if (getenv(base_name) != NULL) {
+        return 1;
+    }
+    for (int i = 0; i < CUDA_DEVICE_MAX_COUNT; i++) {
+        char indexed_name[64];
+        snprintf(indexed_name, sizeof(indexed_name), "%s_%d", base_name, i);
+        if (getenv(indexed_name) != NULL) {
+            return 1;
+        }
+    }
+    return 0;
+}
 void try_create_shrreg() {
     LOG_DEBUG("Try create shrreg")
     if (region_info.fd == -1) {
@@ -1153,26 +1166,45 @@ void try_create_shrreg() {
                     MAJOR_VERSION, MINOR_VERSION,
                     region->major_version, region->minor_version);
         }
-        uint64_t local_limits[CUDA_DEVICE_MAX_COUNT];
-        do_init_device_memory_limits(local_limits, CUDA_DEVICE_MAX_COUNT);
-        int i;
-        for (i = 0; i < CUDA_DEVICE_MAX_COUNT; ++i) {
-            if (local_limits[i] != region->limit[i]) {
-                LOG_ERROR("Limit inconsistency detected for %dth device"
-                    ", %lu expected, get %lu", 
-                    i, local_limits[i], region->limit[i]);
+        /*
+         * when environment variables are stripped (fork+exec with cleaned env,
+         * ssh, su, systemd), skip the consistency check and adopt shared memory
+         * limits directly...prevents false ERROR logs when the child inherits
+         * limits correctly via mmap but has no env vars to compare against.
+         */
+        int mem_env_present = env_limit_family_present(CUDA_DEVICE_MEMORY_LIMIT);
+        int sm_env_present = env_limit_family_present(CUDA_DEVICE_SM_LIMIT);
+        if (mem_env_present) {
+            uint64_t local_limits[CUDA_DEVICE_MAX_COUNT];
+            do_init_device_memory_limits(local_limits, CUDA_DEVICE_MAX_COUNT);
+            int i;
+            for (i = 0; i < CUDA_DEVICE_MAX_COUNT; ++i) {
+                if (local_limits[i] != region->limit[i]) {
+                    LOG_ERROR("Limit inconsistency detected for %dth device"
+                        ", %lu expected, get %lu", 
+                        i, local_limits[i], region->limit[i]);
+                }
             }
+        } else {
+            LOG_INFO("Memory env vars stripped; adopting shared memory limits "
+                     "for pid=%d", getpid());
         }
-        do_init_device_sm_limits(local_limits,CUDA_DEVICE_MAX_COUNT);
-        for (i = 0; i < CUDA_DEVICE_MAX_COUNT; ++i) {
-            if (local_limits[i] != region->sm_limit[i]) {
-                LOG_INFO("SM limit inconsistency detected for %dth device"
-                    ", %lu expected, get %lu", 
-                    i, local_limits[i], region->sm_limit[i]);
-            //    exit(1); 
+        if (sm_env_present) {
+            uint64_t local_limits[CUDA_DEVICE_MAX_COUNT];
+            do_init_device_sm_limits(local_limits, CUDA_DEVICE_MAX_COUNT);
+            int i;
+            for (i = 0; i < CUDA_DEVICE_MAX_COUNT; ++i) {
+                if (local_limits[i] != region->sm_limit[i]) {
+                    LOG_INFO("SM limit inconsistency detected for %dth device"
+                        ", %lu expected, get %lu", 
+                        i, local_limits[i], region->sm_limit[i]);
+                }
             }
+        } else {
+            LOG_INFO("SM env vars stripped; adopting shared memory limits "
+                     "for pid=%d", getpid());
         }
-    }
+    } 
     region->last_kernel_time = region_info.last_kernel_time;
     if (lockf(fd, F_ULOCK, SHARED_REGION_SIZE_MAGIC) != 0) {
         LOG_ERROR("Fail to unlock shrreg %s: errno=%d", shr_reg_file, errno);
