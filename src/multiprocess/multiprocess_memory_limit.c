@@ -787,6 +787,22 @@ void lock_shrreg() {
                 }
                 continue;  // slow wait path
             }
+            // RECOVERY: unlock_shrreg() race where owner_pid was cleared
+            // but sem_post() never executed (e.g., SIGKILL between the two)
+            if (current_owner == 0 && trials > 5) {
+                int sem_val;
+                if (sem_getvalue(&region->sem, &sem_val) == 0 && sem_val < 0) {
+                    LOG_WARN("Detected stuck semaphore with owner_pid == 0 "
+                             "(possible unlock race), forcing recovery post");
+                    if (sem_post(&region->sem) != 0) {
+                        LOG_ERROR("Forced sem_post failed: errno=%d", errno);
+                    } else {
+                        LOG_INFO("Recovered stuck semaphore successfully");
+                    }
+                }
+                usleep(10000);
+                continue;
+            }
 
             // If we're still waiting after many tries, something is seriously wrong
             if (trials > 30) {  // 30 × 10s = 5 minutes
@@ -812,7 +828,10 @@ void unlock_shrreg() {
 
     __sync_synchronize();
     region->owner_pid = 0;
-    // TODO: irregular exit here will hang pending locks
+    // NOTE: If SIGKILL arrives between owner_pid = 0 and sem_post(),
+    // the semaphore remains locked with no owner...recovery exists in
+    // lock_shrreg() which detects owner_pid == 0 after timeout and
+    // forces a sem_post() to unstick pending waiters.
     SEQ_POINT_MARK(SEQ_RESET_OWNER_OK);
 
     sem_post(&region->sem);
