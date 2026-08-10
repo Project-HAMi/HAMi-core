@@ -19,5 +19,5 @@ static const struct timespec g_wait = {
 
 void rate_limiter(int grids, int blocks);
 void init_utilization_watcher();
-void* utilization_watcher();
+void* utilization_watcher(void *arg);
 int setspec();

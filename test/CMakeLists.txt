@@ -1,5 +1,13 @@
 
-find_package(CUDA REQUIRED)
+# The FindCUDA module was deprecated in CMake 3.10 and is removed under
+# policy CMP0146 (CMake >= 3.27).  Use first-class CUDA language support
+# plus FindCUDAToolkit instead.
+enable_language(CUDA)
+find_package(CUDAToolkit REQUIRED)
+
+# Match the previous behavior of linking the shared CUDA runtime
+# (-lcudart) rather than the static default of the CUDA language support.
+set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
 
 set(TEST_CPP_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(TEST_TARGET_NAMES_LIST) 
@@ -28,7 +36,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_SCRIPT MATCHES ".*cu")
-        cuda_add_executable(${TEST_TARGET_NAME}  ${TEST_SCRIPT})
+        add_executable(${TEST_TARGET_NAME}  ${TEST_SCRIPT})
     else()
         add_executable(${TEST_TARGET_NAME}  ${TEST_SCRIPT})
     endif()
@@ -38,7 +46,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     else()
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread
-            -lnvidia-ml -lcuda -lcudart -L${CUDA_HOME}/lib64)
+            -lnvidia-ml CUDA::cuda_driver CUDA::cudart)
     endif()
     target_compile_options(${TEST_TARGET_NAME} PUBLIC ${TEST_COMPILE_FLAGS})
 

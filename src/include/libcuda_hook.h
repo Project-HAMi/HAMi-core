@@ -30,10 +30,13 @@ typedef CUresult (*cuda_sym_t)();
 
 #define CUDA_FIND_ENTRY(table, sym) ({ (table)[CUDA_OVERRIDE_ENUM(sym)].fn_ptr; })
 
+/* Call through the hooked symbol's real function type.  An empty parameter
+ * list "()" declares a zero-argument prototype in C23 (making these calls a
+ * compile error with e.g. gcc 15), and was unchecked in older C anyway. */
 #define CUDA_OVERRIDE_CALL(table, sym, ...)                                    \
   ({    \
     LOG_DEBUG("Hijacking %s", #sym);                                           \
-    cuda_sym_t _entry = (cuda_sym_t)CUDA_FIND_ENTRY(table, sym);               \
+    typeof(&sym) _entry = (typeof(&sym))CUDA_FIND_ENTRY(table, sym);           \
     if (_entry == NULL) {                                                      \
       LOG_ERROR("Hijack failed: %s is NULL", #sym);                            \
     }                                                                          \

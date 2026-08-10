@@ -6,6 +6,13 @@
 #include "include/utils.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
+/* Forward declarations for hooked entry points that NVML_OVERRIDE_CALL
+ * references (via typeof) before their definitions below. */
+nvmlReturn_t nvmlInit_v2(void);
+nvmlReturn_t nvmlDeviceGetCount_v2(unsigned int *deviceCount);
+nvmlReturn_t nvmlDeviceGetMemoryInfo(nvmlDevice_t device, nvmlMemory_t *memory);
+nvmlReturn_t nvmlDeviceGetMemoryInfo_v2(nvmlDevice_t device, nvmlMemory_v2_t *memory);
+
 entry_t nvml_library_entry[] = {
     {.name = "nvmlInit"},
     {.name = "nvmlShutdown"},

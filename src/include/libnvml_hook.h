@@ -24,16 +24,19 @@ typedef nvmlReturn_t (*driver_sym_t)();
 
 #define NVML_FIND_ENTRY(table, sym) ({ (table)[NVML_OVERRIDE_ENUM(sym)].fn_ptr; })
 
+/* Call through the hooked symbol's real function type.  An empty parameter
+ * list "()" declares a zero-argument prototype in C23 (making these calls a
+ * compile error with e.g. gcc 15), and was unchecked in older C anyway. */
 #define NVML_OVERRIDE_CALL(table, sym, ...)                                    \
   ({                                                                           \
     LOG_DEBUG("Hijacking %s", #sym);                                           \
-    driver_sym_t _entry = NVML_FIND_ENTRY(table, sym);                         \
+    typeof(&sym) _entry = (typeof(&sym))NVML_FIND_ENTRY(table, sym);           \
     _entry(__VA_ARGS__);                                                       \
   })
 
 #define NVML_OVERRIDE_CALL_NO_LOG(table, sym, ...)                             \
   ({                                                                           \
-    driver_sym_t _entry = NVML_FIND_ENTRY(table, sym);                         \
+    typeof(&sym) _entry = (typeof(&sym))NVML_FIND_ENTRY(table, sym);           \
     _entry(__VA_ARGS__);                                                       \
   })
 

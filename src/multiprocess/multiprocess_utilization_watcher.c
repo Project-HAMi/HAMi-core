@@ -265,7 +265,8 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
     return 0;
 }
 
-void* utilization_watcher() {
+void* utilization_watcher(void *arg) {
+    (void)arg;
     nvmlInit();
     int userutil[CUDA_DEVICE_MAX_COUNT];
     int sysprocnum;
