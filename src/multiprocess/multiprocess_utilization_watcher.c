@@ -86,13 +86,27 @@ static void change_token(int64_t delta, int device_id) {
 static int64_t delta(int up_limit, int user_current, int64_t share, int device_id) {
   int utilization_diff =
       abs(up_limit - user_current) < 5 ? 5 : abs(up_limit - user_current);
+  /* Scale the correction step linearly with the device's compute size.
+   * The previous sm_num * sm_num factor grows quadratically with the SM
+   * count relative to the pool (pool = sm_num * max_thread * 32, so the
+   * step/pool ratio is sm_num * diff / 81920). On 188 SMs a large error
+   * plus the acceleration branch reached ~2M tokens per 120ms tick and
+   * refilled the ~9.2M pool in under a second, while draining it took
+   * minutes -- the controller degenerated into a bang-bang loop whose ON
+   * phase ran at ~100% utilization for minutes. */
   int64_t increment =
-      (int64_t)g_sm_num[device_id] * (int64_t)g_sm_num[device_id] *
+      (int64_t)g_sm_num[device_id] *
       (int64_t)g_max_thread_per_sm[device_id] * (int64_t)utilization_diff / 2560;
 
   /* Accelerate cuda cores allocation when utilization vary widely */
   if (utilization_diff > up_limit / 2) {
     increment = increment * utilization_diff * 2 / (up_limit + 1);
+  }
+
+  /* Bound a single correction step so even very large devices converge in
+   * measured steps instead of saturating the pool in one tick. */
+  if (increment > g_total_cuda_cores[device_id] / 10) {
+    increment = g_total_cuda_cores[device_id] / 10;
   }
 
   if (user_current <= up_limit) {
@@ -190,7 +204,10 @@ int setspec() {
             CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, cu_dev));
         CHECK_CU_RESULT(cuDeviceGetAttribute(&g_max_thread_per_sm[dev],
             CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_MULTIPROCESSOR, cu_dev));
-        g_total_cuda_cores[dev] = g_max_thread_per_sm[dev] * g_sm_num[dev] * FACTOR;
+        /* Promote to int64_t before multiplying — an int product could
+         * overflow on very large future devices and a wrapped total would
+         * corrupt the per-tick correction cap derived from it. */
+        g_total_cuda_cores[dev] = (int64_t)g_max_thread_per_sm[dev] * g_sm_num[dev] * FACTOR;
         LOG_INFO("setspec: device %d sm_num=%d max_threads_per_sm=%d total_cores=%ld FACTOR=%d",
                  dev, g_sm_num[dev], g_max_thread_per_sm[dev], g_total_cuda_cores[dev], FACTOR);
     }
