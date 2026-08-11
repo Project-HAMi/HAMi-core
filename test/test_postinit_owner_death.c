@@ -592,6 +592,7 @@ static int test_shared_fallback_deadline(void) {
     pid_t global_holder = 0;
     pid_t cache_holder = 0;
     int global_acquired = 0;
+    int cache_acquired = 0;
     int global_status = 0;
     int cache_status = 0;
     int result = -1;
@@ -654,7 +655,12 @@ static int test_shared_fallback_deadline(void) {
     global_acquired = 1;
     global_elapsed = now_ms() - started;
     errno = 0;
-    if (lock_postinit_deadline(&deadline) != 0 || errno != ETIMEDOUT) {
+    if (lock_postinit_deadline(&deadline) != 0) {
+        cache_acquired = 1;
+        fprintf(stderr, "cache lock did not consume the global deadline\n");
+        goto cleanup;
+    }
+    if (errno != ETIMEDOUT) {
         fprintf(stderr, "cache lock did not consume the global deadline\n");
         goto cleanup;
     }
@@ -673,6 +679,9 @@ static int test_shared_fallback_deadline(void) {
     result = 0;
 
 cleanup:
+    if (cache_acquired) {
+        unlock_postinit();
+    }
     if (global_acquired && hostpid_fallback_lock_release() != 0) {
         fprintf(stderr, "shared deadline global release failed\n");
         result = -1;
