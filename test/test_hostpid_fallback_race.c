@@ -252,7 +252,8 @@ static int create_cache_files(const char *directory, int count,
     for (index = 0; index < count; index++) {
         int fd;
 
-        snprintf(paths[index], 4096, "%s/cache-%d", directory, index);
+        snprintf(paths[index], sizeof(paths[index]), "%s/cache-%d", directory,
+                 index);
         fd = open(paths[index], O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
         if (fd < 0) {
             return -1;
