@@ -575,11 +575,14 @@ static void test_waiter_cancellation(const char *path) {
 }
 
 static void test_owner_death(const char *path) {
-    int ready[2];
+    int ready[2] = {-1, -1};
     pid_t child;
     char byte;
 
-    check(pipe(ready) == 0, "owner death pipe");
+    if (pipe(ready) != 0) {
+        check(0, "owner death pipe");
+        return;
+    }
     child = fork();
     check(child >= 0, "owner death fork");
     if (child == 0) {

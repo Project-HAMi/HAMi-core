@@ -507,6 +507,7 @@ static int test_live_cache_holder_timeout(void) {
         goto fail;
     }
     close(ready[0]);
+    ready[0] = -1;
 
     started = now_ms();
     errno = 0;
