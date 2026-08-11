@@ -21,6 +21,18 @@
 #include <unistd.h>
 
 static int failures;
+static int waiter_ready_fd = -1;
+
+static void signal_waiter_ready(void) {
+    if (waiter_ready_fd >= 0) {
+        char byte = '1';
+
+        if (write(waiter_ready_fd, &byte, 1) != 1) {
+            _exit(4);
+        }
+        waiter_ready_fd = -1;
+    }
+}
 
 static int parse_unsigned(const char *value, unsigned long *parsed) {
     char *end = NULL;
@@ -80,6 +92,7 @@ static int probe_default_lock(const char *hold_value) {
         return 2;
     }
     if (hostpid_fallback_lock_acquire() != 0) {
+        fprintf(stderr, "rejected_errno=%d\n", errno);
         perror("hostpid_fallback_lock_acquire");
         return 3;
     }
@@ -104,6 +117,45 @@ static void check(int condition, const char *message) {
     }
 }
 
+static int join_path(char *destination, size_t destination_size,
+                     const char *parent, const char *suffix) {
+    size_t parent_length = strlen(parent);
+    size_t suffix_length = strlen(suffix);
+
+    if (parent_length >= destination_size ||
+        suffix_length >= destination_size - parent_length) {
+        if (destination_size > 0) {
+            destination[0] = '\0';
+        }
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    memcpy(destination, parent, parent_length);
+    memcpy(destination + parent_length, suffix, suffix_length + 1);
+    return 0;
+}
+
+static void test_discovery_path_selection(void) {
+    int failures_before = failures;
+
+    check(hostpid_discovery_path_select(0, 1) ==
+              HOSTPID_DISCOVERY_BROKER,
+          "broker success bypasses disabled fallback");
+    check(hostpid_discovery_path_select(1, 1) ==
+              HOSTPID_DISCOVERY_BROKER,
+          "broker success bypasses enabled fallback");
+    check(hostpid_discovery_path_select(0, 0) ==
+              HOSTPID_DISCOVERY_CACHE_LOCAL,
+          "broker disabled failure selects cache local fallback");
+    check(hostpid_discovery_path_select(1, 0) ==
+              HOSTPID_DISCOVERY_NODE_WIDE,
+          "broker enabled failure selects node wide fallback");
+    if (failures == failures_before) {
+        puts("broker_success_bypass=passed");
+        puts("forced_fallback_selection=passed");
+    }
+}
+
 static int wait_for_child(pid_t child, int expected_status) {
     int status;
 
@@ -116,13 +168,38 @@ static int wait_for_child(pid_t child, int expected_status) {
     return 0;
 }
 
+static double monotonic_milliseconds(void) {
+    struct timespec now;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+        return -1.0;
+    }
+    return (double)now.tv_sec * 1000.0 +
+           (double)now.tv_nsec / 1000000.0;
+}
+
 static int child_timeout(const char *path, unsigned int timeout_ms) {
+    double started = monotonic_milliseconds();
+    double elapsed;
+
+    if (started < 0.0) {
+        return 4;
+    }
     hostpid_fallback_lock_after_fork();
     if (hostpid_fallback_lock_acquire_at(path, getuid(), timeout_ms) == 0) {
         hostpid_fallback_lock_release();
         return 2;
     }
-    return errno == ETIMEDOUT ? 0 : 3;
+    if (errno != ETIMEDOUT) {
+        return 3;
+    }
+    elapsed = monotonic_milliseconds() - started;
+    dprintf(STDOUT_FILENO, "timeout_elapsed_ms=%.3f\n", elapsed);
+    if (elapsed < (double)timeout_ms / 2.0 ||
+        elapsed > (double)timeout_ms + 500.0) {
+        return 5;
+    }
+    return 0;
 }
 
 static int child_acquire(const char *path, unsigned int timeout_ms) {
@@ -181,6 +258,42 @@ static int wait_until_child_opened(pid_t child, const char *path) {
     return -1;
 }
 
+static void test_absolute_deadline_api(const char *path) {
+    struct timespec deadline;
+    struct timespec delay = {.tv_sec = 0, .tv_nsec = 5000000L};
+
+    errno = 0;
+    check(hostpid_fallback_lock_deadline_after_ms(NULL, 50U) == -1 &&
+              errno == EINVAL,
+          "null deadline output is rejected");
+    errno = 0;
+    check(hostpid_fallback_lock_deadline_after_ms(&deadline, 0U) == -1 &&
+              errno == EINVAL,
+          "zero deadline duration is rejected");
+    errno = 0;
+    check(hostpid_fallback_lock_acquire_at_until(path, getuid(), NULL) == -1 &&
+              errno == EINVAL,
+          "null absolute deadline is rejected");
+
+    check(hostpid_fallback_lock_deadline_after_ms(&deadline, 500U) == 0,
+          "future absolute deadline is created");
+    check(hostpid_fallback_lock_acquire_at_until(path, getuid(),
+                                                 &deadline) == 0,
+          "absolute deadline acquire succeeds");
+    check(hostpid_fallback_lock_release() == 0,
+          "absolute deadline acquire releases");
+
+    check(hostpid_fallback_lock_deadline_after_ms(&deadline, 1U) == 0,
+          "short absolute deadline is created");
+    while (nanosleep(&delay, &delay) != 0 && errno == EINTR) {
+    }
+    errno = 0;
+    check(hostpid_fallback_lock_acquire_at_until(path, getuid(),
+                                                 &deadline) == -1 &&
+              errno == ETIMEDOUT,
+          "expired absolute deadline is rejected");
+}
+
 static void test_basic_contract(const char *path) {
     int fd;
 
@@ -207,12 +320,29 @@ static void test_basic_contract(const char *path) {
 static void test_path_trust(const char *path) {
     char file_path[] = "/tmp/hami-hostpid-lock-file.XXXXXX";
     char link_path[] = "/tmp/hami-hostpid-lock-link.XXXXXX";
+    char ancestor_directory[] = "/tmp/hami-hostpid-lock-ancestor.XXXXXX";
+    char ancestor_link[PATH_MAX];
+    char ancestor_nested_target[PATH_MAX];
+    char ancestor_target[PATH_MAX];
+    char missing_path[] = "/tmp/hami-hostpid-lock-missing.XXXXXX";
+    char nested_path[PATH_MAX];
     int file_fd;
 
     errno = 0;
     check(hostpid_fallback_lock_acquire_at("relative", getuid(), 50) == -1 &&
               errno == EINVAL,
           "relative path is rejected");
+
+    file_fd = mkstemp(missing_path);
+    check(file_fd >= 0, "missing path fixture name");
+    if (file_fd >= 0) {
+        close(file_fd);
+        unlink(missing_path);
+        errno = 0;
+        check(hostpid_fallback_lock_acquire_at(missing_path, getuid(), 50) ==
+                  -1 && errno == ENOENT,
+              "missing path is rejected");
+    }
 
     file_fd = mkstemp(file_path);
     check(file_fd >= 0, "regular file fixture");
@@ -238,6 +368,51 @@ static void test_path_trust(const char *path) {
     check(hostpid_fallback_lock_acquire_at(path, getuid() + 1U, 50) == -1 &&
               errno == EACCES,
           "unexpected owner is rejected");
+
+#ifdef __linux__
+    check(mkdtemp(ancestor_directory) != NULL,
+          "symlink ancestor fixture directory");
+    check(join_path(ancestor_target, sizeof(ancestor_target),
+                    ancestor_directory, "/target") == 0,
+          "symlink ancestor target path");
+    check(join_path(ancestor_link, sizeof(ancestor_link),
+                    ancestor_directory, "/link") == 0,
+          "symlink ancestor link path");
+    check(join_path(ancestor_nested_target,
+                    sizeof(ancestor_nested_target), ancestor_target,
+                    "/nested") == 0,
+          "symlink ancestor nested target path");
+    check(join_path(nested_path, sizeof(nested_path), ancestor_link,
+                    "/nested") == 0,
+          "symlink ancestor nested path");
+    check(mkdir(ancestor_target, 0700) == 0,
+          "symlink ancestor target directory");
+    check(mkdir(ancestor_nested_target, 0700) == 0,
+          "symlink ancestor nested directory");
+    check(symlink(ancestor_target, ancestor_link) == 0,
+          "symlink ancestor fixture");
+    errno = 0;
+    check(hostpid_fallback_lock_acquire_at(nested_path, getuid(), 50) == -1,
+          "symlink ancestor is rejected");
+    unlink(ancestor_link);
+    rmdir(ancestor_nested_target);
+    rmdir(ancestor_target);
+    rmdir(ancestor_directory);
+
+    snprintf(nested_path, sizeof(nested_path), "/tmp/../tmp/%s",
+             strrchr(path, '/') + 1);
+    errno = 0;
+    check(hostpid_fallback_lock_acquire_at(nested_path, getuid(), 50) == -1 &&
+              errno == EINVAL,
+          "parent traversal is rejected");
+#else
+    (void)ancestor_directory;
+    (void)ancestor_link;
+    (void)ancestor_nested_target;
+    (void)ancestor_target;
+    (void)nested_path;
+    puts("ancestor path tests skipped: Linux required");
+#endif
 }
 
 static void test_live_holder_timeout(const char *path) {
@@ -254,6 +429,149 @@ static void test_live_holder_timeout(const char *path) {
         check(wait_for_child(child, 0) == 0, "live holder times out waiter");
     }
     check(hostpid_fallback_lock_release() == 0, "timeout holder release");
+}
+
+static void test_deadline_not_renewed(const char *path) {
+    int begin_release[2];
+    int ready[2];
+    pid_t holder;
+    pid_t waiter;
+    char byte;
+
+    if (access("/proc/self/fd", R_OK) != 0) {
+        puts("deadline renewal test skipped: /proc/self/fd unavailable");
+        return;
+    }
+    if (pipe(ready) != 0) {
+        check(0, "deadline holder pipes");
+        return;
+    }
+    if (pipe(begin_release) != 0) {
+        check(0, "deadline holder pipes");
+        close(ready[0]);
+        close(ready[1]);
+        return;
+    }
+    holder = fork();
+    check(holder >= 0, "deadline holder fork");
+    if (holder < 0) {
+        close(ready[0]);
+        close(ready[1]);
+        close(begin_release[0]);
+        close(begin_release[1]);
+        return;
+    }
+    if (holder == 0) {
+        struct timespec hold = {.tv_sec = 0, .tv_nsec = 110000000L};
+
+        close(ready[0]);
+        close(begin_release[1]);
+        hostpid_fallback_lock_after_fork();
+        if (hostpid_fallback_lock_acquire_at(path, getuid(), 500) != 0 ||
+            write(ready[1], "1", 1) != 1) {
+            _exit(2);
+        }
+        close(ready[1]);
+        if (read(begin_release[0], &byte, 1) != 1) {
+            _exit(3);
+        }
+        close(begin_release[0]);
+        while (nanosleep(&hold, &hold) != 0 && errno == EINTR) {
+        }
+        _exit(hostpid_fallback_lock_release() == 0 ? 0 : 4);
+    }
+    close(ready[1]);
+    close(begin_release[0]);
+    if (read(ready[0], &byte, 1) != 1) {
+        check(0, "deadline holder acquired");
+        close(ready[0]);
+        close(begin_release[1]);
+        kill(holder, SIGKILL);
+        waitpid(holder, NULL, 0);
+        return;
+    }
+    close(ready[0]);
+
+    waiter = fork();
+    check(waiter >= 0, "deadline waiter fork");
+    if (waiter == 0) {
+        _exit(child_timeout(path, 80));
+    }
+    if (waiter > 0) {
+        check(wait_until_child_opened(waiter, path) == 0,
+              "deadline waiter opened the lock object");
+        check(write(begin_release[1], "1", 1) == 1,
+              "deadline holder release timer started");
+        close(begin_release[1]);
+        check(wait_for_child(waiter, 0) == 0,
+              "deadline is not renewed by owner release");
+    } else {
+        close(begin_release[1]);
+    }
+    check(wait_for_child(holder, 0) == 0,
+          "deadline holder release");
+}
+
+static void test_waiter_cancellation(const char *path) {
+    int started[2];
+    pid_t child;
+    char byte;
+    int status;
+
+    check(hostpid_fallback_lock_acquire_at(path, getuid(), 500) == 0,
+          "cancellation holder acquire");
+    if (pipe(started) != 0) {
+        check(0, "cancellation start pipe");
+        hostpid_fallback_lock_release();
+        return;
+    }
+    child = fork();
+    check(child >= 0, "cancellation waiter fork");
+    if (child < 0) {
+        close(started[0]);
+        close(started[1]);
+        hostpid_fallback_lock_release();
+        return;
+    }
+    if (child == 0) {
+        close(started[0]);
+        hostpid_fallback_lock_after_fork();
+        if (write(started[1], "1", 1) != 1) {
+            _exit(3);
+        }
+        close(started[1]);
+        if (hostpid_fallback_lock_acquire_at(path, getuid(), 5000) == 0) {
+            hostpid_fallback_lock_release();
+            _exit(4);
+        }
+        _exit(5);
+    }
+    if (child > 0) {
+        close(started[1]);
+        check(read(started[0], &byte, 1) == 1,
+              "cancellation waiter started");
+        close(started[0]);
+        if (access("/proc/self/fd", R_OK) == 0) {
+            check(wait_until_child_opened(child, path) == 0,
+                  "cancellation waiter opened the lock object");
+        }
+        check(kill(child, SIGKILL) == 0,
+              "cancellation waiter killed");
+        check(waitpid(child, &status, 0) == child &&
+                  WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL,
+              "cancellation waiter reaped");
+    }
+    check(hostpid_fallback_lock_release() == 0,
+          "cancellation holder release");
+    child = fork();
+    check(child >= 0, "post cancellation contender fork");
+    if (child == 0) {
+        _exit(child_acquire(path, 500));
+    }
+    if (child > 0) {
+        check(wait_for_child(child, 0) == 0,
+              "lock recovers after waiter cancellation");
+    }
 }
 
 static void test_owner_death(const char *path) {
@@ -348,29 +666,80 @@ static void test_exec_cleanup(const char *path, const char *program) {
     check(hostpid_fallback_lock_release() == 0, "exec holder release");
 }
 
+static void test_permission_change_while_waiting(const char *path) {
+    int failures_before = failures;
+    int ready[2];
+    pid_t child;
+    char byte;
+
+    check(hostpid_fallback_lock_acquire_at(path, getuid(), 500) == 0,
+          "permission change holder acquire");
+    if (pipe(ready) != 0) {
+        check(0, "permission change ready pipe");
+        hostpid_fallback_lock_release();
+        return;
+    }
+    waiter_ready_fd = ready[1];
+    hostpid_fallback_lock_set_before_flock_hook(
+        signal_waiter_ready);
+    child = fork();
+    check(child >= 0, "permission change waiter fork");
+    if (child == 0) {
+        close(ready[0]);
+        hostpid_fallback_lock_after_fork();
+        if (hostpid_fallback_lock_acquire_at(path, getuid(), 1000) == 0) {
+            hostpid_fallback_lock_release();
+            _exit(2);
+        }
+        _exit(errno == EACCES ? 0 : 3);
+    }
+    if (child > 0) {
+        close(ready[1]);
+        check(read(ready[0], &byte, 1) == 1,
+              "permission change waiter passed initial validation");
+        close(ready[0]);
+        hostpid_fallback_lock_set_before_flock_hook(NULL);
+        check(chmod(path, 0777) == 0,
+              "permission change makes lock object untrusted");
+        check(hostpid_fallback_lock_release() == 0,
+              "permission change holder release");
+        check(wait_for_child(child, 0) == 0,
+              "permission change is rejected after lock acquisition");
+        check(chmod(path, 0700) == 0,
+              "permission change restores lock object");
+    } else {
+        close(ready[0]);
+        close(ready[1]);
+        hostpid_fallback_lock_set_before_flock_hook(NULL);
+        hostpid_fallback_lock_release();
+    }
+    if (failures == failures_before) {
+        puts("permission_change_rejected=passed");
+    }
+}
+
 static void test_path_replacement(const char *path) {
     char old_path[4096];
+    int failures_before = failures;
     int reset_ready[2];
     pid_t child;
     char byte;
 
-    if (access("/proc/self/fd", R_OK) != 0) {
-        puts("path replacement test skipped: /proc/self/fd unavailable");
-        return;
-    }
     snprintf(old_path, sizeof(old_path), "%s.old", path);
-    check(pipe(reset_ready) == 0, "replacement reset pipe");
     check(hostpid_fallback_lock_acquire_at(path, getuid(), 500) == 0,
           "replacement holder acquire");
+    if (pipe(reset_ready) != 0) {
+        check(0, "replacement reset pipe");
+        hostpid_fallback_lock_release();
+        return;
+    }
+    waiter_ready_fd = reset_ready[1];
+    hostpid_fallback_lock_set_before_flock_hook(signal_waiter_ready);
     child = fork();
     check(child >= 0, "replacement contender fork");
     if (child == 0) {
         close(reset_ready[0]);
         hostpid_fallback_lock_after_fork();
-        if (write(reset_ready[1], "1", 1) != 1) {
-            _exit(4);
-        }
-        close(reset_ready[1]);
         if (hostpid_fallback_lock_acquire_at(path, getuid(), 1000) == 0) {
             hostpid_fallback_lock_release();
             _exit(2);
@@ -380,10 +749,9 @@ static void test_path_replacement(const char *path) {
     if (child > 0) {
         close(reset_ready[1]);
         check(read(reset_ready[0], &byte, 1) == 1,
-              "replacement child reset inherited state");
+              "replacement waiter passed initial validation");
         close(reset_ready[0]);
-        check(wait_until_child_opened(child, path) == 0,
-              "replacement contender opened original object");
+        hostpid_fallback_lock_set_before_flock_hook(NULL);
         check(rename(path, old_path) == 0, "replace original path");
         check(mkdir(path, 0700) == 0, "create replacement path");
         check(hostpid_fallback_lock_release() == 0,
@@ -392,7 +760,99 @@ static void test_path_replacement(const char *path) {
               "replacement is detected after acquisition");
         rmdir(path);
         check(rename(old_path, path) == 0, "restore original path");
+    } else {
+        close(reset_ready[0]);
+        close(reset_ready[1]);
+        hostpid_fallback_lock_set_before_flock_hook(NULL);
+        hostpid_fallback_lock_release();
     }
+    if (failures == failures_before) {
+        puts("path_replacement_rejected=passed");
+    }
+}
+
+static void test_ancestor_change_while_waiting(void) {
+#ifdef __linux__
+    char fixture[] = "/tmp/hami-hostpid-ancestor-change.XXXXXX";
+    char lock_path[PATH_MAX];
+    char original_parent[PATH_MAX];
+    char parent[PATH_MAX];
+    int failures_before = failures;
+    int ready[2];
+    pid_t child;
+    char byte;
+    char *fixture_root;
+
+    fixture_root = mkdtemp(fixture);
+    check(fixture_root != NULL, "ancestor change fixture root");
+    if (fixture_root == NULL) {
+        return;
+    }
+    check(join_path(parent, sizeof(parent), fixture_root, "/parent") == 0,
+          "ancestor change parent path");
+    check(join_path(original_parent, sizeof(original_parent), fixture_root,
+                    "/parent-original") == 0,
+          "ancestor change original parent path");
+    check(join_path(lock_path, sizeof(lock_path), parent, "/lock") == 0,
+          "ancestor change lock path");
+    check(mkdir(parent, 0700) == 0, "ancestor change parent");
+    check(mkdir(lock_path, 0700) == 0, "ancestor change lock object");
+    check(hostpid_fallback_lock_acquire_at(lock_path, getuid(), 500) == 0,
+          "ancestor change holder acquire");
+    if (pipe(ready) != 0) {
+        check(0, "ancestor change ready pipe");
+        hostpid_fallback_lock_release();
+        rmdir(lock_path);
+        rmdir(parent);
+        rmdir(fixture_root);
+        return;
+    }
+    waiter_ready_fd = ready[1];
+    hostpid_fallback_lock_set_before_flock_hook(signal_waiter_ready);
+    child = fork();
+    check(child >= 0, "ancestor change waiter fork");
+    if (child == 0) {
+        close(ready[0]);
+        hostpid_fallback_lock_after_fork();
+        if (hostpid_fallback_lock_acquire_at(lock_path, getuid(), 1000) ==
+            0) {
+            hostpid_fallback_lock_release();
+            _exit(2);
+        }
+        _exit(errno == ELOOP || errno == ENOTDIR ? 0 : 3);
+    }
+    if (child > 0) {
+        close(ready[1]);
+        check(read(ready[0], &byte, 1) == 1,
+              "ancestor change waiter passed initial validation");
+        close(ready[0]);
+        hostpid_fallback_lock_set_before_flock_hook(NULL);
+        check(rename(parent, original_parent) == 0,
+              "ancestor change moves trusted parent");
+        check(symlink(original_parent, parent) == 0,
+              "ancestor change installs symlink parent");
+        check(hostpid_fallback_lock_release() == 0,
+              "ancestor change holder release");
+        check(wait_for_child(child, 0) == 0,
+              "ancestor change is rejected after lock acquisition");
+        check(unlink(parent) == 0, "ancestor change removes symlink parent");
+        check(rename(original_parent, parent) == 0,
+              "ancestor change restores trusted parent");
+    } else {
+        close(ready[0]);
+        close(ready[1]);
+        hostpid_fallback_lock_set_before_flock_hook(NULL);
+        hostpid_fallback_lock_release();
+    }
+    rmdir(lock_path);
+    rmdir(parent);
+    rmdir(fixture_root);
+    if (failures == failures_before) {
+        puts("ancestor_change_rejected=passed");
+    }
+#else
+    puts("ancestor change test skipped: Linux required");
+#endif
 }
 
 int main(int argc, char **argv) {
@@ -425,13 +885,19 @@ int main(int argc, char **argv) {
                  "/tmp/vgpulock/hostpid") == 0,
           "default lock uses the trusted broker mount");
 
+    test_discovery_path_selection();
+    test_absolute_deadline_api(path);
     test_basic_contract(path);
     test_path_trust(path);
     test_live_holder_timeout(path);
+    test_deadline_not_renewed(path);
+    test_waiter_cancellation(path);
     test_owner_death(path);
     test_fork_cleanup(path);
     test_exec_cleanup(path, argv[0]);
+    test_permission_change_while_waiting(path);
     test_path_replacement(path);
+    test_ancestor_change_while_waiting();
 
     if (hostpid_fallback_lock_active_fd() >= 0) {
         hostpid_fallback_lock_release();

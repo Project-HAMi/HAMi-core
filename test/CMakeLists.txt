@@ -24,7 +24,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_fallback_lock.c)
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
-            _GNU_SOURCE)
+            _GNU_SOURCE HOSTPID_FALLBACK_LOCK_TESTING)
     elseif (TEST_TARGET_NAME STREQUAL "test_hostpid_fallback_race")
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/utils.c
@@ -43,7 +43,10 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         add_executable(${TEST_TARGET_NAME}
             ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_memory_limit.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_fallback_lock.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_include_directories(${TEST_TARGET_NAME} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/include)
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
             _GNU_SOURCE)
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
