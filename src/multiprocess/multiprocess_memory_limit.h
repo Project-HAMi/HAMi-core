@@ -171,7 +171,11 @@ int init_device_info();
 void lock_shrreg();
 void unlock_shrreg();
 
-int lock_postinit();  // Returns 1 on success, 0 on lock error
+int lock_postinit(void);  // Returns 1 on success, 0 on lock error
+// Uses one monotonic deadline for the local guard and record lock.
+int lock_postinit_timeout(unsigned int timeout_ms);
+// Consumes the caller's absolute monotonic deadline.
+int lock_postinit_deadline(const struct timespec *deadline);
 void unlock_postinit();
 
 //Setspec of the corresponding device
