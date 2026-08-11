@@ -2,7 +2,7 @@
 #include "multiprocess/multiprocess_memory_limit.h"
 
 extern size_t context_size;
-extern int ctx_activate[16];
+extern int ctx_activate[CUDA_DEVICE_MAX_COUNT];
 
 
 CUresult cuDevicePrimaryCtxGetState( CUdevice dev, unsigned int* flags, int* active ){
