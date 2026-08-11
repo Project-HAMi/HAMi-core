@@ -663,7 +663,7 @@ static int postinit_deadline_after_ms(struct timespec *deadline,
         return 0;
     }
     deadline->tv_sec += timeout_ms / 1000U;
-    deadline->tv_nsec += (long)(timeout_ms % 1000U) * 1000000L;
+    deadline->tv_nsec += (int64_t)(timeout_ms % 1000U) * INT64_C(1000000);
     if (deadline->tv_nsec >= 1000000000L) {
         deadline->tv_sec++;
         deadline->tv_nsec -= 1000000000L;
@@ -702,7 +702,7 @@ static int postinit_sleep_until(unsigned int delay_us,
                                 const struct timespec *deadline) {
     struct timespec delay = {
         .tv_sec = delay_us / 1000000U,
-        .tv_nsec = (long)(delay_us % 1000000U) * 1000L,
+        .tv_nsec = (int64_t)(delay_us % 1000000U) * INT64_C(1000),
     };
 
     if (deadline != NULL) {
@@ -760,7 +760,7 @@ static uint32_t postinit_file_lock_jitter_seed(void) {
     return seed;
 }
 
-static int postinit_file_lock_until(short lock_type,
+static int postinit_file_lock_until(int16_t lock_type,
                                     const struct timespec *deadline) {
     struct flock lock = {
         .l_type = lock_type,

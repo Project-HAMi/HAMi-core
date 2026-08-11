@@ -63,7 +63,7 @@ int hostpid_fallback_lock_deadline_after_ms(struct timespec *deadline,
         return -1;
     }
     deadline->tv_sec += timeout_ms / 1000U;
-    deadline->tv_nsec += (long)(timeout_ms % 1000U) * 1000000L;
+    deadline->tv_nsec += (int64_t)(timeout_ms % 1000U) * INT64_C(1000000);
     if (deadline->tv_nsec >= 1000000000L) {
         deadline->tv_sec++;
         deadline->tv_nsec -= 1000000000L;
@@ -112,7 +112,7 @@ static int sleep_before_retry(unsigned int delay_us,
                               const struct timespec *deadline) {
     struct timespec delay = {
         .tv_sec = delay_us / 1000000U,
-        .tv_nsec = (long)(delay_us % 1000000U) * 1000L,
+        .tv_nsec = (int64_t)(delay_us % 1000000U) * INT64_C(1000),
     };
     struct timespec remaining;
 
@@ -264,44 +264,44 @@ static int open_directory_without_symlinks(const char *path,
 }
 
 #ifdef __linux__
-static int filesystem_type_supported(unsigned long filesystem_type) {
+static int filesystem_type_supported(uint64_t filesystem_type) {
 #ifdef EXT4_SUPER_MAGIC
-    if (filesystem_type == (unsigned long)EXT4_SUPER_MAGIC) {
+    if (filesystem_type == (uint64_t)EXT4_SUPER_MAGIC) {
         return 1;
     }
 #endif
 #ifdef XFS_SUPER_MAGIC
-    if (filesystem_type == (unsigned long)XFS_SUPER_MAGIC) {
+    if (filesystem_type == (uint64_t)XFS_SUPER_MAGIC) {
         return 1;
     }
 #endif
 #ifdef TMPFS_MAGIC
-    if (filesystem_type == (unsigned long)TMPFS_MAGIC) {
+    if (filesystem_type == (uint64_t)TMPFS_MAGIC) {
         return 1;
     }
 #endif
 #ifdef BTRFS_SUPER_MAGIC
-    if (filesystem_type == (unsigned long)BTRFS_SUPER_MAGIC) {
+    if (filesystem_type == (uint64_t)BTRFS_SUPER_MAGIC) {
         return 1;
     }
 #endif
 #ifdef F2FS_SUPER_MAGIC
-    if (filesystem_type == (unsigned long)F2FS_SUPER_MAGIC) {
+    if (filesystem_type == (uint64_t)F2FS_SUPER_MAGIC) {
         return 1;
     }
 #endif
 #ifdef OVERLAYFS_SUPER_MAGIC
-    if (filesystem_type == (unsigned long)OVERLAYFS_SUPER_MAGIC) {
+    if (filesystem_type == (uint64_t)OVERLAYFS_SUPER_MAGIC) {
         return 1;
     }
 #endif
 #ifdef RAMFS_MAGIC
-    if (filesystem_type == (unsigned long)RAMFS_MAGIC) {
+    if (filesystem_type == (uint64_t)RAMFS_MAGIC) {
         return 1;
     }
 #endif
 #ifdef ZFS_SUPER_MAGIC
-    if (filesystem_type == (unsigned long)ZFS_SUPER_MAGIC) {
+    if (filesystem_type == (uint64_t)ZFS_SUPER_MAGIC) {
         return 1;
     }
 #endif
@@ -316,8 +316,7 @@ static int validate_supported_filesystem(int fd) {
     if (fstatfs(fd, &filesystem_stat) != 0) {
         return -1;
     }
-    if (filesystem_type_supported(
-            (unsigned long)filesystem_stat.f_type)) {
+    if (filesystem_type_supported((uint64_t)filesystem_stat.f_type)) {
         return 0;
     }
     errno = EOPNOTSUPP;

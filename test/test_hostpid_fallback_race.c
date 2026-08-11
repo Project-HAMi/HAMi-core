@@ -6,6 +6,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <nvml.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -86,7 +87,7 @@ static int wait_for_value(_Atomic int *value, int expected) {
     return 0;
 }
 
-static int cache_lock(int fd, short type) {
+static int cache_lock(int fd, int16_t type) {
     struct flock lock = {
         .l_type = type,
         .l_whence = SEEK_SET,
@@ -346,14 +347,16 @@ static int run_case(const char *name, int workers, int devices,
                 failure_count++;
                 break;
         }
-        printf("%s,%d,%d,%d,%ld,%ld,%s,%lld,%lld\n", name, index,
+        printf("%s,%d,%d,%d,%" PRIdMAX ",%" PRIdMAX ",%s,%" PRId64
+               ",%" PRId64 "\n",
+               name, index,
                state->results[index].cache_index,
                state->results[index].device_index,
-               (long)state->results[index].expected_pid,
-               (long)state->results[index].observed_pid,
+               (intmax_t)state->results[index].expected_pid,
+               (intmax_t)state->results[index].observed_pid,
                classification_name(state->results[index].classification),
-               (long long)state->results[index].lock_wait_us,
-               (long long)state->results[index].discovery_us);
+               state->results[index].lock_wait_us,
+               state->results[index].discovery_us);
     }
     fprintf(stderr,
             "case=%s workers=%d own=%d peer=%d failure=%d timeout=%d\n",

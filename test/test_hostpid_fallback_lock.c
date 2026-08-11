@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <signal.h>
 #include <stdio.h>
@@ -34,11 +35,11 @@ static void signal_waiter_ready(void) {
     }
 }
 
-static int parse_unsigned(const char *value, unsigned long *parsed) {
+static int parse_unsigned(const char *value, uintmax_t *parsed) {
     char *end = NULL;
 
     errno = 0;
-    *parsed = strtoul(value, &end, 10);
+    *parsed = strtoumax(value, &end, 10);
     return errno == 0 && end != value && *end == '\0' ? 0 : -1;
 }
 
@@ -46,14 +47,14 @@ static int probe_lock(const char *path, const char *owner_value,
                       const char *timeout_value, const char *hold_value,
                       int expect_timeout) {
     struct timespec hold;
-    unsigned long owner;
-    unsigned long timeout_ms;
-    unsigned long hold_ms;
+    uintmax_t owner;
+    uintmax_t timeout_ms;
+    uintmax_t hold_ms;
 
     if (parse_unsigned(owner_value, &owner) != 0 ||
         parse_unsigned(timeout_value, &timeout_ms) != 0 ||
         parse_unsigned(hold_value, &hold_ms) != 0 ||
-        owner > (unsigned long)(uid_t)-1 || timeout_ms > UINT_MAX ||
+        owner > (uintmax_t)(uid_t)-1 || timeout_ms > UINT_MAX ||
         hold_ms > UINT_MAX) {
         return 2;
     }
@@ -73,8 +74,8 @@ static int probe_lock(const char *path, const char *owner_value,
     }
     puts("acquired");
     fflush(stdout);
-    hold.tv_sec = (time_t)(hold_ms / 1000UL);
-    hold.tv_nsec = (long)(hold_ms % 1000UL) * 1000000L;
+    hold.tv_sec = (time_t)(hold_ms / UINTMAX_C(1000));
+    hold.tv_nsec = (int64_t)(hold_ms % UINTMAX_C(1000)) * INT64_C(1000000);
     while (nanosleep(&hold, &hold) != 0 && errno == EINTR) {
     }
     if (hostpid_fallback_lock_release() != 0) {
@@ -86,7 +87,7 @@ static int probe_lock(const char *path, const char *owner_value,
 
 static int probe_default_lock(const char *hold_value) {
     struct timespec hold;
-    unsigned long hold_ms;
+    uintmax_t hold_ms;
 
     if (parse_unsigned(hold_value, &hold_ms) != 0 || hold_ms > UINT_MAX) {
         return 2;
@@ -98,8 +99,8 @@ static int probe_default_lock(const char *hold_value) {
     }
     puts("acquired");
     fflush(stdout);
-    hold.tv_sec = (time_t)(hold_ms / 1000UL);
-    hold.tv_nsec = (long)(hold_ms % 1000UL) * 1000000L;
+    hold.tv_sec = (time_t)(hold_ms / UINTMAX_C(1000));
+    hold.tv_nsec = (int64_t)(hold_ms % UINTMAX_C(1000)) * INT64_C(1000000);
     while (nanosleep(&hold, &hold) != 0 && errno == EINTR) {
     }
     if (hostpid_fallback_lock_release() != 0) {
@@ -218,8 +219,8 @@ static int wait_until_child_opened(pid_t child, const char *path) {
     struct timespec delay = {.tv_sec = 0, .tv_nsec = 1000000L};
     int attempt;
 
-    snprintf(fd_directory, sizeof(fd_directory), "/proc/%ld/fd",
-             (long)child);
+    snprintf(fd_directory, sizeof(fd_directory), "/proc/%" PRIdMAX "/fd",
+             (intmax_t)child);
     for (attempt = 0; attempt < 2000; attempt++) {
         DIR *directory = opendir(fd_directory);
 
