@@ -12,7 +12,7 @@ The client is enabled only when `LIBVGPU_HOSTPID_BROKER` is the exact string `1`
 
 The expected container socket is fixed at `/tmp/vgpulock/hostpid/broker.sock`. A caller cannot redirect the production client to another path.
 
-The companion HAMi device plugin must mount the root-owned broker directory read-only at `/tmp/vgpulock/hostpid`. If this ownership or mount contract is not met, the broker lookup and node-wide fallback lock both fail safely.
+The companion HAMi device plugin must mount the root-owned broker directory read-only at `/tmp/vgpulock/hostpid`. The parent `/tmp/vgpulock` must be root owned and use sticky permissions if it remains writable. If this ownership, permission, or mount contract is not met, the broker lookup and node-wide fallback lock both fail safely.
 
 ## Trust checks
 
@@ -30,11 +30,21 @@ Before using a reply, the client verifies all of the following:
 
 6. The reply has the expected magic, version, success status, and a positive PID that fits in `pid_t`.
 
+The fallback lock opens each directory component with `O_NOFOLLOW`. Every component must be root owned and use an accepted filesystem type. A group-writable or world-writable component must also have its sticky bit set. These checks reject a symlink ancestor, an ordinary writable ancestor, or an unsupported filesystem before the node lock is used. The production lock accepts ext4, XFS, tmpfs, Btrfs, F2FS, OverlayFS, ramfs, and ZFS when the build headers identify them. Other filesystem types fail with `EOPNOTSUPP` until their behavior is validated.
+
 One monotonic deadline covers connect, request write, and response read. A trickle response cannot renew the deadline.
 
 ## Fallback
 
 If the gate is disabled, `postInit()` keeps the existing cache-local NVML fallback. If the gate is enabled and any trust, connection, deadline, or protocol check fails, `postInit()` locks the trusted `/tmp/vgpulock/hostpid` directory before the cache record lock and runs the NVML discovery path. The node-wide lock coordinates independent cache files. A missing or untrusted broker mount causes a clear discovery failure instead of returning to cache-local discovery.
+
+`postInit()` selects the broker result, cache-local fallback, or node-wide fallback through one tested decision function. A successful broker result selects the broker path whether the gate state is enabled or disabled, so neither fallback lock is selected. A failed broker result selects the cache-local path only when the gate is disabled and the node-wide path when it is enabled.
+
+The enabled fallback creates one 30 second monotonic deadline before it tries the node lock. The node lock and the following cache record lock consume that same absolute deadline, so their combined acquisition cannot become two consecutive 30 second waits. This preserves the global then cache order while preventing a live holder or a reverse-order peer from hanging initialization indefinitely. A timeout produces the same clear discovery failure and releases any node lock already acquired.
+
+The lock rechecks the opened directory after a waiter acquires `flock`. It reads current descriptor and path metadata instead of reusing the prewait mode bits. A directory that becomes writable and nonsticky while the waiter is blocked fails with `EACCES`, even when its inode, owner, mount flags, and filesystem stay unchanged.
+
+The final check walks the path again with `O_NOFOLLOW` on every component. It compares the fresh final descriptor with the locked object and checks the current path's read only mount and filesystem policy. Replacing an ancestor with a symlink to the same final directory therefore fails even though the final device and inode are unchanged. Replacing the final object also fails after the waiter has completed its initial validation.
 
 ## CUDA context accounting
 
