@@ -4,8 +4,8 @@
  * Copyright (c) 2026 The HAMi Authors.
  */
 
-#ifndef HOSTPID_FALLBACK_LOCK_H
-#define HOSTPID_FALLBACK_LOCK_H
+#ifndef SRC_INCLUDE_HOSTPID_FALLBACK_LOCK_H_
+#define SRC_INCLUDE_HOSTPID_FALLBACK_LOCK_H_
 
 #include <sys/types.h>
 #include <time.h>
@@ -42,4 +42,4 @@ int hostpid_fallback_lock_release(void);
 void hostpid_fallback_lock_after_fork(void);
 int hostpid_fallback_lock_active_fd(void);
 
-#endif
+#endif  // SRC_INCLUDE_HOSTPID_FALLBACK_LOCK_H_
