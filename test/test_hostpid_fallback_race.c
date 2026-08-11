@@ -4,15 +4,9 @@
  * Copyright (c) 2026 The HAMi Authors.
  */
 
-#include "../src/include/hostpid_fallback_lock.h"
-#include "../src/include/nvml_prefix.h"
-
-#include <nvml.h>
-
-#include "../src/include/nvml_override.h"
-
 #include <errno.h>
 #include <fcntl.h>
+#include <nvml.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -24,6 +18,10 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+
+#include "../src/include/hostpid_fallback_lock.h"
+#include "../src/include/nvml_override.h"
+#include "../src/include/nvml_prefix.h"
 
 #define MAX_WORKERS 16
 #define POSTINIT_LOCK_OFFSET ((off_t)UINT64_C(0x40000000))

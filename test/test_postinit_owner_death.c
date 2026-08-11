@@ -18,8 +18,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "include/hostpid_fallback_lock.h"
 #include "multiprocess/multiprocess_memory_limit.h"
-#include "hostpid_fallback_lock.h"
 
 #define PROCESS_COUNT 3
 #define HOLDER_ID 0

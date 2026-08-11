@@ -4,8 +4,6 @@
  * Copyright (c) 2026 The HAMi Authors.
  */
 
-#include "../src/include/hostpid_fallback_lock.h"
-
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -19,6 +17,8 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+
+#include "../src/include/hostpid_fallback_lock.h"
 
 static int failures;
 static int waiter_ready_fd = -1;
