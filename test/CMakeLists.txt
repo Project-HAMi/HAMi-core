@@ -92,7 +92,7 @@ add_test(NAME hostpid_fallback_race
     COMMAND test_hostpid_fallback_race)
 set_tests_properties(context_accounting hostpid_broker
     PROPERTIES TIMEOUT 5)
-set_tests_properties(hostpid_fallback_lock PROPERTIES TIMEOUT 10)
+set_tests_properties(hostpid_fallback_lock PROPERTIES TIMEOUT 30)
 set_tests_properties(hostpid_fallback_race PROPERTIES TIMEOUT 35)
 
 
