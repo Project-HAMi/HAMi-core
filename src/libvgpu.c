@@ -906,7 +906,10 @@ void postInit(){
     map_cuda_visible_devices();
 
     nvmlReturn_t res = set_task_pid_from_broker();
-    if (res != NVML_SUCCESS && !broker_enabled) {
+    enum hostpid_discovery_path discovery_path =
+        hostpid_discovery_path_select(broker_enabled,
+                                      res == NVML_SUCCESS);
+    if (discovery_path == HOSTPID_DISCOVERY_CACHE_LOCAL) {
         int cache_lock_acquired = lock_postinit();
 
         if (cache_lock_acquired) {
@@ -917,22 +920,32 @@ void postInit(){
                      "lock failed");
             res = NVML_ERROR_UNKNOWN;
         }
-    } else if (res != NVML_SUCCESS) {
+    } else if (discovery_path == HOSTPID_DISCOVERY_NODE_WIDE) {
+        struct timespec fallback_deadline;
+
         /*
          * The cache record lock coordinates processes that share one cache.
          * The directory lock also coordinates independent cache files on the
          * node. Always take the node lock first so new processes use one lock
-         * order.
+         * order. Both locks consume one absolute monotonic deadline.
          */
-        if (hostpid_fallback_lock_acquire() == 0) {
-            int cache_lock_acquired = lock_postinit();
+        if (hostpid_fallback_lock_deadline_after_ms(
+                &fallback_deadline,
+                HOSTPID_FALLBACK_LOCK_TIMEOUT_MS) != 0) {
+            LOG_WARN("Skipped host PID detection because the fallback "
+                     "deadline could not be created: %s", strerror(errno));
+            res = NVML_ERROR_UNKNOWN;
+        } else if (hostpid_fallback_lock_acquire_until(
+                       &fallback_deadline) == 0) {
+            int cache_lock_acquired = lock_postinit_deadline(
+                &fallback_deadline);
 
             if (cache_lock_acquired) {
                 res = set_task_pid();
                 unlock_postinit();
             } else {
                 LOG_WARN("Skipped host PID detection because the cache "
-                         "postinit lock failed");
+                         "postinit lock failed or timed out");
                 res = NVML_ERROR_UNKNOWN;
             }
             if (hostpid_fallback_lock_release() != 0) {

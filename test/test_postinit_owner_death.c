@@ -19,6 +19,7 @@
 #include <unistd.h>
 
 #include "multiprocess/multiprocess_memory_limit.h"
+#include "hostpid_fallback_lock.h"
 
 #define PROCESS_COUNT 3
 #define HOLDER_ID 0
@@ -28,6 +29,12 @@
 #define OBSERVATION_MS 200
 #define THREAD_COUNT 2
 #define THREAD_HOLD_MS 100
+#define BOUNDED_CACHE_TIMEOUT_MS 120U
+#define ABBA_GLOBAL_TIMEOUT_MS 150U
+#define ABBA_CACHE_TIMEOUT_MS 1000U
+#define SHARED_FALLBACK_TIMEOUT_MS 600U
+#define SHARED_GLOBAL_HOLD_MS 350
+#define SHARED_TOTAL_LIMIT_MS 900.0
 
 typedef struct {
     _Atomic int process_started;
@@ -44,6 +51,18 @@ typedef struct {
     _Atomic int threads_active;
     _Atomic int max_threads_active;
     _Atomic int thread_failures;
+
+    _Atomic int abba_cache_acquired;
+    _Atomic int abba_global_acquired;
+
+    _Atomic int local_timeout_acquired;
+    _Atomic int local_timeout_release;
+    _Atomic int local_timeout_failures;
+
+    _Atomic int shared_global_ready;
+    _Atomic int shared_global_start;
+    _Atomic int shared_cache_ready;
+    _Atomic int shared_cache_release;
 } test_state_t;
 
 static test_state_t *state;
@@ -150,6 +169,15 @@ static void initialize_state(void) {
     atomic_init(&state->threads_active, 0);
     atomic_init(&state->max_threads_active, 0);
     atomic_init(&state->thread_failures, 0);
+    atomic_init(&state->abba_cache_acquired, 0);
+    atomic_init(&state->abba_global_acquired, 0);
+    atomic_init(&state->local_timeout_acquired, 0);
+    atomic_init(&state->local_timeout_release, 0);
+    atomic_init(&state->local_timeout_failures, 0);
+    atomic_init(&state->shared_global_ready, 0);
+    atomic_init(&state->shared_global_start, 0);
+    atomic_init(&state->shared_cache_ready, 0);
+    atomic_init(&state->shared_cache_release, 0);
 }
 
 static void process_worker(int id) {
@@ -358,6 +386,406 @@ static int test_same_process_threads(void) {
     return 0;
 }
 
+static void *local_timeout_holder(void *unused) {
+    (void)unused;
+
+    if (lock_postinit() != 1) {
+        atomic_fetch_add_explicit(&state->local_timeout_failures, 1,
+                                  memory_order_release);
+        return NULL;
+    }
+    atomic_store_explicit(&state->local_timeout_acquired, 1,
+                          memory_order_release);
+    while (atomic_load_explicit(&state->local_timeout_release,
+                                memory_order_acquire) == 0) {
+        sleep_ms(1);
+    }
+    unlock_postinit();
+    return NULL;
+}
+
+static int test_same_process_live_holder_timeout(void) {
+    pthread_t holder;
+    double started;
+    double elapsed;
+    int result = -1;
+
+    atomic_store_explicit(&state->local_timeout_acquired, 0,
+                          memory_order_release);
+    atomic_store_explicit(&state->local_timeout_release, 0,
+                          memory_order_release);
+    atomic_store_explicit(&state->local_timeout_failures, 0,
+                          memory_order_release);
+    if (pthread_create(&holder, NULL, local_timeout_holder, NULL) != 0) {
+        fprintf(stderr, "local timeout holder creation failed\n");
+        return -1;
+    }
+    if (wait_for_counter(&state->local_timeout_acquired, 1,
+                         TEST_TIMEOUT_MS) != 0) {
+        fprintf(stderr, "local timeout holder did not acquire\n");
+        goto cleanup;
+    }
+
+    started = now_ms();
+    errno = 0;
+    if (lock_postinit_timeout(BOUNDED_CACHE_TIMEOUT_MS) != 0 ||
+        errno != ETIMEDOUT) {
+        fprintf(stderr, "local live holder did not time out cleanly\n");
+        goto cleanup;
+    }
+    elapsed = now_ms() - started;
+    if (elapsed < 50.0 || elapsed > 1000.0) {
+        fprintf(stderr, "local timeout was outside its bound: %.3f ms\n",
+                elapsed);
+        goto cleanup;
+    }
+    result = 0;
+
+cleanup:
+    atomic_store_explicit(&state->local_timeout_release, 1,
+                          memory_order_release);
+    pthread_join(holder, NULL);
+    if (atomic_load_explicit(&state->local_timeout_failures,
+                             memory_order_acquire) != 0) {
+        return -1;
+    }
+    if (lock_postinit_timeout(500U) != 1) {
+        fprintf(stderr, "local lock did not recover after timeout\n");
+        return -1;
+    }
+    unlock_postinit();
+    return result;
+}
+
+static int test_live_cache_holder_timeout(void) {
+    int ready[2] = {-1, -1};
+    int release[2] = {-1, -1};
+    pid_t child;
+    char byte;
+    int status;
+    double started;
+    double elapsed;
+
+    if (pipe(ready) != 0) {
+        perror("cache timeout pipes");
+        return -1;
+    }
+    if (pipe(release) != 0) {
+        perror("cache timeout pipes");
+        close(ready[0]);
+        close(ready[1]);
+        return -1;
+    }
+    child = fork();
+    if (child == 0) {
+        close(ready[0]);
+        close(release[1]);
+        ensure_initialized();
+        if (lock_postinit() != 1 || write(ready[1], "1", 1) != 1) {
+            _exit(2);
+        }
+        close(ready[1]);
+        if (read(release[0], &byte, 1) != 1) {
+            _exit(3);
+        }
+        close(release[0]);
+        unlock_postinit();
+        _exit(0);
+    }
+    if (child < 0) {
+        perror("cache timeout fork");
+        close(ready[0]);
+        close(ready[1]);
+        close(release[0]);
+        close(release[1]);
+        return -1;
+    }
+    close(ready[1]);
+    close(release[0]);
+    if (read(ready[0], &byte, 1) != 1) {
+        fprintf(stderr, "cache timeout holder did not acquire\n");
+        goto fail;
+    }
+    close(ready[0]);
+
+    started = now_ms();
+    errno = 0;
+    if (lock_postinit_timeout(BOUNDED_CACHE_TIMEOUT_MS) != 0 ||
+        errno != ETIMEDOUT) {
+        fprintf(stderr, "live cache holder did not time out cleanly\n");
+        goto fail;
+    }
+    elapsed = now_ms() - started;
+    if (elapsed < 50.0 || elapsed > 1000.0) {
+        fprintf(stderr, "cache timeout was outside its bound: %.3f ms\n",
+                elapsed);
+        goto fail;
+    }
+
+    if (write(release[1], "1", 1) != 1) {
+        goto fail;
+    }
+    close(release[1]);
+    release[1] = -1;
+    if (wait_child_bounded(child, TEST_TIMEOUT_MS, &status) != 0 ||
+        !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        fprintf(stderr, "cache timeout holder did not exit cleanly\n");
+        goto fail;
+    }
+    child = 0;
+    if (lock_postinit_timeout(500U) != 1) {
+        fprintf(stderr, "cache lock did not recover after timeout\n");
+        return -1;
+    }
+    unlock_postinit();
+    return 0;
+
+fail:
+    if (ready[0] >= 0) {
+        close(ready[0]);
+    }
+    if (release[1] >= 0) {
+        close(release[1]);
+    }
+    kill_and_reap(child);
+    return -1;
+}
+
+static void shared_deadline_global_holder(const char *global_directory) {
+    hostpid_fallback_lock_after_fork();
+    if (hostpid_fallback_lock_acquire_at(global_directory, getuid(),
+                                         2000U) != 0) {
+        _exit(2);
+    }
+    atomic_store_explicit(&state->shared_global_ready, 1,
+                          memory_order_release);
+    while (atomic_load_explicit(&state->shared_global_start,
+                                memory_order_acquire) == 0) {
+        sleep_ms(1);
+    }
+    sleep_ms(SHARED_GLOBAL_HOLD_MS);
+    if (hostpid_fallback_lock_release() != 0) {
+        _exit(3);
+    }
+    _exit(0);
+}
+
+static void shared_deadline_cache_holder(void) {
+    ensure_initialized();
+    if (lock_postinit() != 1) {
+        _exit(2);
+    }
+    atomic_store_explicit(&state->shared_cache_ready, 1,
+                          memory_order_release);
+    while (atomic_load_explicit(&state->shared_cache_release,
+                                memory_order_acquire) == 0) {
+        sleep_ms(1);
+    }
+    unlock_postinit();
+    _exit(0);
+}
+
+static int test_shared_fallback_deadline(void) {
+    char global_directory[] = "/tmp/hami-shared-deadline.XXXXXX";
+    struct timespec deadline;
+    pid_t global_holder = 0;
+    pid_t cache_holder = 0;
+    int global_acquired = 0;
+    int global_status = 0;
+    int cache_status = 0;
+    int result = -1;
+    double started;
+    double global_elapsed;
+    double total_elapsed;
+
+    if (mkdtemp(global_directory) == NULL) {
+        perror("mkdtemp(shared fallback deadline)");
+        return -1;
+    }
+    atomic_store_explicit(&state->shared_global_ready, 0,
+                          memory_order_release);
+    atomic_store_explicit(&state->shared_global_start, 0,
+                          memory_order_release);
+    atomic_store_explicit(&state->shared_cache_ready, 0,
+                          memory_order_release);
+    atomic_store_explicit(&state->shared_cache_release, 0,
+                          memory_order_release);
+
+    global_holder = fork();
+    if (global_holder == 0) {
+        shared_deadline_global_holder(global_directory);
+    }
+    if (global_holder < 0) {
+        perror("shared deadline global holder fork");
+        global_holder = 0;
+        goto cleanup;
+    }
+    cache_holder = fork();
+    if (cache_holder == 0) {
+        shared_deadline_cache_holder();
+    }
+    if (cache_holder < 0) {
+        perror("shared deadline cache holder fork");
+        cache_holder = 0;
+        goto cleanup;
+    }
+    if (wait_for_counter(&state->shared_global_ready, 1,
+                         TEST_TIMEOUT_MS) != 0 ||
+        wait_for_counter(&state->shared_cache_ready, 1,
+                         TEST_TIMEOUT_MS) != 0) {
+        fprintf(stderr, "shared deadline holders did not acquire\n");
+        goto cleanup;
+    }
+    if (hostpid_fallback_lock_deadline_after_ms(
+            &deadline, SHARED_FALLBACK_TIMEOUT_MS) != 0) {
+        perror("shared fallback deadline");
+        goto cleanup;
+    }
+
+    started = now_ms();
+    atomic_store_explicit(&state->shared_global_start, 1,
+                          memory_order_release);
+    if (hostpid_fallback_lock_acquire_at_until(
+            global_directory, getuid(), &deadline) != 0) {
+        perror("shared deadline global acquisition");
+        goto cleanup;
+    }
+    global_acquired = 1;
+    global_elapsed = now_ms() - started;
+    errno = 0;
+    if (lock_postinit_deadline(&deadline) != 0 || errno != ETIMEDOUT) {
+        fprintf(stderr, "cache lock did not consume the global deadline\n");
+        goto cleanup;
+    }
+    total_elapsed = now_ms() - started;
+    if (global_elapsed < (double)SHARED_GLOBAL_HOLD_MS / 2.0 ||
+        total_elapsed < (double)SHARED_FALLBACK_TIMEOUT_MS / 2.0 ||
+        total_elapsed > SHARED_TOTAL_LIMIT_MS) {
+        fprintf(stderr,
+                "shared fallback deadline was outside its bound: "
+                "global=%.3f total=%.3f ms\n",
+                global_elapsed, total_elapsed);
+        goto cleanup;
+    }
+    printf("shared_fallback_deadline_ms=%.3f global_wait_ms=%.3f\n",
+           total_elapsed, global_elapsed);
+    result = 0;
+
+cleanup:
+    if (global_acquired && hostpid_fallback_lock_release() != 0) {
+        fprintf(stderr, "shared deadline global release failed\n");
+        result = -1;
+    }
+    atomic_store_explicit(&state->shared_global_start, 1,
+                          memory_order_release);
+    atomic_store_explicit(&state->shared_cache_release, 1,
+                          memory_order_release);
+    if (global_holder > 0 &&
+        (wait_child_bounded(global_holder, TEST_TIMEOUT_MS,
+                            &global_status) != 0 ||
+         !WIFEXITED(global_status) || WEXITSTATUS(global_status) != 0)) {
+        result = -1;
+    }
+    if (cache_holder > 0 &&
+        (wait_child_bounded(cache_holder, TEST_TIMEOUT_MS,
+                            &cache_status) != 0 ||
+         !WIFEXITED(cache_status) || WEXITSTATUS(cache_status) != 0)) {
+        result = -1;
+    }
+    kill_and_reap(global_holder);
+    kill_and_reap(cache_holder);
+    if (rmdir(global_directory) != 0) {
+        result = -1;
+    }
+    return result;
+}
+
+static void reverse_order_worker(const char *global_directory) {
+    int global_status;
+    int saved_errno;
+
+    hostpid_fallback_lock_after_fork();
+    ensure_initialized();
+    if (lock_postinit() != 1) {
+        _exit(2);
+    }
+    atomic_store_explicit(&state->abba_cache_acquired, 1,
+                          memory_order_release);
+    if (wait_for_counter(&state->abba_global_acquired, 1,
+                         TEST_TIMEOUT_MS) != 0) {
+        unlock_postinit();
+        _exit(3);
+    }
+    errno = 0;
+    global_status = hostpid_fallback_lock_acquire_at(
+        global_directory, getuid(), ABBA_GLOBAL_TIMEOUT_MS);
+    saved_errno = errno;
+    if (global_status == 0) {
+        hostpid_fallback_lock_release();
+    }
+    unlock_postinit();
+    _exit(global_status == -1 && saved_errno == ETIMEDOUT ? 0 : 4);
+}
+
+static int test_reverse_order_abba(void) {
+    char global_directory[] = "/tmp/hami-postinit-abba.XXXXXX";
+    pid_t child;
+    int status;
+    int result = -1;
+
+    if (mkdtemp(global_directory) == NULL) {
+        perror("mkdtemp(ABBA global lock)");
+        return -1;
+    }
+    atomic_store_explicit(&state->abba_cache_acquired, 0,
+                          memory_order_release);
+    atomic_store_explicit(&state->abba_global_acquired, 0,
+                          memory_order_release);
+    child = fork();
+    if (child == 0) {
+        reverse_order_worker(global_directory);
+    }
+    if (child < 0) {
+        perror("ABBA worker fork");
+        rmdir(global_directory);
+        return -1;
+    }
+    if (wait_for_counter(&state->abba_cache_acquired, 1,
+                         TEST_TIMEOUT_MS) != 0) {
+        fprintf(stderr, "reverse-order worker did not acquire cache lock\n");
+        goto cleanup;
+    }
+    if (hostpid_fallback_lock_acquire_at(global_directory, getuid(),
+                                         500U) != 0) {
+        fprintf(stderr, "normal-order worker did not acquire global lock\n");
+        goto cleanup;
+    }
+    atomic_store_explicit(&state->abba_global_acquired, 1,
+                          memory_order_release);
+    if (lock_postinit_timeout(ABBA_CACHE_TIMEOUT_MS) != 1) {
+        fprintf(stderr, "normal-order worker did not recover from ABBA\n");
+        hostpid_fallback_lock_release();
+        goto cleanup;
+    }
+    unlock_postinit();
+    if (hostpid_fallback_lock_release() != 0) {
+        fprintf(stderr, "normal-order global release failed\n");
+        goto cleanup;
+    }
+    if (wait_child_bounded(child, TEST_TIMEOUT_MS, &status) != 0 ||
+        !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        fprintf(stderr, "reverse-order worker did not time out cleanly\n");
+        goto cleanup;
+    }
+    child = 0;
+    result = 0;
+
+cleanup:
+    kill_and_reap(child);
+    rmdir(global_directory);
+    return result;
+}
+
 int main(void) {
     char cache_path[] = "/tmp/hami-postinit-ownerdeath.XXXXXX";
     int cache_fd;
@@ -391,6 +819,18 @@ int main(void) {
         failures++;
     }
     if (test_same_process_threads() != 0) {
+        failures++;
+    }
+    if (test_same_process_live_holder_timeout() != 0) {
+        failures++;
+    }
+    if (test_live_cache_holder_timeout() != 0) {
+        failures++;
+    }
+    if (test_shared_fallback_deadline() != 0) {
+        failures++;
+    }
+    if (test_reverse_order_abba() != 0) {
         failures++;
     }
 
