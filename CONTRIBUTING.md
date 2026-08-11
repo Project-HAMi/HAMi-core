@@ -85,7 +85,7 @@ When you are willing to take on an issue, simply reply to the issue and a mainta
 While we encourage everyone to contribute code, we also appreciate when someone reports an issue.
 Issues should be filed under the appropriate HAMi sub-repository.
 
-*Example:* A HAMi-core issue should be opened in [Project-HAMi/HAMi-core](https://github.com/Project-HAMi/HAMI-core/issues).
+*Example:* A HAMi-core issue should be opened in [Project-HAMi/HAMi-core](https://github.com/Project-HAMi/HAMi-core/issues).
 
 Please follow the provided submission guidelines when opening an issue.
 
