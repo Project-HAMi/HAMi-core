@@ -32,7 +32,7 @@ Before using a reply, the client verifies all of the following:
 
 The fallback lock opens each directory component with `O_NOFOLLOW`. Every component must be root owned and use an accepted filesystem type. A group-writable or world-writable component must also have its sticky bit set. These checks reject a symlink ancestor, an ordinary writable ancestor, or an unsupported filesystem before the node lock is used. The production lock accepts ext4, XFS, tmpfs, Btrfs, F2FS, OverlayFS, ramfs, and ZFS when the build headers identify them. Other filesystem types fail with `EOPNOTSUPP` until their behavior is validated.
 
-One monotonic deadline covers connect, request write, and response read. A trickle response cannot renew the deadline.
+One 500 millisecond monotonic deadline covers connect, request write, and response read. A trickle response cannot renew the deadline.
 
 ## Fallback
 
