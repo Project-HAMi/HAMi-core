@@ -462,7 +462,7 @@ static void test_deadline_not_renewed(const char *path) {
         return;
     }
     if (holder == 0) {
-        struct timespec hold = {.tv_sec = 0, .tv_nsec = 110000000L};
+        struct timespec hold = {.tv_sec = 0, .tv_nsec = 400000000L};
 
         close(ready[0]);
         close(begin_release[1]);
