@@ -150,7 +150,11 @@ CUresult cuMemAllocManaged(CUdeviceptr* dptr, size_t bytesize, unsigned int flag
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemAllocManaged, dptr, bytesize, flags);
     if (res == CUDA_SUCCESS) {
-        add_chunk_only(*dptr, bytesize, dev);
+        if (add_chunk_only(*dptr, bytesize, dev) != 0) {
+            CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFree_v2, *dptr);
+            release_device_memory(dev, bytesize);
+            return CUDA_ERROR_OUT_OF_MEMORY;
+        }
     } else {
         release_device_memory(dev, bytesize);
     }
@@ -627,7 +631,11 @@ CUresult cuMemCreate ( CUmemGenericAllocationHandle* handle, size_t size, const 
         cuMemCreate, handle, size, prop, flags);
     if (do_oom_check) {
         if (res == CUDA_SUCCESS) {
-            add_chunk_only(*handle, size, dev);
+            if (add_chunk_only(*handle, size, dev) != 0) {
+                CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemRelease, *handle);
+                release_device_memory(dev, size);
+                return CUDA_ERROR_OUT_OF_MEMORY;
+            }
         } else {
             release_device_memory(dev, size);
         }

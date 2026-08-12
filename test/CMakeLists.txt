@@ -71,10 +71,12 @@ endif()
 
 # GPU + LD_PRELOAD regression for cross-process cuMemAlloc TOCTOU (#273).
 # Uses the wrapper so --expect-fixed and limit/cache env are set.
+# Wrapper exits 77 when no NVIDIA GPU is present (skip, not fail).
 add_test(NAME concurrent_oom_race
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/run_concurrent_oom_race.sh --expect-fixed)
 set_tests_properties(concurrent_oom_race PROPERTIES
     TIMEOUT 180
+    SKIP_RETURN_CODE 77
     ENVIRONMENT "LIBVGPU=${CMAKE_BINARY_DIR}/libvgpu.so;TEST_BIN=${CMAKE_CURRENT_BINARY_DIR}/test_concurrent_oom_race")
 
 
