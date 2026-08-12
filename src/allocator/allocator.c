@@ -27,6 +27,25 @@ extern CUresult cuMemoryFree(CUdeviceptr dptr);
 pthread_once_t allocator_allocate_flag = PTHREAD_ONCE_INIT;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
+/* Optional delay after the unlocked oom pre-check in add_chunk.
+ * Used only by the race-reproduce harness to widen the TOCTOU window
+ * between check and usage accounting across processes.
+ * Env: HAMI_ALLOC_RACE_WINDOW_US=<microseconds>, unset/0 = no delay. */
+static void maybe_widen_alloc_race_window(void) {
+    const char *env = getenv("HAMI_ALLOC_RACE_WINDOW_US");
+    unsigned long us;
+    char *end = NULL;
+
+    if (env == NULL || env[0] == '\0') {
+        return;
+    }
+    us = strtoul(env, &end, 10);
+    if (end == env || us == 0) {
+        return;
+    }
+    usleep((useconds_t)us);
+}
+
 size_t round_up(size_t size, size_t unit) {
     if (size & (unit-1))
         return ((size / unit) + 1 ) * unit;
@@ -118,6 +137,8 @@ int add_chunk(CUdeviceptr *address, size_t size) {
     /* OOM pre-check without lock */
     if (oom_check(dev, size))
         return CUDA_ERROR_OUT_OF_MEMORY;
+
+    maybe_widen_alloc_race_window();
 
     /* GPU allocation outside lock, the expensive part */
     if (size <= IPCSIZE) {
