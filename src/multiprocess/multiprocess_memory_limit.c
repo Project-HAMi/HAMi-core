@@ -723,7 +723,7 @@ static inline void copy_proc_slot_atomic(shrreg_proc_slot_t* dst, shrreg_proc_sl
 }
 
 static inline void clear_proc_slot_atomic(shrreg_proc_slot_t* slot) {
-    atomic_store_explicit(&slot->seqlock, 0, memory_order_relaxed);
+    atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release); // odd: write in progress
     atomic_store_explicit(&slot->pid, 0, memory_order_release);
     atomic_store_explicit(&slot->hostpid, 0, memory_order_relaxed);
     atomic_store_explicit(&slot->status, 0, memory_order_release);
@@ -739,8 +739,8 @@ static inline void clear_proc_slot_atomic(shrreg_proc_slot_t* slot) {
         atomic_store_explicit(&slot->device_util[dev].sm_util, 0, memory_order_relaxed);
         atomic_store_explicit(&slot->monitorused[dev], 0, memory_order_relaxed);
     }
+    atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release); // even: write complete
 }
-
 void exit_handler() {
     if (region_info.init_status == PTHREAD_ONCE_INIT) {
         return;
