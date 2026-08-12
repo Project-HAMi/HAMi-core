@@ -12,7 +12,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     get_filename_component(TEST_TARGET_NAME ${RELATIVE_TEST_PATH} NAME_WE)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${TEST_TARGET_DIR})
 
-    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
+    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR
+        TEST_TARGET_NAME STREQUAL "test_env_isolation")
         # Build this focused regression test with the production shared-region
         # implementation.  It does not invoke any CUDA/NVML entry point at
         # runtime.  Section garbage collection drops unrelated GPU-facing
@@ -34,7 +35,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     endif()
 
     list(APPEND TEST_TARGET_NAMES_LIST ${TEST_TARGET_NAME})
-    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
+    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR
+        TEST_TARGET_NAME STREQUAL "test_env_isolation")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     else()
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread
@@ -51,6 +53,10 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 add_test(NAME postinit_owner_death
     COMMAND test_postinit_owner_death)
 set_tests_properties(postinit_owner_death PROPERTIES TIMEOUT 20)
+
+add_test(NAME env_isolation
+    COMMAND test_env_isolation)
+set_tests_properties(env_isolation PROPERTIES TIMEOUT 30)
 
 
 add_custom_target(python_test ALL
