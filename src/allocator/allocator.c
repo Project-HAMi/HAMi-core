@@ -34,16 +34,26 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static void maybe_widen_alloc_race_window(void) {
     const char *env = getenv("HAMI_ALLOC_RACE_WINDOW_US");
     unsigned long us;
+    unsigned long sec;
     char *end = NULL;
+    struct timespec ts;
 
     if (env == NULL || env[0] == '\0') {
         return;
     }
+    errno = 0;
     us = strtoul(env, &end, 10);
-    if (end == env || us == 0) {
+    if (end == env || *end != '\0' || errno == ERANGE || us == 0) {
         return;
     }
-    usleep((useconds_t)us);
+    /* nanosleep supports >=1s; also avoids useconds_t truncation (e.g. 2^32 -> 0). */
+    sec = us / 1000000UL;
+    ts.tv_sec = (time_t)sec;
+    if ((unsigned long)ts.tv_sec != sec) {
+        return;
+    }
+    ts.tv_nsec = (long)((us % 1000000UL) * 1000UL);
+    (void)nanosleep(&ts, NULL);
 }
 
 size_t round_up(size_t size, size_t unit) {
@@ -145,9 +155,21 @@ void allocator_init() {
     pthread_mutex_init(&mutex,NULL);
 }
 
+/* Wrap INIT_ALLOCATED_LIST_ENTRY so QUIT_WITH_ERROR returns here, not from
+ * callers that hold mutex / CUDA memory / shared reservations. */
+static int new_allocated_list_entry(allocated_list_entry **out,
+                                    CUdeviceptr address, size_t size,
+                                    CUdevice dev) {
+    allocated_list_entry *e;
+    INIT_ALLOCATED_LIST_ENTRY(e, address, size, dev);
+    *out = e;
+    return 0;
+}
+
 int add_chunk(CUdeviceptr *address, size_t size) {
     CUdevice dev;
     CUresult res;
+    allocated_list_entry *e;
 
     cuCtxGetDevice(&dev);
 
@@ -173,8 +195,12 @@ int add_chunk(CUdeviceptr *address, size_t size) {
 
     /* Local list tracking only — usage already reserved */
     pthread_mutex_lock(&mutex);
-    allocated_list_entry *e;
-    INIT_ALLOCATED_LIST_ENTRY(e, 0, size, dev);
+    if (new_allocated_list_entry(&e, 0, size, dev) != 0) {
+        pthread_mutex_unlock(&mutex);
+        cuMemoryFree(*address);
+        release_device_memory(dev, size);
+        return -1;
+    }
     e->entry->address = *address;
     LIST_ADD(device_overallocated, e);
     pthread_mutex_unlock(&mutex);
@@ -184,9 +210,13 @@ int add_chunk(CUdeviceptr *address, size_t size) {
 /* Track a pointer in the local list. Caller must already have reserved
  * `size` via reserve_device_memory() (or equivalent usage accounting). */
 int add_chunk_only(CUdeviceptr address, size_t size, CUdevice dev) {
-    pthread_mutex_lock(&mutex);
     allocated_list_entry *e;
-    INIT_ALLOCATED_LIST_ENTRY(e, 0, size, dev);
+
+    pthread_mutex_lock(&mutex);
+    if (new_allocated_list_entry(&e, 0, size, dev) != 0) {
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
     e->entry->address = address;
     LIST_ADD(device_overallocated, e);
     pthread_mutex_unlock(&mutex);

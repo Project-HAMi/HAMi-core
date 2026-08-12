@@ -37,12 +37,15 @@
 
 #include <cuda.h>
 #include <errno.h>
+#include <limits.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #ifndef TEST_DEVICE_ID
@@ -73,34 +76,73 @@ typedef struct {
     volatile int stop;
 } shm_state_t;
 
-static size_t parse_size_env(const char *name, size_t default_bytes) {
+/* Parse HAMI_RACE_ALLOC / HAMI_RACE_ROUNDS style values.
+ * On success writes *out and returns 0. Unset/empty → default.
+ * Malformed env (ERANGE, trailing junk, zero) → -1. */
+static int parse_size_env(const char *name, size_t default_bytes, size_t *out) {
     const char *v = getenv(name);
     char *end = NULL;
-    unsigned long long n;
+    uint64_t n;
+    size_t result;
 
     if (v == NULL || v[0] == '\0') {
-        return default_bytes;
+        *out = default_bytes;
+        return 0;
     }
-    n = strtoull(v, &end, 10);
-    if (end == v) {
-        return default_bytes;
+    errno = 0;
+    n = (uint64_t)strtoull(v, &end, 10);
+    if (end == v || errno == ERANGE) {
+        return -1;
     }
     if (*end == 'G' || *end == 'g') {
-        return (size_t)n << 30;
+        if (n > (SIZE_MAX >> 30)) {
+            return -1;
+        }
+        result = (size_t)n << 30;
+        end++;
+    } else if (*end == 'M' || *end == 'm') {
+        if (n > (SIZE_MAX >> 20)) {
+            return -1;
+        }
+        result = (size_t)n << 20;
+        end++;
+    } else if (*end == 'K' || *end == 'k') {
+        if (n > (SIZE_MAX >> 10)) {
+            return -1;
+        }
+        result = (size_t)n << 10;
+        end++;
+    } else {
+        result = (size_t)n;
     }
-    if (*end == 'M' || *end == 'm') {
-        return (size_t)n << 20;
+    if (*end != '\0' || result == 0) {
+        return -1;
     }
-    if (*end == 'K' || *end == 'k') {
-        return (size_t)n << 10;
-    }
-    return (size_t)n;
+    *out = result;
+    return 0;
 }
 
-static void wait_until(volatile int *p, int want) {
-    while (*p != want) {
-        usleep(100);
+#ifndef WAIT_UNTIL_TIMEOUT_SEC
+#define WAIT_UNTIL_TIMEOUT_SEC 60
+#endif
+
+/* Returns 0 when *p == want, -1 on timeout (avoids indefinite CI hangs). */
+static int wait_until(volatile int *p, int want) {
+    struct timespec start, now;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
+        return -1;
     }
+    while (*p != want) {
+        if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+            return -1;
+        }
+        if (now.tv_sec - start.tv_sec >= WAIT_UNTIL_TIMEOUT_SEC) {
+            return -1;
+        }
+        usleep(1000);
+    }
+    return 0;
 }
 
 static void child_init_cuda(CUcontext *ctx) {
@@ -126,25 +168,35 @@ static void child_main(int id, shm_state_t *st, size_t alloc_bytes) {
     __sync_fetch_and_add(&st->ready, 1);
 
     for (;;) {
-        wait_until(&st->go, 1);
+        if (wait_until(&st->go, 1) != 0) {
+            fprintf(stderr, "child %d: timed out waiting for go=1\n", id);
+            _exit(1);
+        }
         if (st->stop) {
             break;
         }
 
-        /* Release previous round's allocation if any. */
-        if (dptr != 0) {
-            cuMemFree(dptr);
-            dptr = 0;
-        }
-
+        /* Round starts with no outstanding allocation (freed in teardown). */
+        dptr = 0;
         __sync_synchronize();
         res = cuMemAlloc(&dptr, alloc_bytes);
+        if (res != CUDA_SUCCESS) {
+            dptr = 0;
+        }
         st->child_res[id] = (int)res;
         st->child_ok[id] = (res == CUDA_SUCCESS) ? 1 : 0;
         __sync_synchronize();
 
         __sync_fetch_and_add(&st->done, 1);
-        wait_until(&st->go, 0);
+        if (wait_until(&st->go, 0) != 0) {
+            fprintf(stderr, "child %d: timed out waiting for go=0\n", id);
+            _exit(1);
+        }
+        /* Teardown before ready++ so finish_round sees a clean slate. */
+        if (dptr != 0) {
+            cuMemFree(dptr);
+            dptr = 0;
+        }
         __sync_fetch_and_add(&st->ready, 1);
     }
 
@@ -193,11 +245,19 @@ static void start_round(shm_state_t *st) {
     st->go = 1;
 }
 
-static void finish_round(shm_state_t *st) {
-    wait_until(&st->done, 2);
-    st->go = 0;
+static int finish_round(shm_state_t *st) {
+    if (wait_until(&st->done, 2) != 0) {
+        return -1;
+    }
+    /* Zero ready before releasing children. If go=0 comes first, a child may
+     * ready++ and then parent clears it — lost increment → hang on ready==2. */
     st->ready = 0;
-    wait_until(&st->ready, 2);
+    __sync_synchronize();
+    st->go = 0;
+    if (wait_until(&st->ready, 2) != 0) {
+        return -1;
+    }
+    return 0;
 }
 
 static const char *cu_res_name(int res) {
@@ -238,8 +298,22 @@ int main(int argc, char **argv) {
     preload = getenv("LD_PRELOAD");
     limit_env = getenv("CUDA_DEVICE_MEMORY_LIMIT");
     cache_env = getenv("CUDA_DEVICE_MEMORY_SHARED_CACHE");
-    alloc_bytes = parse_size_env("HAMI_RACE_ALLOC", (size_t)600 << 20);
-    rounds = (int)parse_size_env("HAMI_RACE_ROUNDS", 30);
+    if (parse_size_env("HAMI_RACE_ALLOC", (size_t)600 << 20, &alloc_bytes) != 0) {
+        fprintf(stderr,
+                "ERROR: invalid HAMI_RACE_ALLOC (use e.g. 600m; no spaces; non-zero)\n");
+        return 1;
+    }
+    {
+        size_t rounds_sz;
+
+        if (parse_size_env("HAMI_RACE_ROUNDS", 30, &rounds_sz) != 0 ||
+            rounds_sz > (size_t)INT_MAX) {
+            fprintf(stderr,
+                    "ERROR: invalid HAMI_RACE_ROUNDS (positive integer required)\n");
+            return 1;
+        }
+        rounds = (int)rounds_sz;
+    }
 
     printf("=== HAMi-core concurrent oom_check race reproducer ===\n");
     printf("LD_PRELOAD=%s\n", preload ? preload : "(unset — libvgpu will not hook)");
@@ -329,12 +403,20 @@ int main(int argc, char **argv) {
             child_init_cuda(&ctx);
             CHECK_DRV(cuMemAlloc(&dptr, alloc_bytes));
             __sync_fetch_and_add(&st->ready, 1);
-            wait_until(&st->go, 1); /* hold until parent says release */
+            if (wait_until(&st->go, 1) != 0) {
+                fprintf(stderr, "hold-control A: timed out waiting for release\n");
+                _exit(1);
+            }
             cuMemFree(dptr);
             cuCtxDestroy(ctx);
             _exit(0);
         }
-        wait_until(&st->ready, 1);
+        if (wait_until(&st->ready, 1) != 0) {
+            fprintf(stderr, "ERROR: timed out waiting for hold-control A ready\n");
+            kill(a, SIGKILL);
+            waitpid(a, NULL, 0);
+            return 1;
+        }
 
         b = fork();
         if (b < 0) {
@@ -387,11 +469,24 @@ int main(int argc, char **argv) {
     if (spawn_children(kids, st, alloc_bytes) != 0) {
         return 1;
     }
-    wait_until(&st->ready, 2);
+    if (wait_until(&st->ready, 2) != 0) {
+        fprintf(stderr,
+                "ERROR: timed out waiting for race children ready "
+                "(ready=%d; child init/CUDA failure?)\n",
+                st->ready);
+        kill_children(kids);
+        return 1;
+    }
 
     for (i = 0; i < rounds; i++) {
         start_round(st);
-        finish_round(st);
+        if (finish_round(st) != 0) {
+            fprintf(stderr,
+                    "ERROR: timed out in round %d (done=%d ready=%d)\n", i,
+                    st->done, st->ready);
+            kill_children(kids);
+            return 1;
+        }
 
         if (st->child_ok[0] && st->child_ok[1]) {
             race_hits++;

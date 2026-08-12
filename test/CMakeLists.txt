@@ -69,6 +69,14 @@ if (TARGET vgpu)
         TIMEOUT 10)
 endif()
 
+# GPU + LD_PRELOAD regression for cross-process cuMemAlloc TOCTOU (#273).
+# Uses the wrapper so --expect-fixed and limit/cache env are set.
+add_test(NAME concurrent_oom_race
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/run_concurrent_oom_race.sh --expect-fixed)
+set_tests_properties(concurrent_oom_race PROPERTIES
+    TIMEOUT 180
+    ENVIRONMENT "LIBVGPU=${CMAKE_BINARY_DIR}/libvgpu.so;TEST_BIN=${CMAKE_CURRENT_BINARY_DIR}/test_concurrent_oom_race")
+
 
 add_custom_target(python_test ALL
     COMMAND cp -r ${CMAKE_CURRENT_SOURCE_DIR}/python ${CMAKE_CURRENT_BINARY_DIR})
