@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Run the cross-process oom_check TOCTOU reproducer against libvgpu.so.
+# Run the cross-process oom_check race test against libvgpu.so (race-fix).
+# Default: --expect-fixed (limit must hold under concurrent alloc + race window).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -31,8 +32,14 @@ export HAMI_RACE_ROUNDS="$ROUNDS"
 export HAMI_ALLOC_RACE_WINDOW_US="$WINDOW_US"
 export LIBCUDA_LOG_LEVEL="${LIBCUDA_LOG_LEVEL:-1}"
 
-echo "Running: $BIN $*"
+# Default to verifying the fix; omit args only triggers --expect-fixed.
+ARGS=("$@")
+if [[ ${#ARGS[@]} -eq 0 ]]; then
+  ARGS=(--expect-fixed)
+fi
+
+echo "Running: $BIN ${ARGS[*]}"
 echo "  LD_PRELOAD=$LD_PRELOAD"
 echo "  LIMIT=$LIMIT ALLOC=$ALLOC ROUNDS=$ROUNDS WINDOW_US=$WINDOW_US"
 echo "  CACHE=$CACHE"
-exec "$BIN" "$@"
+exec "$BIN" "${ARGS[@]}"

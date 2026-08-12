@@ -24,6 +24,7 @@
  *   ./build/test/test_concurrent_oom_race
  *
  * Or: ./test/run_concurrent_oom_race.sh
+ *   (race-fix defaults to --expect-fixed)
  *
  * Suggested sizing: limit=1024m, alloc=600m so each request fits alone
  * (after two process contexts) but 2*alloc exceeds the limit.
