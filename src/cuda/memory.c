@@ -565,6 +565,10 @@ CUresult cuLaunchCooperativeKernel ( CUfunction f, unsigned int  gridDimX, unsig
     ENSURE_RUNNING();
     ensure_post_init();
     pre_launch_kernel();
+    if (pidfound==1){
+        rate_limiter(gridDimX * gridDimY * gridDimZ,
+                   blockDimX * blockDimY * blockDimZ);
+    }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuLaunchCooperativeKernel,f,gridDimX,gridDimY,gridDimZ,blockDimX,blockDimY,blockDimZ,sharedMemBytes,hStream,kernelParams);
     return res;
 }
