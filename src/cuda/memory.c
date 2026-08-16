@@ -275,16 +275,15 @@ CUresult cuPointerGetAttributes ( unsigned int  numAttributes, CUpointer_attribu
     LOG_DEBUG("cuPointGetAttribute data=%p ptr=%llx", data, ptr);
     ENSURE_RUNNING();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuPointerGetAttributes,numAttributes,attributes,data,ptr);
+    if (res != CUDA_SUCCESS) {
+        return res;
+    }
     int cur=0;
     for (cur=0;cur<numAttributes;cur++){
         if (attributes[cur]==CU_POINTER_ATTRIBUTE_MEMORY_TYPE){
             int j = check_memory_type(ptr);
             //*(int *)(data[cur])=1;
             LOG_DEBUG("check result = %d %d",j,*(int *)(data[cur]));
-        }else{
-            if (attributes[cur]==CU_POINTER_ATTRIBUTE_IS_MANAGED){
-                *(int *)(data[cur])=0;    
-            }
         }
     }
     return res;
