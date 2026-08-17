@@ -12,15 +12,24 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     get_filename_component(TEST_TARGET_NAME ${RELATIVE_TEST_PATH} NAME_WE)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${TEST_TARGET_DIR})
 
-    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
+    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR
+        TEST_TARGET_NAME STREQUAL "test_seqlock_writer_exclusion")
         # Build this focused regression test with the production shared-region
         # implementation.  It does not invoke any CUDA/NVML entry point at
         # runtime.  Section garbage collection drops unrelated GPU-facing
         # production functions.
-        add_executable(${TEST_TARGET_NAME}
-            ${TEST_SCRIPT}
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_memory_limit.c
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        if (TEST_TARGET_NAME STREQUAL "test_seqlock_writer_exclusion")
+            # includes the translation unit directly to observe the sequence
+            # counter, so it must not also be linked in
+            add_executable(${TEST_TARGET_NAME}
+                ${TEST_SCRIPT}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        else()
+            add_executable(${TEST_TARGET_NAME}
+                ${TEST_SCRIPT}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_memory_limit.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        endif()
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
             _GNU_SOURCE)
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
@@ -34,7 +43,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     endif()
 
     list(APPEND TEST_TARGET_NAMES_LIST ${TEST_TARGET_NAME})
-    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
+    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR
+        TEST_TARGET_NAME STREQUAL "test_seqlock_writer_exclusion")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     else()
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread
@@ -50,7 +60,14 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
 add_test(NAME postinit_owner_death
     COMMAND test_postinit_owner_death)
-set_tests_properties(postinit_owner_death PROPERTIES TIMEOUT 20)
+set_tests_properties(postinit_owner_death PROPERTIES TIMEOUT 20
+    RESOURCE_LOCK shared_region)
+
+add_test(NAME seqlock_writer_exclusion
+    COMMAND test_seqlock_writer_exclusion)
+set_tests_properties(seqlock_writer_exclusion PROPERTIES TIMEOUT 60
+    SKIP_RETURN_CODE 77
+    RESOURCE_LOCK shared_region)
 
 
 add_custom_target(python_test ALL
