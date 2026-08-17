@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <cuda.h>
 
-#include "test_utils.h"
+#include "test/test_utils.h"
 
 // Regression test for the managed-memory state reported by the two CUDA
 // pointer-attribute APIs.
@@ -37,6 +37,33 @@ int main() {
     CUpointer_attribute attributes[1] = {CU_POINTER_ATTRIBUTE_IS_MANAGED};
     void *data[1] = {&managed_multi};
     CHECK_DRV_API(cuPointerGetAttributes(1, attributes, data, dptr));
+
+    CUcontext popped_ctx;
+    CHECK_DRV_API(cuCtxPopCurrent(&popped_ctx));
+
+    int memory_type = -1;
+    CUpointer_attribute error_attributes[1] = {
+        CU_POINTER_ATTRIBUTE_MEMORY_TYPE
+    };
+    void *error_data[1] = {&memory_type};
+    CUresult error_result = cuPointerGetAttributes(
+        1, error_attributes, error_data, dptr);
+
+    CHECK_DRV_API(cuCtxPushCurrent(popped_ctx));
+
+    if (error_result != CUDA_ERROR_INVALID_CONTEXT) {
+        fprintf(stderr,
+            "cuPointerGetAttributes returned %d without a current context, "
+            "expected %d\n", error_result, CUDA_ERROR_INVALID_CONTEXT);
+        return -1;
+    }
+
+    if (memory_type != -1) {
+        fprintf(stderr,
+            "cuPointerGetAttributes changed output after an error: %d\n",
+            memory_type);
+        return -1;
+    }
 
     printf("IS_MANAGED: cuPointerGetAttribute=%d cuPointerGetAttributes=%d\n",
         managed_single, managed_multi);

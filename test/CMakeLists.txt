@@ -1,6 +1,8 @@
 
 find_package(CUDA REQUIRED)
 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/..)
+
 set(TEST_CPP_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(TEST_TARGET_NAMES_LIST) 
 
