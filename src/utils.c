@@ -29,15 +29,19 @@ int try_lock_unified_lock() {
         }
     }
 
-    // Native blocking wait (no LOCK_NB). 
-    // The OS handles the waiting queue automatically and efficiently.
-    while (flock(unified_lock_fd, LOCK_EX) == -1) {
+    struct flock fl;
+    fl.l_type = F_WRLCK;  // Exclusive write lock
+    fl.l_whence = SEEK_SET;
+    fl.l_start = 0;
+    fl.l_len = 0;         // Lock the entire file
+
+    // F_SETLKW is the blocking wait. It handles the queue instantly.
+    while (fcntl(unified_lock_fd, F_SETLKW, &fl) == -1) {
         if (errno == EINTR) {
             continue; // Interrupted by system signal, retry the wait
         }
 
-        // If it fails for any reason other than a signal, error out.
-        LOG_ERROR("unexpected flock error on %s: %s", unified_lock, strerror(errno));
+        LOG_ERROR("unexpected fcntl lock error on %s: %s", unified_lock, strerror(errno));
         close(unified_lock_fd);
         unified_lock_fd = -1;
         return -1;
@@ -55,18 +59,22 @@ int try_unlock_unified_lock(void) {
         return -1;
     }
 
-    int res = flock(unified_lock_fd, LOCK_UN);
-    
-    // Preserve errno in case close() modifies it
+    struct flock fl;
+    fl.l_type = F_UNLCK;  // Unlock
+    fl.l_whence = SEEK_SET;
+    fl.l_start = 0;
+    fl.l_len = 0;
+
+    // F_SETLK (no W) because unlocking shouldn't block
+    int res = fcntl(unified_lock_fd, F_SETLK, &fl);
     int saved_errno = errno;
 
-    if (close(unified_lock_fd) != 0) {
-        LOG_ERROR("try_unlock_unified_lock: failed to close fd: %s", strerror(errno));
-    }
-    unified_lock_fd = -1;
+    // Notice we removed close() and unified_lock_fd = -1 here!
+    // Keeping the FD open prevents race conditions during high-frequency locking.
+    // The OS will automatically close it when the process exits.
 
     if (res != 0) {
-        LOG_ERROR("try_unlock_unified_lock: flock unlock failed: %s", strerror(saved_errno));
+        LOG_ERROR("try_unlock_unified_lock: fcntl unlock failed: %s", strerror(saved_errno));
         return -1;
     }
 
