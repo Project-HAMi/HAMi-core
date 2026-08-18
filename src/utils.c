@@ -29,30 +29,18 @@ int try_lock_unified_lock() {
         }
     }
 
-    const int max_retries = 10;
-    int cnt = 0;
-
-    // Retry with 10ms - 110ms jittered backoff on contention
-    while (flock(unified_lock_fd, LOCK_EX | LOCK_NB) == -1) {
+    // Native blocking wait (no LOCK_NB). 
+    // The OS handles the waiting queue automatically and efficiently.
+    while (flock(unified_lock_fd, LOCK_EX) == -1) {
         if (errno == EINTR) {
-            continue; // Retry immediately without counting against max_retries
-        }
-        
-        if (errno != EWOULDBLOCK && errno != EAGAIN) {
-            LOG_ERROR("unexpected flock error on %s: %s", unified_lock, strerror(errno));
-            close(unified_lock_fd);
-            unified_lock_fd = -1;
-            return -1;
+            continue; // Interrupted by system signal, retry the wait
         }
 
-        if (++cnt > max_retries) {
-            LOG_ERROR("unified_lock contention timeout after %d retries", max_retries);
-            close(unified_lock_fd);
-            unified_lock_fd = -1;
-            return -1;
-        }
-
-        usleep((rand() % 100 + 10) * 1000);
+        // If it fails for any reason other than a signal, error out.
+        LOG_ERROR("unexpected flock error on %s: %s", unified_lock, strerror(errno));
+        close(unified_lock_fd);
+        unified_lock_fd = -1;
+        return -1;
     }
 
     LOG_INFO("try_lock_unified_lock: acquired");
