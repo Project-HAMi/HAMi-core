@@ -20,3 +20,15 @@ build-in-docker:
 check-cuda-hook-consistency:
 	python3 hack/check_cuda_hook_consistency.py
 .PHONY: check-cuda-hook-consistency
+
+test_alloc:
+	@mkdir -p build/test
+	nvcc -o build/test/test_alloc test/main.cu -lcuda -lcudart
+.PHONY: test_alloc
+
+test: build test_alloc
+	@echo "\n=== Running Baseline Test (No Preload) ==="
+	./build/test/test_alloc
+	@echo "\n=== Running HAMi-core Interception Test (4GB Limit) ==="
+	LD_PRELOAD=$(current_dir)build/libvgpu.so CUDA_DEVICE_MEMORY_LIMIT=4096m LIBCUDA_LOG_LEVEL=4 ./build/test/test_alloc
+.PHONY: test
