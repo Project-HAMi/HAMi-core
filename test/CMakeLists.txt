@@ -36,6 +36,12 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     list(APPEND TEST_TARGET_NAMES_LIST ${TEST_TARGET_NAME})
     if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
+    elseif(TEST_TARGET_NAME STREQUAL "bench_lock")
+        # Tell CMake to compile utils.c together with bench_lock.c
+        target_sources(${TEST_TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/utils.c)
+        # Add the include directory so it can find the headers
+        target_include_directories(${TEST_TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+        target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     else()
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread
             -lnvidia-ml -lcuda -lcudart -L${CUDA_HOME}/lib64)
