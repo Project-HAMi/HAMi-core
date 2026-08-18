@@ -43,6 +43,7 @@ test: build test_alloc
 	run_test "Baseline Allocation (No Preload)" "./build/test/test_alloc"; \
 	run_test "HAMi-core Interception Test (4GB Limit)" "LD_PRELOAD=$(current_dir)build/libvgpu.so CUDA_DEVICE_MEMORY_LIMIT=4096m LIBCUDA_LOG_LEVEL=4 ./build/test/test_alloc"; \
 	run_test "Lock Contention Benchmark (Debug Mode)" "time sh -c 'for worker in \$$(seq 1 5); do (for iter in \$$(seq 1 2); do LD_PRELOAD=$(current_dir)build/libvgpu.so CUDA_DEVICE_MEMORY_LIMIT=4096m ./build/test/test_alloc; done) & done; wait'"; \
+	run_test "Lock Contention Benchmark (20 Workers x 5 Iterations)" "time sh -c 'for worker in \$$(seq 1 20); do (for iter in \$$(seq 1 5); do LD_PRELOAD=$(current_dir)build/libvgpu.so CUDA_DEVICE_MEMORY_LIMIT=4096m ./build/test/test_alloc > /dev/null; done) & done; wait'"; \
 	echo "\n========================================"; \
 	echo "$$total tests executed, $$passed passed"; \
 	if [ "$$passed" -eq "$$total" ]; then \
