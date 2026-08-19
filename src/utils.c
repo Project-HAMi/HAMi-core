@@ -13,9 +13,10 @@
 #include "multiprocess/multiprocess_memory_limit.h"
 
 const char* unified_lock="/tmp/vgpulock/lock";
-static int lock_fd = -1;
+
 extern size_t context_size;
 extern int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
+static int unified_lock_fd = -1;
 
 // 0 unified_lock lock success
 // -1 unified_lock lock fail
