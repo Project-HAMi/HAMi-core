@@ -86,8 +86,11 @@ static void change_token(int64_t delta, int device_id) {
 static int64_t delta(int up_limit, int user_current, int64_t share, int device_id) {
   int utilization_diff =
       abs(up_limit - user_current) < 5 ? 5 : abs(up_limit - user_current);
+  /* Keep the correction step linear in the SM count so it scales like the
+   * token pool (sm_num * max_thread_per_sm * FACTOR) and the step-to-pool
+   * ratio is the same on every device size. */
   int64_t increment =
-      (int64_t)g_sm_num[device_id] * (int64_t)g_sm_num[device_id] *
+      (int64_t)g_sm_num[device_id] *
       (int64_t)g_max_thread_per_sm[device_id] * (int64_t)utilization_diff / 2560;
 
   /* Accelerate cuda cores allocation when utilization vary widely */
@@ -190,7 +193,7 @@ int setspec() {
             CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, cu_dev));
         CHECK_CU_RESULT(cuDeviceGetAttribute(&g_max_thread_per_sm[dev],
             CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_MULTIPROCESSOR, cu_dev));
-        g_total_cuda_cores[dev] = g_max_thread_per_sm[dev] * g_sm_num[dev] * FACTOR;
+        g_total_cuda_cores[dev] = (int64_t)g_max_thread_per_sm[dev] * g_sm_num[dev] * FACTOR;
         LOG_INFO("setspec: device %d sm_num=%d max_threads_per_sm=%d total_cores=%ld FACTOR=%d",
                  dev, g_sm_num[dev], g_max_thread_per_sm[dev], g_total_cuda_cores[dev], FACTOR);
     }
