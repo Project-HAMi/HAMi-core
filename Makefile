@@ -35,9 +35,9 @@ test: build test_alloc
 		eval "$$2"; \
 		if [ $$? -eq 0 ]; then \
 			passed=$$((passed + 1)); \
-			echo "[✅ PASSED] $$1"; \
+			echo "[PASSED] $$1"; \
 		else \
-			echo "[❌ FAILED] $$1"; \
+			echo "[FAILED] $$1"; \
 		fi; \
 	}; \
 	run_test "Baseline Allocation (No Preload)" "./build/test/test_alloc"; \
@@ -49,7 +49,7 @@ test: build test_alloc
 				for i in \$$(seq 1 5); do \
 					LD_PRELOAD=$(current_dir)build/libvgpu.so CUDA_DEVICE_MEMORY_LIMIT=4096m ./build/test/test_alloc > /dev/null 2>&1; \
 				done; \
-				echo \"✅ Worker \$$w completed\"; \
+				echo \"Worker \$$w completed\"; \
 			) & \
 		done; \
 		while [ \$$(jobs -p | wc -l) -gt 0 ]; do \

@@ -13,7 +13,7 @@
 #include "multiprocess/multiprocess_memory_limit.h"
 
 const char* unified_lock="/tmp/vgpulock/lock";
-static int lock_fd = -1;
+
 extern size_t context_size;
 extern int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 static int unified_lock_fd = -1;
@@ -21,65 +21,33 @@ static int unified_lock_fd = -1;
 // 0 unified_lock lock success
 // -1 unified_lock lock fail
 int try_lock_unified_lock() {
-    if(unified_lock_fd < 0 ) {
-        unified_lock_fd = open(unified_lock, O_CREAT | O_RDWR | O_CLOEXEC, 0666);
-        if (unified_lock_fd == -1) {
-            LOG_ERROR("failed to open unified_lock file: %s", unified_lock);
-            return -1;
-        }
-    }
-
-    struct flock fl;
-    fl.l_type = F_WRLCK;  // Exclusive write lock
-    fl.l_whence = SEEK_SET;
-    fl.l_start = 0;
-    fl.l_len = 0;         // Lock the entire file
-
-    // F_SETLKW is the blocking wait. It handles the queue instantly.
-    while (fcntl(unified_lock_fd, F_SETLKW, &fl) == -1) {
-        if (errno == EINTR) {
-            continue; // Interrupted by system signal, retry the wait
-        }
-
-        LOG_ERROR("unexpected fcntl lock error on %s: %s", unified_lock, strerror(errno));
-        close(unified_lock_fd);
-        unified_lock_fd = -1;
+    lock_fd = open(unified_lock, O_CREAT | O_RDWR, 0666);
+    if (lock_fd == -1) {
+        LOG_ERROR("failed to open unified_lock file: %s", unified_lock);
         return -1;
     }
-
+    if (flock(lock_fd, LOCK_EX) == -1) {
+        LOG_ERROR("flock failed on unified_lock");
+        close(lock_fd);
+        lock_fd = -1;
+        return -1;
+    }
     LOG_INFO("try_lock_unified_lock: acquired");
     return 0;
 }
 
 // 0 unified_lock unlock success
 // -1 unified_lock unlock fail
-int try_unlock_unified_lock(void) {
-    if (unified_lock_fd < 0) {
-        LOG_ERROR("try_unlock_unified_lock: no lock held (invalid fd)");
+int try_unlock_unified_lock() {
+    if (lock_fd == -1) {
+        LOG_ERROR("try_unlock_unified_lock: no lock held");
         return -1;
     }
-
-    struct flock fl;
-    fl.l_type = F_UNLCK;  // Unlock
-    fl.l_whence = SEEK_SET;
-    fl.l_start = 0;
-    fl.l_len = 0;
-
-    // F_SETLK (no W) because unlocking shouldn't block
-    int res = fcntl(unified_lock_fd, F_SETLK, &fl);
-    int saved_errno = errno;
-
-    // Notice we removed close() and unified_lock_fd = -1 here!
-    // Keeping the FD open prevents race conditions during high-frequency locking.
-    // The OS will automatically close it when the process exits.
-
-    if (res != 0) {
-        LOG_ERROR("try_unlock_unified_lock: fcntl unlock failed: %s", strerror(saved_errno));
-        return -1;
-    }
-
-    LOG_INFO("try_unlock_unified_lock: released successfully");
-    return 0;
+    int res = flock(lock_fd, LOCK_UN);
+    close(lock_fd);
+    lock_fd = -1;
+    LOG_INFO("try unlock_unified_lock:%d", res);
+    return res == 0 ? 0 : -1;
 }
 
 int mergepid(unsigned int *prev, unsigned int *current, nvmlProcessInfo_t1 *sub, nvmlProcessInfo_t1 *merged) {
