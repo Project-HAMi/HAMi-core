@@ -33,8 +33,8 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
  * Env: HAMI_ALLOC_RACE_WINDOW_US=<microseconds>, unset/0 = no delay. */
 static void maybe_widen_alloc_race_window(void) {
     const char *env = getenv("HAMI_ALLOC_RACE_WINDOW_US");
-    unsigned long us;
-    unsigned long sec;
+    uint64_t us;
+    uint64_t sec;
     char *end = NULL;
     struct timespec ts;
 
@@ -49,10 +49,10 @@ static void maybe_widen_alloc_race_window(void) {
     /* nanosleep supports >=1s; also avoids useconds_t truncation (e.g. 2^32 -> 0). */
     sec = us / 1000000UL;
     ts.tv_sec = (time_t)sec;
-    if ((unsigned long)ts.tv_sec != sec) {
+    if ((uint64_t)ts.tv_sec != sec) {
         return;
     }
-    ts.tv_nsec = (long)((us % 1000000UL) * 1000UL);
+    ts.tv_nsec = (int64_t)((us % 1000000UL) * 1000UL);
     (void)nanosleep(&ts, NULL);
 }
 
