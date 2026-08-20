@@ -88,7 +88,9 @@ static int64_t delta(int up_limit, int user_current, int64_t share, int device_i
       abs(up_limit - user_current) < 5 ? 5 : abs(up_limit - user_current);
   /* Keep the correction step linear in the SM count so it scales like the
    * token pool (sm_num * max_thread_per_sm * FACTOR) and the step-to-pool
-   * ratio is the same on every device size. */
+   * ratio is the same on every device size:
+   *   increment / pool = utilization_diff / (2560 * FACTOR) = diff / 81920
+   * per 120 ms tick, before the acceleration branch below. */
   int64_t increment =
       (int64_t)g_sm_num[device_id] *
       (int64_t)g_max_thread_per_sm[device_id] * (int64_t)utilization_diff / 2560;
