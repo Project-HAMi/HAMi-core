@@ -13,12 +13,14 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${TEST_TARGET_DIR})
 
     if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR
-        TEST_TARGET_NAME STREQUAL "test_seqlock_writer_exclusion")
+        TEST_TARGET_NAME STREQUAL "test_seqlock_writer_exclusion" OR
+        TEST_TARGET_NAME STREQUAL "test_seqlock_multiprocess")
         # Build this focused regression test with the production shared-region
         # implementation.  It does not invoke any CUDA/NVML entry point at
         # runtime.  Section garbage collection drops unrelated GPU-facing
         # production functions.
-        if (TEST_TARGET_NAME STREQUAL "test_seqlock_writer_exclusion")
+        if (TEST_TARGET_NAME STREQUAL "test_seqlock_writer_exclusion" OR
+            TEST_TARGET_NAME STREQUAL "test_seqlock_multiprocess")
             # includes the translation unit directly to observe the sequence
             # counter, so it must not also be linked in
             add_executable(${TEST_TARGET_NAME}
@@ -44,7 +46,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
 
     list(APPEND TEST_TARGET_NAMES_LIST ${TEST_TARGET_NAME})
     if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR
-        TEST_TARGET_NAME STREQUAL "test_seqlock_writer_exclusion")
+        TEST_TARGET_NAME STREQUAL "test_seqlock_writer_exclusion" OR
+        TEST_TARGET_NAME STREQUAL "test_seqlock_multiprocess")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     else()
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread
@@ -66,6 +69,12 @@ set_tests_properties(postinit_owner_death PROPERTIES TIMEOUT 20
 add_test(NAME seqlock_writer_exclusion
     COMMAND test_seqlock_writer_exclusion)
 set_tests_properties(seqlock_writer_exclusion PROPERTIES TIMEOUT 60
+    SKIP_RETURN_CODE 77
+    RESOURCE_LOCK shared_region)
+
+add_test(NAME seqlock_multiprocess
+    COMMAND test_seqlock_multiprocess)
+set_tests_properties(seqlock_multiprocess PROPERTIES TIMEOUT 120
     SKIP_RETURN_CODE 77
     RESOURCE_LOCK shared_region)
 
