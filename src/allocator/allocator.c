@@ -33,6 +33,7 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
  * Env: HAMI_ALLOC_RACE_WINDOW_US=<microseconds>, unset/0 = no delay. */
 static void maybe_widen_alloc_race_window(void) {
     const char *env = getenv("HAMI_ALLOC_RACE_WINDOW_US");
+    const char *p;
     uint64_t us;
     uint64_t sec;
     char *end = NULL;
@@ -41,9 +42,17 @@ static void maybe_widen_alloc_race_window(void) {
     if (env == NULL || env[0] == '\0') {
         return;
     }
+    p = env;
+    while (isspace((unsigned char)*p)) {
+        p++;
+    }
+    /* strtoull("-1") becomes UINT64_MAX without ERANGE. */
+    if (*p == '\0' || *p == '-') {
+        return;
+    }
     errno = 0;
-    us = strtoul(env, &end, 10);
-    if (end == env || *end != '\0' || errno == ERANGE || us == 0) {
+    us = strtoull(p, &end, 10);
+    if (end == p || *end != '\0' || errno == ERANGE || us == 0) {
         return;
     }
     /* nanosleep supports >=1s; also avoids useconds_t truncation (e.g. 2^32 -> 0). */
