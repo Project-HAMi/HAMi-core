@@ -29,6 +29,17 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_pid_discovery")
+        add_executable(${TEST_TARGET_NAME}
+            ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/utils.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT})
     elseif (TEST_SCRIPT MATCHES ".*cu")
@@ -39,6 +50,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
 
     list(APPEND TEST_TARGET_NAMES_LIST ${TEST_TARGET_NAME})
     if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
+        target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
+    elseif (TEST_TARGET_NAME STREQUAL "test_pid_discovery")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         target_link_libraries(${TEST_TARGET_NAME} -ldl)
@@ -61,6 +74,10 @@ set_tests_properties(postinit_owner_death PROPERTIES TIMEOUT 20)
 add_test(NAME dlsym_rtld_next
     COMMAND test_dlsym_rtld_next)
 set_tests_properties(dlsym_rtld_next PROPERTIES TIMEOUT 10)
+
+add_test(NAME pid_discovery
+    COMMAND test_pid_discovery)
+set_tests_properties(pid_discovery PROPERTIES TIMEOUT 10)
 if (TARGET vgpu)
     add_test(NAME dlsym_rtld_next_preloaded
         COMMAND test_dlsym_rtld_next)
