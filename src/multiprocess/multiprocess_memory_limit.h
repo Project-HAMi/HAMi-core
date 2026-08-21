@@ -129,6 +129,7 @@ typedef struct {
 
 void ensure_initialized();
 
+int is_gpu_core_limit_enabled(void);
 int get_current_device_sm_limit(int dev);
 uint64_t get_current_device_memory_limit(const int dev);
 int set_current_device_memory_limit(const int dev,size_t newlimit);
