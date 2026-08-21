@@ -145,10 +145,11 @@ size_t get_limit_from_env(const char* env_name) {
     size_t res = strtoul(env_limit, &digit_end, 0);
     size_t scaled_res = res * scalar;
     if (scaled_res == 0) {
-        if (env_name[12]=='S'){
+        size_t name_len = strlen(env_name);
+        if (name_len > 12 && env_name[12] == 'S'){
             LOG_INFO("device core util limit set to 0, which means no limit: %s=%s",
                 env_name, env_limit);
-        }else if (env_name[12]=='M'){
+        }else if (name_len > 12 && env_name[12] == 'M'){
             LOG_WARN("invalid device memory limit %s=%s",env_name,env_limit);
         }else{
             LOG_WARN("invalid env name:%s",env_name);
