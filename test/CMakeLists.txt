@@ -29,6 +29,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
+        add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT})
     elseif (TEST_SCRIPT MATCHES ".*cu")
         cuda_add_executable(${TEST_TARGET_NAME}  ${TEST_SCRIPT})
     else()
@@ -38,6 +40,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     list(APPEND TEST_TARGET_NAMES_LIST ${TEST_TARGET_NAME})
     if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
+    elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
+        target_link_libraries(${TEST_TARGET_NAME} -ldl)
     else()
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread
             -lnvidia-ml -lcuda -lcudart -L${CUDA_HOME}/lib64)
@@ -53,6 +57,17 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 add_test(NAME postinit_owner_death
     COMMAND test_postinit_owner_death)
 set_tests_properties(postinit_owner_death PROPERTIES TIMEOUT 20)
+
+add_test(NAME dlsym_rtld_next
+    COMMAND test_dlsym_rtld_next)
+set_tests_properties(dlsym_rtld_next PROPERTIES TIMEOUT 10)
+if (TARGET vgpu)
+    add_test(NAME dlsym_rtld_next_preloaded
+        COMMAND test_dlsym_rtld_next)
+    set_tests_properties(dlsym_rtld_next_preloaded PROPERTIES
+        ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:vgpu>"
+        TIMEOUT 10)
+endif()
 
 
 add_custom_target(python_test ALL
