@@ -21,7 +21,9 @@ extern int wait_status_self(int status);
 #define ENSURE_RUNNING() {                                \
    /* LOG_DEBUG("Memory op at %d",__LINE__); */              \
     ensure_initialized();                                 \
-    while(!wait_status_self(1)) { LOG_DEBUG("E1"); sleep(1); }             \
+    if (is_gpu_core_limit_enabled()) {                    \
+        while(!wait_status_self(1)) { LOG_DEBUG("E1"); sleep(1); }         \
+    }                                                      \
 }                                                         \
 
 #define INC_MEMORY_OR_RETURN_ERROR(bytes) {               \

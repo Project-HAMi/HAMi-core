@@ -29,7 +29,6 @@ void *vgpulib;
 
 pthread_once_t pre_cuinit_flag = PTHREAD_ONCE_INIT;
 pthread_once_t post_cuinit_flag = PTHREAD_ONCE_INIT;
-pthread_once_t dlsym_init_flag = PTHREAD_ONCE_INIT;
 
 /* pidfound is to enable core utilization, if we don't find hostpid in container, then we have no
  where to find its core utilization */
@@ -44,40 +43,8 @@ extern size_t context_size;
 /* This is the symbol search function */
 fp_dlsym real_dlsym = NULL;
 
-pthread_mutex_t dlsym_lock;
-typedef struct {
-    pthread_t tid;
-    void *pointer;
-}tid_dl_map;
-
-#define DLMAP_SIZE 100
-tid_dl_map dlmap[DLMAP_SIZE];
-int dlmap_count=0;
-
-void init_dlsym(){
-    LOG_DEBUG("init_dlsym\n");
-    pthread_mutex_init(&dlsym_lock,NULL);
-    dlmap_count=0;
-    memset(dlmap, 0, sizeof(tid_dl_map)*DLMAP_SIZE);
-}
-
-int check_dlmap(pthread_t tid, void *pointer){
-    int i;
-    int cursor = (dlmap_count < DLMAP_SIZE) ? dlmap_count : DLMAP_SIZE;
-    for (i=cursor-1; i>=0; i--) {
-        if ((dlmap[i].pointer == pointer) && pthread_equal(dlmap[i].tid, tid))
-            return 1;
-    }
-    cursor = dlmap_count % DLMAP_SIZE;
-    dlmap[cursor].tid = tid;
-    dlmap[cursor].pointer = pointer;
-    dlmap_count++;
-    return 0;
-}
-
 FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
     LOG_DEBUG("into dlsym %s",symbol);
-    pthread_once(&dlsym_init_flag,init_dlsym);
     if (real_dlsym == NULL) {
         const char* glibc_versions[] = {
                 "GLIBC_2.2.5",  // for amd64
@@ -113,15 +80,7 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
         }
     }
     if (handle == RTLD_NEXT) {
-        void *h = real_dlsym(RTLD_NEXT,symbol);
-        pthread_mutex_lock(&dlsym_lock);
-        pthread_t tid = pthread_self();
-        if (check_dlmap(tid,h)){
-            LOG_WARN("recursive dlsym : %s\n",symbol);
-            h = NULL;
-        }
-        pthread_mutex_unlock(&dlsym_lock);
-        return h;
+        return real_dlsym(RTLD_NEXT, symbol);
     }
     if (symbol[0] == 'c' && symbol[1] == 'u') {
         //Compatible with cuda 12.8+ fix
