@@ -79,7 +79,7 @@ int getextrapid(unsigned int prev, unsigned int current, nvmlProcessInfo_t1 *pre
     for (i=0; i< current; i++) {
         LOG_INFO("current pids[%d]=%d",i,pids_on_device[i].pid);
     }
-    if (current-prev<=0)
+    if (current <= prev)
         return 0;
     for (i=0; i<current; i++) {
         found = 0;
