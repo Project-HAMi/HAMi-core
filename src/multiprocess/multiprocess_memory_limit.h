@@ -135,11 +135,11 @@ typedef struct {
 
 void ensure_initialized();
 
+int is_gpu_core_limit_enabled(void);
 int get_current_device_sm_limit(int dev);
 uint64_t get_current_device_memory_limit(const int dev);
 int set_current_device_memory_limit(const int dev,size_t newlimit);
-int set_current_device_sm_limit(int dev,int scale);
-int set_current_device_sm_limit_scale(int dev,int scale);
+int set_current_device_sm_limit(int dev, int limit);
 int update_host_pid();
 int set_host_pid(int hostpid);
 
