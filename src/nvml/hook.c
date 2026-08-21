@@ -354,18 +354,34 @@ nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,void* memory,int versi
             return NVML_SUCCESS;
         }
     } else {
+        size_t physical_total;
         switch (version) {
         case 1:
-             ((nvmlMemory_t*)memory)->free = (limit-usage);
-             ((nvmlMemory_t*)memory)->total = limit;
-             ((nvmlMemory_t*)memory)->used = usage;
+            physical_total = ((nvmlMemory_t*)memory)->total;
+            break;
+        case 2:
+            physical_total = ((nvmlMemory_v2_t *)memory)->total;
+            break;
+        default:
+            return NVML_ERROR_INVALID_ARGUMENT;
+        }
+        size_t actual_limit = (limit > physical_total) ? physical_total : limit;
+        size_t clamped = (usage > actual_limit) ? actual_limit : usage;
+        if (usage > actual_limit) {
+            LOG_WARN("NVML meminfo: usage %lu exceeds limit %lu, clamping", usage, actual_limit);
+        }
+        switch (version) {
+        case 1:
+            ((nvmlMemory_t*)memory)->free = (actual_limit > clamped) ? (actual_limit - clamped) : 0;
+            ((nvmlMemory_t*)memory)->total = actual_limit;
+            ((nvmlMemory_t*)memory)->used = clamped;
             return NVML_SUCCESS;
         case 2:
-            ((nvmlMemory_v2_t *)memory)->free = (limit-usage);
-            ((nvmlMemory_v2_t *)memory)->total = limit;
-            ((nvmlMemory_v2_t *)memory)->used = usage;
+            ((nvmlMemory_v2_t *)memory)->free = (actual_limit > clamped) ? (actual_limit - clamped) : 0;
+            ((nvmlMemory_v2_t *)memory)->total = actual_limit;
+            ((nvmlMemory_v2_t *)memory)->used = clamped;
             return NVML_SUCCESS;
-        } 
+        }
     }
     return NVML_SUCCESS;
 }

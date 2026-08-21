@@ -496,16 +496,17 @@ CUresult cuMemGetInfo_v2(size_t* free, size_t* total) {
         *free = *total - usage;
         LOG_INFO("after free=%ld total=%ld", *free, *total);
         return CUDA_SUCCESS;
-    } else if (limit < usage) {
-        LOG_WARN("limit < usage; usage=%ld, limit=%ld", usage, limit);
-        return CUDA_ERROR_INVALID_VALUE;
     } else {
         CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
         LOG_INFO("orig free=%ld total=%ld limit=%ld usage=%ld",
             *free, *total, limit, usage);
         // Ensure total memory does not exceed the physical or imposed limit.
         size_t actual_limit = (limit > *total) ? *total : limit;
-        *free = (actual_limit > usage) ? (actual_limit - usage) : 0;
+        size_t clamped = (usage > limit) ? limit : usage;
+        if (usage > limit) {
+            LOG_WARN("CUDA meminfo: usage %lu exceeds limit %lu, clamping", usage, limit);
+        }
+        *free = (actual_limit > clamped) ? (actual_limit - clamped) : 0;
         *total = actual_limit;
         LOG_INFO("after free=%ld total=%ld limit=%ld usage=%ld",
             *free, *total, limit, usage);
