@@ -71,24 +71,8 @@ size_t round_up(size_t size, size_t unit) {
     return size;
 }
 
-int reserve_device_memory(CUdevice dev, size_t size) {
-    lock_shrreg();
-    if (oom_check(dev, size)) {
-        unlock_shrreg();
-        return CUDA_ERROR_OUT_OF_MEMORY;
-    }
-    add_gpu_device_memory_usage(getpid(), dev, size, 2);
-    unlock_shrreg();
-    return 0;
-}
-
-void release_device_memory(CUdevice dev, size_t size) {
-    lock_shrreg();
-    rm_gpu_device_memory_usage(getpid(), dev, size, 2);
-    unlock_shrreg();
-}
-
-int oom_check(const int dev, size_t addon) {
+/* already_locked: caller already holds lock_shrreg (not reentrant). */
+static int oom_check_impl(const int dev, size_t addon, int already_locked) {
     CUdevice d;
     if (dev==-1)
         cuCtxGetDevice(&d);
@@ -104,16 +88,43 @@ int oom_check(const int dev, size_t addon) {
     size_t new_allocated = _usage + addon;
     LOG_INFO("_usage=%lu limit=%lu new_allocated=%lu",_usage,limit,new_allocated);
     if (new_allocated > limit) {
+        int cleared;
+
         LOG_ERROR("Device %d OOM %lu / %lu", d, new_allocated, limit);
 
-        lock_shrreg();
-        int cleared = clear_proc_slot_nolock(1);
-        unlock_shrreg();
+        if (already_locked) {
+            cleared = clear_proc_slot_nolock(1);
+        } else {
+            lock_shrreg();
+            cleared = clear_proc_slot_nolock(1);
+            unlock_shrreg();
+        }
         if (cleared > 0)
-            return oom_check(dev,addon);
+            return oom_check_impl(dev, addon, already_locked);
         return 1;
     }
     return 0;
+}
+
+int oom_check(const int dev, size_t addon) {
+    return oom_check_impl(dev, addon, 0);
+}
+
+int reserve_device_memory(CUdevice dev, size_t size) {
+    lock_shrreg();
+    if (oom_check_impl(dev, size, 1)) {
+        unlock_shrreg();
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+    add_gpu_device_memory_usage(getpid(), dev, size, 2);
+    unlock_shrreg();
+    return 0;
+}
+
+void release_device_memory(CUdevice dev, size_t size) {
+    lock_shrreg();
+    rm_gpu_device_memory_usage(getpid(), dev, size, 2);
+    unlock_shrreg();
 }
 
 CUresult view_vgpu_allocator() {
