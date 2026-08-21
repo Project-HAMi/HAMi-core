@@ -182,6 +182,10 @@ int parse_cuda_visible_env() {
     if (need_cuda_virtualize()) {
         for (int i = 0; i < strlen(s); i++) {
             if ((s[i] == ',') || (i == 0)) {
+                if (count >= CUDA_DEVICE_MAX_COUNT) {
+                    LOG_ERROR("CUDA_VISIBLE_DEVICES exceeds max count");
+                    break;
+                }
                 int tmp = (i==0) ? atoi(s) : atoi(s + i +1);
                 cuda_to_nvml_map_array[count] = tmp; 
                 count++;
