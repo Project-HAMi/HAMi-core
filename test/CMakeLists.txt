@@ -14,7 +14,30 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     get_filename_component(TEST_TARGET_NAME ${RELATIVE_TEST_PATH} NAME_WE)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${TEST_TARGET_DIR})
 
-    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
+    if (TEST_TARGET_NAME STREQUAL "test_context_accounting")
+        add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/context_accounting.c)
+    elseif (TEST_TARGET_NAME STREQUAL "test_hostpid_broker")
+        add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_broker.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE HOSTPID_TIMEOUT_MS=100)
+    elseif (TEST_TARGET_NAME STREQUAL "test_hostpid_fallback_lock")
+        add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_fallback_lock.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE HOSTPID_FALLBACK_LOCK_TESTING)
+    elseif (TEST_TARGET_NAME STREQUAL "test_hostpid_fallback_race")
+        add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/utils.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_fallback_lock.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
         # Build this focused regression test with the production shared-region
         # implementation.  It does not invoke any CUDA/NVML entry point at
         # runtime.  Section garbage collection drops unrelated GPU-facing
@@ -22,7 +45,10 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         add_executable(${TEST_TARGET_NAME}
             ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_memory_limit.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_fallback_lock.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_include_directories(${TEST_TARGET_NAME} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/include)
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
             _GNU_SOURCE)
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
@@ -38,7 +64,11 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     endif()
 
     list(APPEND TEST_TARGET_NAMES_LIST ${TEST_TARGET_NAME})
-    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
+    if (TEST_TARGET_NAME STREQUAL "test_context_accounting" OR
+        TEST_TARGET_NAME STREQUAL "test_hostpid_broker" OR
+        TEST_TARGET_NAME STREQUAL "test_hostpid_fallback_lock" OR
+        TEST_TARGET_NAME STREQUAL "test_hostpid_fallback_race" OR
+        TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         target_link_libraries(${TEST_TARGET_NAME} -ldl)
@@ -57,6 +87,19 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 add_test(NAME postinit_owner_death
     COMMAND test_postinit_owner_death)
 set_tests_properties(postinit_owner_death PROPERTIES TIMEOUT 20)
+
+add_test(NAME context_accounting
+    COMMAND test_context_accounting)
+add_test(NAME hostpid_broker
+    COMMAND test_hostpid_broker)
+add_test(NAME hostpid_fallback_lock
+    COMMAND test_hostpid_fallback_lock)
+add_test(NAME hostpid_fallback_race
+    COMMAND test_hostpid_fallback_race)
+set_tests_properties(context_accounting hostpid_broker
+    PROPERTIES TIMEOUT 5)
+set_tests_properties(hostpid_fallback_lock PROPERTIES TIMEOUT 30)
+set_tests_properties(hostpid_fallback_race PROPERTIES TIMEOUT 35)
 
 add_test(NAME dlsym_rtld_next
     COMMAND test_dlsym_rtld_next)

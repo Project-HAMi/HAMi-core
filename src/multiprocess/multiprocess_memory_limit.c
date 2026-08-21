@@ -44,7 +44,7 @@ _Static_assert(POSTINIT_FILE_LOCK_OFFSET > (off_t)sizeof(shared_region_t),
 
 int pidfound;
 
-int ctx_activate[32];
+int ctx_activate[CUDA_DEVICE_MAX_COUNT];
 
 static shared_region_info_t region_info = {0, -1, PTHREAD_ONCE_INIT, NULL, 0, NULL};
 static atomic_flag postinit_local_lock = ATOMIC_FLAG_INIT;
@@ -478,10 +478,22 @@ uint64_t nvml_get_device_memory_usage(const int dev) {
 
 // Lock-free memory add using atomics with seqlock for consistent reads
 int add_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type) {
-    LOG_INFO("add_gpu_device_memory_lockfree:%d %d->%d %lu", pid, cudadev, cuda_to_nvml_map(cudadev), usage);
+    int dev;
+    unsigned int mapped_dev;
 
-    int dev = cuda_to_nvml_map(cudadev);
     ensure_initialized();
+    if (cudadev < 0 || cudadev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_WARN("Invalid CUDA device %d", cudadev);
+        return -1;
+    }
+    mapped_dev = cuda_to_nvml_map((unsigned int)cudadev);
+    if (mapped_dev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_WARN("Invalid NVML device mapping for CUDA device %d", cudadev);
+        return -1;
+    }
+    dev = (int)mapped_dev;
+    LOG_INFO("add_gpu_device_memory_lockfree:%d %d->%d %lu", pid,
+             cudadev, dev, usage);
 
     // Fast path: use the validated cached slot for our own process
     shrreg_proc_slot_t* self_slot = NULL;
@@ -517,6 +529,11 @@ int add_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type
 
     // Slow path: find slot for other process (still lock-free)
     int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
+    if (proc_num < 0) {
+        proc_num = 0;
+    } else if (proc_num > SHARED_REGION_MAX_PROCESS_NUM) {
+        proc_num = SHARED_REGION_MAX_PROCESS_NUM;
+    }
     int i;
     for (i=0; i < proc_num; i++) {
         int32_t slot_pid = atomic_load_explicit(&region_info.shared_region->procs[i].pid, memory_order_acquire);
@@ -554,9 +571,22 @@ int add_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type
 
 // Lock-free memory remove using atomics with seqlock for consistent reads
 int rm_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type) {
-    LOG_INFO("rm_gpu_device_memory_lockfree:%d %d->%d %d:%lu", pid, cudadev, cuda_to_nvml_map(cudadev), type, usage);
-    int dev = cuda_to_nvml_map(cudadev);
+    int dev;
+    unsigned int mapped_dev;
+
     ensure_initialized();
+    if (cudadev < 0 || cudadev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_WARN("Invalid CUDA device %d", cudadev);
+        return -1;
+    }
+    mapped_dev = cuda_to_nvml_map((unsigned int)cudadev);
+    if (mapped_dev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_WARN("Invalid NVML device mapping for CUDA device %d", cudadev);
+        return -1;
+    }
+    dev = (int)mapped_dev;
+    LOG_INFO("rm_gpu_device_memory_lockfree:%d %d->%d %d:%lu", pid,
+             cudadev, dev, type, usage);
 
     // Fast path: use the validated cached slot for our own process
     shrreg_proc_slot_t* self_slot = NULL;
@@ -593,6 +623,11 @@ int rm_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type)
 
     // Slow path: find slot for other process (still lock-free)
     int proc_num = atomic_load_explicit(&region_info.shared_region->proc_num, memory_order_acquire);
+    if (proc_num < 0) {
+        proc_num = 0;
+    } else if (proc_num > SHARED_REGION_MAX_PROCESS_NUM) {
+        proc_num = SHARED_REGION_MAX_PROCESS_NUM;
+    }
     int i;
     for (i = 0; i < proc_num; i++) {
         int32_t slot_pid = atomic_load_explicit(&region_info.shared_region->procs[i].pid, memory_order_acquire);
@@ -647,19 +682,96 @@ void get_timespec(int seconds, struct timespec* spec) {
  * byte.  Processes sharing one cache must all use this protocol; a sem-only
  * binary does not participate in the record lock.
  */
-static void postinit_file_lock_backoff(unsigned int backoff_us,
-                                       uint32_t* jitter_state) {
-    struct timespec delay;
+static int postinit_deadline_after_ms(struct timespec *deadline,
+                                      unsigned int timeout_ms) {
+    if (clock_gettime(CLOCK_MONOTONIC, deadline) != 0) {
+        return 0;
+    }
+    deadline->tv_sec += timeout_ms / 1000U;
+    deadline->tv_nsec += (int64_t)(timeout_ms % 1000U) * INT64_C(1000000);
+    if (deadline->tv_nsec >= 1000000000L) {
+        deadline->tv_sec++;
+        deadline->tv_nsec -= 1000000000L;
+    }
+    return 1;
+}
+
+static int postinit_deadline_remaining(const struct timespec *deadline,
+                                       struct timespec *remaining) {
+    struct timespec now;
+
+    if (deadline == NULL) {
+        remaining->tv_sec = 0;
+        remaining->tv_nsec = 0;
+        return 1;
+    }
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+        return 0;
+    }
+    if (now.tv_sec > deadline->tv_sec ||
+        (now.tv_sec == deadline->tv_sec &&
+         now.tv_nsec >= deadline->tv_nsec)) {
+        errno = ETIMEDOUT;
+        return 0;
+    }
+    remaining->tv_sec = deadline->tv_sec - now.tv_sec;
+    remaining->tv_nsec = deadline->tv_nsec - now.tv_nsec;
+    if (remaining->tv_nsec < 0) {
+        remaining->tv_sec--;
+        remaining->tv_nsec += 1000000000L;
+    }
+    return 1;
+}
+
+static int postinit_sleep_until(unsigned int delay_us,
+                                const struct timespec *deadline) {
+    struct timespec delay = {
+        .tv_sec = delay_us / 1000000U,
+        .tv_nsec = (int64_t)(delay_us % 1000000U) * INT64_C(1000),
+    };
+
+    if (deadline != NULL) {
+        struct timespec remaining;
+
+        if (!postinit_deadline_remaining(deadline, &remaining)) {
+            return 0;
+        }
+        if (delay.tv_sec > remaining.tv_sec ||
+            (delay.tv_sec == remaining.tv_sec &&
+             delay.tv_nsec > remaining.tv_nsec)) {
+            delay = remaining;
+        }
+    }
+    while (nanosleep(&delay, &delay) != 0) {
+        if (errno != EINTR) {
+            return 0;
+        }
+        if (deadline != NULL) {
+            struct timespec remaining;
+
+            if (!postinit_deadline_remaining(deadline, &remaining)) {
+                return 0;
+            }
+            if (delay.tv_sec > remaining.tv_sec ||
+                (delay.tv_sec == remaining.tv_sec &&
+                 delay.tv_nsec > remaining.tv_nsec)) {
+                delay = remaining;
+            }
+        }
+    }
+    return 1;
+}
+
+static int postinit_file_lock_backoff(unsigned int backoff_us,
+                                      uint32_t* jitter_state,
+                                      const struct timespec *deadline) {
     unsigned int minimum_us = backoff_us / 2;
     unsigned int jitter_range_us = backoff_us - minimum_us;
+    unsigned int delay_us;
 
     *jitter_state = *jitter_state * UINT32_C(1103515245) + UINT32_C(12345);
-    unsigned int delay_us = minimum_us +
-                            *jitter_state % (jitter_range_us + 1);
-    delay.tv_sec = delay_us / 1000000U;
-    delay.tv_nsec = (long)(delay_us % 1000000U) * 1000L;
-    while (nanosleep(&delay, &delay) != 0 && errno == EINTR) {
-    }
+    delay_us = minimum_us + *jitter_state % (jitter_range_us + 1);
+    return postinit_sleep_until(delay_us, deadline);
 }
 
 static uint32_t postinit_file_lock_jitter_seed(void) {
@@ -673,7 +785,8 @@ static uint32_t postinit_file_lock_jitter_seed(void) {
     return seed;
 }
 
-static int postinit_file_lock(short lock_type) {
+static int postinit_file_lock_until(int16_t lock_type,
+                                    const struct timespec *deadline) {
     struct flock lock = {
         .l_type = lock_type,
         .l_whence = SEEK_SET,
@@ -697,11 +810,19 @@ static int postinit_file_lock(short lock_type) {
          * released lock immediately.
          */
         for (;;) {
-            do {
-                status = fcntl(region_info.fd, F_SETLK, &lock);
-            } while (status != 0 && errno == EINTR);
+            struct timespec remaining;
+
+            if (deadline != NULL &&
+                !postinit_deadline_remaining(deadline, &remaining)) {
+                return 0;
+            }
+            status = fcntl(region_info.fd, F_SETLK, &lock);
             if (status == 0) {
                 return 1;
+            }
+            if (errno == EINTR) {
+                /* Recheck the shared absolute deadline before retrying. */
+                continue;
             }
             if (errno != EACCES && errno != EAGAIN) {
                 LOG_ERROR("Failed to acquire postinit file lock: errno=%d",
@@ -712,7 +833,10 @@ static int postinit_file_lock(short lock_type) {
                 LOG_MSG("Waiting for postinit file lock (PID %d)", getpid());
                 waiting_logged = 1;
             }
-            postinit_file_lock_backoff(retry_delay_us, &retry_jitter);
+            if (!postinit_file_lock_backoff(retry_delay_us, &retry_jitter,
+                                            deadline)) {
+                return 0;
+            }
             if (retry_delay_us < POSTINIT_FILE_LOCK_MAX_RETRY_US / 2) {
                 retry_delay_us *= 2;
             } else {
@@ -732,10 +856,21 @@ static int postinit_file_lock(short lock_type) {
     return 1;
 }
 
-static void lock_postinit_local(void) {
-    while (atomic_flag_test_and_set_explicit(&postinit_local_lock,
-                                              memory_order_acquire)) {
-        usleep(1000);
+static int lock_postinit_local_until(const struct timespec *deadline) {
+    for (;;) {
+        struct timespec remaining;
+
+        if (deadline != NULL &&
+            !postinit_deadline_remaining(deadline, &remaining)) {
+            return 0;
+        }
+        if (!atomic_flag_test_and_set_explicit(&postinit_local_lock,
+                                                memory_order_acquire)) {
+            return 1;
+        }
+        if (!postinit_sleep_until(1000U, deadline)) {
+            return 0;
+        }
     }
 }
 
@@ -979,19 +1114,67 @@ void unlock_shrreg() {
     SEQ_POINT_MARK(SEQ_RELEASE_SEMLOCK_OK);
 }
 
-int lock_postinit() {
+static int lock_postinit_until(const struct timespec *deadline) {
     if (postinit_lock_held) {
         LOG_ERROR("Postinit lock cannot be acquired recursively");
+        errno = EDEADLK;
         return 0;
     }
-    lock_postinit_local();
-    if (!postinit_file_lock(F_WRLCK)) {
+    if (!lock_postinit_local_until(deadline)) {
+        return 0;
+    }
+    if (!postinit_file_lock_until(F_WRLCK, deadline)) {
         unlock_postinit_local();
         return 0;
+    }
+    if (deadline != NULL) {
+        struct timespec remaining;
+
+        if (!postinit_deadline_remaining(deadline, &remaining)) {
+            int saved_errno = errno;
+
+            if (!postinit_file_lock_until(F_UNLCK, NULL)) {
+                /*
+                 * Do not release the process-local guard while the
+                 * process-wide record lock may still be held. This leaves
+                 * the process failed closed instead of allowing overlap.
+                 */
+                postinit_lock_held = 1;
+                return 0;
+            }
+            unlock_postinit_local();
+            errno = saved_errno;
+            return 0;
+        }
     }
     postinit_lock_held = 1;
     LOG_DEBUG("Acquired postinit file lock (PID %d)", getpid());
     return 1;
+}
+
+int lock_postinit(void) {
+    return lock_postinit_until(NULL);
+}
+
+int lock_postinit_timeout(unsigned int timeout_ms) {
+    struct timespec deadline;
+
+    if (timeout_ms == 0U) {
+        errno = EINVAL;
+        return 0;
+    }
+    if (!postinit_deadline_after_ms(&deadline, timeout_ms)) {
+        return 0;
+    }
+    return lock_postinit_until(&deadline);
+}
+
+int lock_postinit_deadline(const struct timespec *deadline) {
+    if (deadline == NULL) {
+        errno = EINVAL;
+        return 0;
+    }
+    return lock_postinit_until(deadline);
 }
 
 void unlock_postinit() {
@@ -999,7 +1182,7 @@ void unlock_postinit() {
         LOG_ERROR("Postinit unlock attempted by a thread that does not hold the lock");
         return;
     }
-    if (!postinit_file_lock(F_UNLCK)) {
+    if (!postinit_file_lock_until(F_UNLCK, NULL)) {
         /*
          * Keep the local guard held.  POSIX record locks are process-wide, so
          * letting another thread proceed could overlap the still-held lock.
@@ -1145,6 +1328,7 @@ void print_all() {
 void child_reinit_flag() {
     LOG_DEBUG("Detect child pid: %d -> %d", region_info.pid, getpid());   
     region_info.init_status = PTHREAD_ONCE_INIT;
+    region_info.my_slot = NULL;
     postinit_lock_held = 0;
     atomic_flag_clear_explicit(&postinit_local_lock, memory_order_release);
 }
@@ -1392,21 +1576,46 @@ int update_host_pid() {
     return 0;
 }
 
-int set_host_pid(int hostpid) {
-    int i,j,found=0;
-    for (i=0;i<region_info.shared_region->proc_num;i++){
-        if (region_info.shared_region->procs[i].pid == getpid()){
-            LOG_INFO("SET PID= %d",hostpid);
-            found=1;
-            region_info.shared_region->procs[i].hostpid = hostpid;
-            for (j=0;j<CUDA_DEVICE_MAX_COUNT;j++)
-                region_info.shared_region->procs[i].monitorused[j]=0;
-        }
+int get_current_host_pid(void) {
+    shrreg_proc_slot_t *slot;
+
+    if (region_info.shared_region == NULL ||
+        region_info.shared_region == MAP_FAILED) {
+        return 0;
     }
-    if (!found) {
+
+    slot = get_current_proc_slot();
+    if (slot == NULL) {
+        return 0;
+    }
+    return atomic_load_explicit(&slot->hostpid, memory_order_acquire);
+}
+
+int set_host_pid(int hostpid) {
+    shrreg_proc_slot_t *slot = NULL;
+    int j;
+
+    if (hostpid <= 0 || region_info.shared_region == NULL ||
+        region_info.shared_region == MAP_FAILED) {
+        return -1;
+    }
+
+    lock_shrreg();
+    slot = get_current_proc_slot();
+
+    if (slot == NULL) {
+        unlock_shrreg();
         LOG_ERROR("HOST PID NOT FOUND. %d",hostpid);
         return -1;
     }
+
+    LOG_INFO("SET PID= %d", hostpid);
+    for (j = 0; j < CUDA_DEVICE_MAX_COUNT; j++) {
+        atomic_store_explicit(&slot->monitorused[j], 0,
+                              memory_order_relaxed);
+    }
+    atomic_store_explicit(&slot->hostpid, hostpid, memory_order_release);
+    unlock_shrreg();
     setspec();
     return 0;
 }

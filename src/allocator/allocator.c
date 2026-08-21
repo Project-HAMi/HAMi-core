@@ -35,12 +35,27 @@ size_t round_up(size_t size, size_t unit) {
 
 int oom_check(const int dev, size_t addon) {
     CUdevice d;
-    if (dev==-1)
-        cuCtxGetDevice(&d);
-    else
+    unsigned int mapped_dev;
+
+    if (dev == -1) {
+        if (cuCtxGetDevice(&d) != CUDA_SUCCESS) {
+            LOG_ERROR("Unable to resolve the current CUDA device in OOM check");
+            return 1;
+        }
+    } else {
         d=dev;
+    }
+    if (d < 0 || d >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_ERROR("Invalid CUDA device %d in OOM check", d);
+        return 1;
+    }
+    mapped_dev = cuda_to_nvml_map((unsigned int)d);
+    if (mapped_dev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_ERROR("Invalid NVML mapping for CUDA device %d in OOM check", d);
+        return 1;
+    }
     uint64_t limit = get_current_device_memory_limit(d);
-    size_t _usage = get_gpu_memory_usage(d);
+    size_t _usage = get_gpu_memory_usage((int)mapped_dev);
 
     if (limit == 0) {
         return 0;
@@ -63,6 +78,7 @@ int oom_check(const int dev, size_t addon) {
 
 CUresult view_vgpu_allocator() {
     allocated_list_entry *al;
+    unsigned int mapped_dev;
     size_t total;
     total=0;
     LOG_INFO("[view1]:overallocated:");
@@ -71,7 +87,12 @@ CUresult view_vgpu_allocator() {
         total+=al->entry->length;
     }
     LOG_INFO("total=%lu",total);
-    size_t t = get_current_device_memory_usage(0);
+    mapped_dev = cuda_to_nvml_map(0);
+    if (mapped_dev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_ERROR("Invalid NVML mapping for CUDA device 0");
+        return CUDA_ERROR_INVALID_DEVICE;
+    }
+    size_t t = get_current_device_memory_usage((int)mapped_dev);
     LOG_INFO("current_device_memory_usage:%lu",t);
     return 0;
 }

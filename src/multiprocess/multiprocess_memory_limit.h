@@ -136,6 +136,7 @@ int set_current_device_memory_limit(const int dev,size_t newlimit);
 int set_current_device_sm_limit(int dev, int limit);
 int update_host_pid();
 int set_host_pid(int hostpid);
+int get_current_host_pid(void);
 
 uint64_t get_current_device_memory_monitor(const int dev);
 uint64_t get_current_device_memory_usage(const int dev);
@@ -170,7 +171,11 @@ int init_device_info();
 void lock_shrreg();
 void unlock_shrreg();
 
-int lock_postinit();  // Returns 1 on success, 0 on lock error
+int lock_postinit(void);  // Returns 1 on success, 0 on lock error
+// Uses one monotonic deadline for the local guard and record lock.
+int lock_postinit_timeout(unsigned int timeout_ms);
+// Consumes the caller's absolute monotonic deadline.
+int lock_postinit_deadline(const struct timespec *deadline);
 void unlock_postinit();
 
 //Setspec of the corresponding device
@@ -186,7 +191,10 @@ void print_all();
 int load_env_from_file(char *filename);
 int comparelwr(const char *s1,char *s2);
 int put_device_info();
-unsigned int nvml_to_cuda_map(unsigned int nvmldev);
+/* Limits and utilization use visible CUDA ordinals. Allocation usage uses
+ * physical NVML indices so all processes sharing the cache aggregate the
+ * same GPU even when their visibility order differs. */
+int nvml_to_cuda_map(unsigned int nvmldev);
 unsigned int cuda_to_nvml_map(unsigned int cudadev);
 
 int clear_proc_slot_nolock(int);

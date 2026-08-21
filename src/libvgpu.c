@@ -1,7 +1,9 @@
 //#include "memory_limit.h"
+#include <errno.h>
 #include <fcntl.h>
 #include <dlfcn.h>
 #include <pthread.h>
+#include <string.h>
 #include "include/nvml_prefix.h"
 #include <nvml.h>
 #include "include/nvml_prefix.h"
@@ -9,6 +11,8 @@
 #include "include/libcuda_hook.h"
 #include "include/libvgpu.h"
 #include "include/utils.h"
+#include "include/hostpid_broker.h"
+#include "include/hostpid_fallback_lock.h"
 #include "include/nvml_override.h"
 #include "allocator/allocator.h"
 #include "multiprocess/multiprocess_memory_limit.h"
@@ -846,23 +850,72 @@ void preInit(){
     load_cuda_libraries();
     //nvmlInit();
     ENSURE_INITIALIZED();
-    pthread_atfork(NULL, NULL, childReinitPostInit);
+    if (pthread_atfork(context_accounting_fork_prepare,
+                       context_accounting_fork_parent,
+                       childReinitPostInit) != 0) {
+        LOG_WARN("Failed to register context accounting fork handlers");
+    }
 }
 
 void postInit(){
+    int broker_enabled = hostpid_broker_enabled(
+        getenv("LIBVGPU_HOSTPID_BROKER"));
+
     allocator_init();
     map_cuda_visible_devices();
 
-    // Use the process-death-safe shared file lock to serialize host PID detection
-    int lock_acquired = lock_postinit();
-    nvmlReturn_t res = NVML_SUCCESS;
+    nvmlReturn_t res = set_task_pid_from_broker();
+    enum hostpid_discovery_path discovery_path =
+        hostpid_discovery_path_select(broker_enabled,
+                                      res == NVML_SUCCESS);
+    if (discovery_path == HOSTPID_DISCOVERY_CACHE_LOCAL) {
+        int cache_lock_acquired = lock_postinit();
 
-    if (lock_acquired) {
-        res = set_task_pid();
-        unlock_postinit();
-    } else {
-        LOG_WARN("Skipped host PID detection because the postinit lock failed");
-        res = NVML_ERROR_UNKNOWN;
+        if (cache_lock_acquired) {
+            res = set_task_pid();
+            unlock_postinit();
+        } else {
+            LOG_WARN("Skipped host PID detection because the cache postinit "
+                     "lock failed");
+            res = NVML_ERROR_UNKNOWN;
+        }
+    } else if (discovery_path == HOSTPID_DISCOVERY_NODE_WIDE) {
+        struct timespec fallback_deadline;
+
+        /*
+         * The cache record lock coordinates processes that share one cache.
+         * The directory lock also coordinates independent cache files on the
+         * node. Always take the node lock first so new processes use one lock
+         * order. Both locks consume one absolute monotonic deadline.
+         */
+        if (hostpid_fallback_lock_deadline_after_ms(
+                &fallback_deadline,
+                HOSTPID_FALLBACK_LOCK_TIMEOUT_MS) != 0) {
+            LOG_WARN("Skipped host PID detection because the fallback "
+                     "deadline could not be created: %s", strerror(errno));
+            res = NVML_ERROR_UNKNOWN;
+        } else if (hostpid_fallback_lock_acquire_until(
+                       &fallback_deadline) == 0) {
+            int cache_lock_acquired = lock_postinit_deadline(
+                &fallback_deadline);
+
+            if (cache_lock_acquired) {
+                res = set_task_pid();
+                unlock_postinit();
+            } else {
+                LOG_WARN("Skipped host PID detection because the cache "
+                         "postinit lock failed or timed out");
+                res = NVML_ERROR_UNKNOWN;
+            }
+            if (hostpid_fallback_lock_release() != 0) {
+                LOG_ERROR("Failed to release host PID fallback lock: %s",
+                          strerror(errno));
+            }
+        } else {
+            LOG_WARN("Skipped host PID detection because the node fallback "
+                     "lock failed: %s", strerror(errno));
+            res = NVML_ERROR_UNKNOWN;
+        }
     }
 
     LOG_MSG("Initialized");
@@ -879,6 +932,8 @@ void postInit(){
 }
 
 void childReinitPostInit() {
+    hostpid_fallback_lock_after_fork();
+    context_accounting_fork_child();
     LOG_DEBUG("Reset postInit state after fork");
     post_cuinit_flag = PTHREAD_ONCE_INIT;
     pidfound = 0;

@@ -1,8 +1,49 @@
 #include "include/libcuda_hook.h"
+#include "include/libvgpu.h"
+#include "cuda/context_accounting.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
 extern size_t context_size;
-extern int ctx_activate[16];
+extern int ctx_activate[CUDA_DEVICE_MAX_COUNT];
+extern int pidfound;
+
+static size_t device_context_size[CUDA_DEVICE_MAX_COUNT];
+static primary_context_accounting_t
+    context_accounting[CUDA_DEVICE_MAX_COUNT];
+static pthread_mutex_t context_accounting_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t context_device_locks[CUDA_DEVICE_MAX_COUNT] = {
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+};
+
+void context_accounting_fork_prepare() {
+    pthread_mutex_lock(&context_accounting_lock);
+}
+
+void context_accounting_fork_parent() {
+    pthread_mutex_unlock(&context_accounting_lock);
+}
+
+void context_accounting_fork_child() {
+    int dev;
+
+    context_size = 0;
+    primary_context_accounting_reset(context_accounting,
+                                     CUDA_DEVICE_MAX_COUNT);
+    for (dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
+        device_context_size[dev] = 0;
+        ctx_activate[dev] = 0;
+        context_device_locks[dev] =
+            (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+    }
+    pthread_mutex_unlock(&context_accounting_lock);
+}
 
 
 CUresult cuDevicePrimaryCtxGetState( CUdevice dev, unsigned int* flags, int* active ){
@@ -11,16 +52,123 @@ CUresult cuDevicePrimaryCtxGetState( CUdevice dev, unsigned int* flags, int* act
     return res;
 }
 
+static size_t context_charge_for_device(CUdevice dev) {
+    if (dev >= 0 && dev < CUDA_DEVICE_MAX_COUNT &&
+        device_context_size[dev] > 0) {
+        return device_context_size[dev];
+    }
+    return dev == 0 ? context_size : 0;
+}
+
+static CUresult rollback_unaccounted_retain(CUdevice dev,
+                                            int retain_recorded,
+                                            size_t bytes_to_add) {
+    CUresult release_result;
+
+    if (retain_recorded &&
+        primary_context_rollback_retain(&context_accounting[dev],
+                                        bytes_to_add) != 0) {
+        LOG_ERROR("Failed to roll back local context accounting on device %d",
+                  dev);
+    }
+    release_result = CUDA_OVERRIDE_CALL(cuda_library_entry,
+                                        cuDevicePrimaryCtxRelease_v2, dev);
+    if (release_result != CUDA_SUCCESS) {
+        LOG_ERROR("Failed to release an unaccounted primary context on "
+                  "device %d: %d", dev, release_result);
+    }
+    ctx_activate[dev] = (int)context_accounting[dev].retain_count;
+    return CUDA_ERROR_OUT_OF_MEMORY;
+}
+
 CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
-    LOG_INFO("dev=%d context_size=%ld",dev,context_size);
-    //for Initialization only
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRetain,pctx,dev);
-    if (ctx_activate[dev] == 0) {
-        add_gpu_device_memory_usage(getpid(),dev,context_size,0); 
+    uint64_t before = 0;
+    uint64_t after = 0;
+    int hostpid;
+    int measure_context = 0;
+    size_t charge;
+    size_t measured_charge = 0;
+    size_t bytes_to_add = 0;
+
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        return CUDA_OVERRIDE_CALL(cuda_library_entry,
+                                  cuDevicePrimaryCtxRetain, pctx, dev);
     }
-    if (context_size>0) {
-        ctx_activate[dev] = 1;
+
+    pthread_mutex_lock(&context_device_locks[dev]);
+    pthread_mutex_lock(&context_accounting_lock);
+    charge = context_charge_for_device(dev);
+    hostpid = get_current_host_pid();
+    if (charge == 0 && pidfound == 1 && hostpid > 0 &&
+        context_accounting[dev].charged_bytes == 0) {
+        measure_context = 1;
     }
+    pthread_mutex_unlock(&context_accounting_lock);
+
+    if (measure_context) {
+        nvmlReturn_t result = get_used_gpu_memory_by_pid(
+            (unsigned int)hostpid, dev, &before);
+        if (result == NVML_SUCCESS || result == NVML_ERROR_NOT_FOUND) {
+            if (result == NVML_ERROR_NOT_FOUND) {
+                before = 0;
+            }
+        } else {
+            measure_context = 0;
+        }
+    }
+
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,
+                                      cuDevicePrimaryCtxRetain, pctx, dev);
+    if (res != CUDA_SUCCESS) {
+        pthread_mutex_unlock(&context_device_locks[dev]);
+        return res;
+    }
+
+    if (measure_context) {
+        int attempt;
+
+        for (attempt = 0; attempt < 10; attempt++) {
+            if (get_used_gpu_memory_by_pid((unsigned int)hostpid, dev,
+                                           &after) == NVML_SUCCESS &&
+                after > before) {
+                measured_charge = after - before;
+                break;
+            }
+            usleep(1000);
+        }
+    }
+    pthread_mutex_lock(&context_accounting_lock);
+    if (measured_charge > 0) {
+        device_context_size[dev] = measured_charge;
+        charge = measured_charge;
+        LOG_INFO("Measured primary context size lazily: "
+                 "dev=%d size=%lu", dev, charge);
+    }
+    if ((pidfound == 1
+             ? primary_context_record_accounted_retain(
+                   &context_accounting[dev], charge, &bytes_to_add)
+             : primary_context_record_retain(&context_accounting[dev], charge,
+                                             &bytes_to_add)) != 0) {
+        LOG_ERROR("Cannot account primary context retain on device %d",
+                  dev);
+        res = rollback_unaccounted_retain(dev, 0, 0);
+        pthread_mutex_unlock(&context_accounting_lock);
+        pthread_mutex_unlock(&context_device_locks[dev]);
+        return res;
+    }
+    if (bytes_to_add > 0) {
+        if (add_gpu_device_memory_usage(getpid(), dev, bytes_to_add, 0) != 0) {
+            LOG_ERROR("Failed to charge primary context memory on device %d",
+                      dev);
+            res = rollback_unaccounted_retain(dev, 1, bytes_to_add);
+            pthread_mutex_unlock(&context_accounting_lock);
+            pthread_mutex_unlock(&context_device_locks[dev]);
+            return res;
+        }
+    }
+    ctx_activate[dev] = (int)context_accounting[dev].retain_count;
+    pthread_mutex_unlock(&context_accounting_lock);
+    pthread_mutex_unlock(&context_device_locks[dev]);
     return res;
 }
 
@@ -31,11 +179,30 @@ CUresult cuDevicePrimaryCtxSetFlags_v2( CUdevice dev, unsigned int  flags ){
 }
 
 CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
-    if (ctx_activate[dev] == 1) {
-        rm_gpu_device_memory_usage(getpid(),dev,context_size,0);
+    size_t bytes_to_remove = 0;
+
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        return CUDA_OVERRIDE_CALL(cuda_library_entry,
+                                  cuDevicePrimaryCtxRelease_v2, dev);
     }
-    ctx_activate[dev] = 0;
+    pthread_mutex_lock(&context_device_locks[dev]);
+    pthread_mutex_lock(&context_accounting_lock);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRelease_v2,dev);
+    if (res == CUDA_SUCCESS) {
+        if (primary_context_record_release(&context_accounting[dev],
+                                           &bytes_to_remove) != 0) {
+            LOG_WARN("Unbalanced primary context release on device %d", dev);
+        } else if (bytes_to_remove > 0) {
+            if (rm_gpu_device_memory_usage(getpid(), dev, bytes_to_remove,
+                                           0) != 0) {
+                primary_context_restore_charge(&context_accounting[dev],
+                                               bytes_to_remove);
+            }
+        }
+        ctx_activate[dev] = (int)context_accounting[dev].retain_count;
+    }
+    pthread_mutex_unlock(&context_accounting_lock);
+    pthread_mutex_unlock(&context_device_locks[dev]);
     return res;
 }
 
@@ -149,4 +316,3 @@ CUresult cuCtxSynchronize ( void ){
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxSynchronize);
     return res;
 }
-

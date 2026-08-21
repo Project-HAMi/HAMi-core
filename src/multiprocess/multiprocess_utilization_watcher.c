@@ -31,6 +31,7 @@ static volatile int64_t g_cur_cuda_cores[CUDA_DEVICE_MAX_COUNT] = {0};
 static volatile int64_t g_total_cuda_cores[CUDA_DEVICE_MAX_COUNT] = {0};
 extern int pidfound;
 int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
+int cuda_to_nvml_map_count = CUDA_DEVICE_MAX_COUNT;
 
 /* Cached at init — these values do not change at runtime */
 static int cached_sm_limit[CUDA_DEVICE_MAX_COUNT] = {0};
@@ -106,18 +107,27 @@ static int64_t delta(int up_limit, int user_current, int64_t share, int device_i
   return share;
 }
 
-unsigned int nvml_to_cuda_map(unsigned int nvmldev){
-    unsigned int devcount;
-    CHECK_NVML_API(nvmlDeviceGetCount_v2(&devcount));
-    int i=0;
-    for (i=0;i<devcount;i++){
-        if (cuda_to_nvml_map(i)==nvmldev)
+int nvml_to_cuda_map(unsigned int nvmldev) {
+    int i;
+    int devcount = cuda_to_nvml_map_count;
+
+    if (devcount < 0 || devcount > CUDA_DEVICE_MAX_COUNT) {
+        return -1;
+    }
+    for (i = 0; i < devcount; i++) {
+        if (cuda_to_nvml_map((unsigned int)i) == nvmldev)
           return i;
     }
     return -1;
 }
 
 unsigned int cuda_to_nvml_map(unsigned int cudadev){
+    int devcount = cuda_to_nvml_map_count;
+
+    if (devcount < 0 || devcount > CUDA_DEVICE_MAX_COUNT ||
+        cudadev >= (unsigned int)devcount) {
+        return CUDA_DEVICE_MAX_COUNT;
+    }
     return cuda_to_nvml_map_array[cudadev];
 }
 
@@ -178,12 +188,19 @@ static nvmlReturn_t get_process_utilization_samples(
 }
 
 int setspec() {
-    unsigned int device_count;
+    int device_count;
+    CUresult result;
 
     CHECK_NVML_API(nvmlInit());
-    CHECK_NVML_API(nvmlDeviceGetCount(&device_count));
+    result = cuDeviceGetCount(&device_count);
+    if (result != CUDA_SUCCESS || device_count < 0 ||
+        device_count > CUDA_DEVICE_MAX_COUNT) {
+        LOG_WARN("Unable to read the visible CUDA device count: %d",
+                 result);
+        return -1;
+    }
 
-    for (unsigned int dev = 0; dev < device_count && dev < CUDA_DEVICE_MAX_COUNT; dev++) {
+    for (int dev = 0; dev < device_count; dev++) {
         CUdevice cu_dev;
         CHECK_CU_RESULT(cuDeviceGet(&cu_dev, dev));
         CHECK_CU_RESULT(cuDeviceGetAttribute(&g_sm_num[dev],
@@ -218,7 +235,7 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
         continue;
       userutil[cudadev] = 0;
       nvmlDevice_t device;
-      CHECK_NVML_API(nvmlDeviceGetHandleByIndex(cudadev, &device));
+      CHECK_NVML_API(nvmlDeviceGetHandleByIndex(devi, &device));
 
       // OPTIMIZATION: Do slow NVML queries WITHOUT holding lock
       // This prevents blocking memory allocation operations
@@ -270,8 +287,9 @@ void* utilization_watcher() {
     int userutil[CUDA_DEVICE_MAX_COUNT];
     int sysprocnum;
 
-    unsigned int device_count;
-    if (nvmlDeviceGetCount(&device_count) != NVML_SUCCESS) {
+    int device_count;
+    if (cuDeviceGetCount(&device_count) != CUDA_SUCCESS ||
+        device_count < 0 || device_count > CUDA_DEVICE_MAX_COUNT) {
         return NULL;
     }
 
@@ -289,10 +307,13 @@ void* utilization_watcher() {
         cached_util_switch = get_utilization_switch();
         LOG_INFO("init_utilization_watcher: util_switch=%d", cached_util_switch);
         init_gpu_device_utilization();
+        for (int dev = 0; dev < device_count; dev++) {
+            userutil[dev] = -1;
+        }
         get_used_gpu_utilization(userutil,&sysprocnum);
 
         // Calculate independently for each device
-        for (unsigned int dev = 0; dev < device_count && dev < CUDA_DEVICE_MAX_COUNT; dev++) {
+        for (int dev = 0; dev < device_count; dev++) {
             if (cached_sm_limit[dev] <= 0 || cached_sm_limit[dev] >= 100) {
                 continue;
             }
@@ -315,9 +336,10 @@ void* utilization_watcher() {
 }
 
 void init_utilization_watcher() {
-    unsigned int device_count;
-    if (nvmlDeviceGetCount(&device_count) != NVML_SUCCESS) {
-        LOG_WARN("nvmlDeviceGetCount failed");
+    int device_count;
+    if (cuDeviceGetCount(&device_count) != CUDA_SUCCESS ||
+        device_count < 0 || device_count > CUDA_DEVICE_MAX_COUNT) {
+        LOG_WARN("cuDeviceGetCount failed");
         return;
     }
 
@@ -325,7 +347,7 @@ void init_utilization_watcher() {
 
     // Initialize cached_sm_limit for each device
     int has_limit = 0;
-    for (unsigned int dev = 0; dev < device_count && dev < CUDA_DEVICE_MAX_COUNT; dev++) {
+    for (int dev = 0; dev < device_count; dev++) {
         cached_sm_limit[dev] = get_current_device_sm_limit(dev);
         LOG_INFO("device %d: core utilization limit = %d", dev, cached_sm_limit[dev]);
         if (cached_sm_limit[dev] > 0 && cached_sm_limit[dev] <= 100) {
@@ -339,4 +361,3 @@ void init_utilization_watcher() {
     }
     return;
 }
-
