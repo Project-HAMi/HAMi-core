@@ -289,6 +289,10 @@ int shrreg_minor_version() {
 size_t get_gpu_memory_monitor(const int dev) {
     LOG_DEBUG("get_gpu_memory_monitor_lockfree dev=%d", dev);
     ensure_initialized();
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_ERROR("Illegal device id: %d", dev);
+        return 0;
+    }
     int i=0;
     size_t total=0;
 
@@ -310,6 +314,10 @@ size_t get_gpu_memory_monitor(const int dev) {
 size_t get_gpu_memory_usage(const int dev) {
     LOG_INFO("get_gpu_memory_usage_lockfree dev=%d", dev);
     ensure_initialized();
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_ERROR("Illegal device id: %d", dev);
+        return 0;
+    }
     int i=0;
     size_t total=0;
 
@@ -482,6 +490,10 @@ int add_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type
 
     int dev = cuda_to_nvml_map(cudadev);
     ensure_initialized();
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_ERROR("Illegal device id: %d (cudadev=%d)", dev, cudadev);
+        return -1;
+    }
 
     // Fast path: use the validated cached slot for our own process
     shrreg_proc_slot_t* self_slot = NULL;
@@ -557,6 +569,10 @@ int rm_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type)
     LOG_INFO("rm_gpu_device_memory_lockfree:%d %d->%d %d:%lu", pid, cudadev, cuda_to_nvml_map(cudadev), type, usage);
     int dev = cuda_to_nvml_map(cudadev);
     ensure_initialized();
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_ERROR("Illegal device id: %d (cudadev=%d)", dev, cudadev);
+        return -1;
+    }
 
     // Fast path: use the validated cached slot for our own process
     shrreg_proc_slot_t* self_slot = NULL;
@@ -1451,6 +1467,7 @@ int get_current_device_sm_limit(int dev) {
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
+        return -1;
     }
     return region_info.shared_region->sm_limit[dev];
 }
@@ -1459,6 +1476,7 @@ int set_current_device_memory_limit(const int dev,size_t newlimit) {
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
+        return -1;
     }
     LOG_INFO("dev %d new limit set to %ld",dev,newlimit);
     region_info.shared_region->limit[dev]=newlimit;
@@ -1469,6 +1487,7 @@ uint64_t get_current_device_memory_limit(const int dev) {
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
+        return 0;
     }
     return region_info.shared_region->limit[dev];       
 }
@@ -1477,6 +1496,7 @@ uint64_t get_current_device_memory_monitor(const int dev) {
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
+        return 0;
     }
     uint64_t result = get_gpu_memory_monitor(dev);
 //    result= nvml_get_device_memory_usage(dev);
@@ -1490,6 +1510,7 @@ uint64_t get_current_device_memory_usage(const int dev) {
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
+        return 0;
     }
     result = get_gpu_memory_usage(dev);
 //    result= nvml_get_device_memory_usage(dev);

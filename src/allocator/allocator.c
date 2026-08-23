@@ -35,10 +35,14 @@ size_t round_up(size_t size, size_t unit) {
 
 int oom_check(const int dev, size_t addon) {
     CUdevice d;
-    if (dev==-1)
-        cuCtxGetDevice(&d);
-    else
+    if (dev == -1) {
+        if (cuCtxGetDevice(&d) != CUDA_SUCCESS) {
+            LOG_WARN("oom_check: no current context, skipping enforcement");
+            return 0;
+        }
+    } else {
         d=dev;
+    }
     uint64_t limit = get_current_device_memory_limit(d);
     size_t _usage = get_gpu_memory_usage(d);
 
@@ -113,7 +117,17 @@ int add_chunk(CUdeviceptr *address, size_t size) {
     CUdevice dev;
     CUresult res;
 
-    cuCtxGetDevice(&dev);
+    if (cuCtxGetDevice(&dev) != CUDA_SUCCESS) {
+        /* No current context on this thread (for example a worker thread that
+         * never bound one). We cannot attribute or bound this allocation to a
+         * device, so forward it to the driver rather than index per-device
+         * state with an undefined id. */
+        LOG_WARN("add_chunk: no current context, forwarding allocation without tracking");
+        if (size <= IPCSIZE) {
+            return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAlloc_v2, address, size);
+        }
+        return cuMemoryAllocate(address, size, NULL);
+    }
 
     /* OOM pre-check without lock */
     if (oom_check(dev, size))
@@ -248,8 +262,10 @@ int remove_chunk_async(
             LIST_REMOVE(a_list,val);
             a_list->limit-=t_size;
             CUdevice dev;
-            cuCtxGetDevice(&dev);
-            rm_gpu_device_memory_usage(getpid(),dev,t_size,2);
+            if (cuCtxGetDevice(&dev) == CUDA_SUCCESS)
+                rm_gpu_device_memory_usage(getpid(), dev, t_size, 2);
+            else
+                LOG_WARN("remove_chunk_async: no current context, skipping accounting");
             return 0;
         }
     }
@@ -296,7 +312,10 @@ int add_chunk_async(CUdeviceptr *address, size_t size, CUstream hStream) {
     size_t addr = 0;
     CUresult res = CUDA_SUCCESS;
     CUdevice dev;
-    cuCtxGetDevice(&dev);
+    if (cuCtxGetDevice(&dev) != CUDA_SUCCESS) {
+        LOG_WARN("add_chunk_async: no current context, forwarding allocation without tracking");
+        return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAllocAsync, address, size, hStream);
+    }
     if (oom_check(dev, size))
         return CUDA_ERROR_OUT_OF_MEMORY;
 
@@ -322,7 +341,10 @@ int add_chunk_from_pool_async(CUdeviceptr *address, size_t size, CUmemoryPool po
     size_t addr = 0;
     CUresult res = CUDA_SUCCESS;
     CUdevice dev;
-    cuCtxGetDevice(&dev);
+    if (cuCtxGetDevice(&dev) != CUDA_SUCCESS) {
+        LOG_WARN("add_chunk_from_pool_async: no current context, forwarding allocation without tracking");
+        return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAllocFromPoolAsync, address, size, pool, hStream);
+    }
     if (oom_check(dev, size))
         return CUDA_ERROR_OUT_OF_MEMORY;
 
