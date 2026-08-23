@@ -2,7 +2,6 @@
 #include "multiprocess/multiprocess_memory_limit.h"
 
 extern size_t context_size;
-extern int ctx_activate[16];
 
 
 CUresult cuDevicePrimaryCtxGetState( CUdevice dev, unsigned int* flags, int* active ){
@@ -15,11 +14,8 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
     LOG_INFO("dev=%d context_size=%ld",dev,context_size);
     //for Initialization only
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRetain,pctx,dev);
-    if (ctx_activate[dev] == 0) {
-        add_gpu_device_memory_usage(getpid(),dev,context_size,0); 
-    }
-    if (context_size>0) {
-        ctx_activate[dev] = 1;
+    if (context_size > 0 && ctx_activate_acquire(dev)) {
+        add_gpu_device_memory_usage(getpid(), dev, context_size, 0);
     }
     return res;
 }
@@ -31,10 +27,9 @@ CUresult cuDevicePrimaryCtxSetFlags_v2( CUdevice dev, unsigned int  flags ){
 }
 
 CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
-    if (ctx_activate[dev] == 1) {
-        rm_gpu_device_memory_usage(getpid(),dev,context_size,0);
+    if (ctx_activate_release(dev)) {
+        rm_gpu_device_memory_usage(getpid(), dev, context_size, 0);
     }
-    ctx_activate[dev] = 0;
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRelease_v2,dev);
     return res;
 }

@@ -44,7 +44,7 @@ _Static_assert(POSTINIT_FILE_LOCK_OFFSET > (off_t)sizeof(shared_region_t),
 
 int pidfound;
 
-int ctx_activate[32];
+_Atomic int ctx_activate[CUDA_DEVICE_MAX_COUNT];
 
 static shared_region_info_t region_info = {0, -1, PTHREAD_ONCE_INIT, NULL, 0, NULL};
 static atomic_flag postinit_local_lock = ATOMIC_FLAG_INIT;

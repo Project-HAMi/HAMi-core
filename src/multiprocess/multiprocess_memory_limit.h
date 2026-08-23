@@ -154,6 +154,23 @@ int init_gpu_device_utilization();
 int add_gpu_device_memory_usage(int32_t pid,int dev,size_t usage,int type);
 int rm_gpu_device_memory_usage(int32_t pid,int dev,size_t usage,int type);
 
+// Tracks whether this process already accounted the primary context on a
+// device. The CUDA hooks run on any thread, so the flag has to carry the
+// 0 <-> 1 transition itself: only the thread that wins the exchange adds or
+// removes context_size, otherwise concurrent cuDevicePrimaryCtxRetain calls
+// double-count the process against its own memory limit.
+extern _Atomic int ctx_activate[CUDA_DEVICE_MAX_COUNT];
+
+static inline int ctx_activate_acquire(int dev) {
+    int expected = 0;
+    return atomic_compare_exchange_strong(&ctx_activate[dev], &expected, 1);
+}
+
+static inline int ctx_activate_release(int dev) {
+    int expected = 1;
+    return atomic_compare_exchange_strong(&ctx_activate[dev], &expected, 0);
+}
+
 shrreg_proc_slot_t *find_proc_by_hostpid(int hostpid);
 int active_oom_killer();
 void pre_launch_kernel();
