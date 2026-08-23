@@ -254,18 +254,22 @@ int free_raw(CUdeviceptr dptr) {
 int remove_chunk_async(
     allocated_list *a_list, CUdeviceptr dptr, CUstream hStream) {
     size_t t_size;
+    CUdevice t_dev;
     allocated_list_entry *val;
     for (val = a_list->head; val != NULL; val = val->next) {
         if (val->entry->address == dptr) {
             t_size=val->entry->length;
+            /* Release against the device recorded when the allocation was
+             * charged, captured before LIST_REMOVE frees the entry. The
+             * freeing thread may have no current context, or a different
+             * current device, so asking cuCtxGetDevice here would skip or
+             * misattribute the release and leave the usage charged, which
+             * later surfaces as a spurious OOM. */
+            t_dev = val->entry->dev;
             CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemFreeAsync,dptr,hStream);
             LIST_REMOVE(a_list,val);
             a_list->limit-=t_size;
-            CUdevice dev;
-            if (cuCtxGetDevice(&dev) == CUDA_SUCCESS)
-                rm_gpu_device_memory_usage(getpid(), dev, t_size, 2);
-            else
-                LOG_WARN("remove_chunk_async: no current context, skipping accounting");
+            rm_gpu_device_memory_usage(getpid(), t_dev, t_size, 2);
             return 0;
         }
     }
