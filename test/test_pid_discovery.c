@@ -2,15 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Minimal types for mergepid and getextrapid
-typedef struct {
-    unsigned int pid;
-    unsigned long long usedGpuMemory;
-} nvmlProcessInfo_t1;
-
-// Forward declarations
-int mergepid(unsigned int *prev, unsigned int *current, nvmlProcessInfo_t1 *sub, nvmlProcessInfo_t1 *merged);
-int getextrapid(unsigned int prev, unsigned int current, nvmlProcessInfo_t1 *pre_pids_on_device, nvmlProcessInfo_t1 *pids_on_device);
+#include "../src/include/utils.h"
 
 // Simple assertion macro
 #define ASSERT_EQ(actual, expected) \
@@ -21,7 +13,7 @@ int getextrapid(unsigned int prev, unsigned int current, nvmlProcessInfo_t1 *pre
 
 void test_getextrapid_underflow() {
     nvmlProcessInfo_t1 pre[] = { {100, 0}, {101, 0}, {102, 0} };
-    nvmlProcessInfo_t1 cur[] = { {100, 0} };
+    nvmlProcessInfo_t1 cur[] = { {999, 0} };
     int extra = getextrapid(3, 1, pre, cur);
     ASSERT_EQ(extra, 0); // underflow should be handled and return 0
 }
@@ -41,7 +33,7 @@ void test_getextrapid_happy_path() {
 }
 
 void test_getextrapid_empty() {
-    nvmlProcessInfo_t1 pre[] = {};
+    nvmlProcessInfo_t1 *pre = NULL;
     nvmlProcessInfo_t1 cur[] = { {103, 0} };
     int extra = getextrapid(0, 1, pre, cur);
     ASSERT_EQ(extra, 103);
