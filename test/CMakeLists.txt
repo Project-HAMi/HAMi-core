@@ -14,7 +14,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     get_filename_component(TEST_TARGET_NAME ${RELATIVE_TEST_PATH} NAME_WE)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${TEST_TARGET_DIR})
 
-    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
+    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
+            OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup")
         # Build this focused regression test with the production shared-region
         # implementation.  It does not invoke any CUDA/NVML entry point at
         # runtime.  Section garbage collection drops unrelated GPU-facing
@@ -38,7 +39,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     endif()
 
     list(APPEND TEST_TARGET_NAMES_LIST ${TEST_TARGET_NAME})
-    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
+    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
+            OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         target_link_libraries(${TEST_TARGET_NAME} -ldl)
@@ -57,6 +59,10 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 add_test(NAME postinit_owner_death
     COMMAND test_postinit_owner_death)
 set_tests_properties(postinit_owner_death PROPERTIES TIMEOUT 20)
+
+add_test(NAME fork_child_exit_cleanup
+    COMMAND test_fork_child_exit_cleanup)
+set_tests_properties(fork_child_exit_cleanup PROPERTIES TIMEOUT 20)
 
 add_test(NAME dlsym_rtld_next
     COMMAND test_dlsym_rtld_next)
