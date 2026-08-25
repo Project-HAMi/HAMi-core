@@ -218,13 +218,20 @@ static int test_clone_child_exit_does_not_drop_parent_lock(void) {
                                   memory_order_release);
         _exit(0);
     }
-    if (wait_for_counter(&state->probe_entered, 1, TEST_TIMEOUT_MS) != 0 ||
-        wait_child_bounded(probe, TEST_TIMEOUT_MS, &status) != 0 ||
-        !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    if (wait_for_counter(&state->probe_entered, 1, TEST_TIMEOUT_MS) != 0) {
         fprintf(stderr, "probe could not initialize after parent unlocked\n");
         goto cleanup;
     }
+    if (wait_child_bounded(probe, TEST_TIMEOUT_MS, &status) != 0) {
+        fprintf(stderr, "probe could not initialize after parent unlocked\n");
+        goto cleanup;
+    }
+    /* Child already reaped; clear before any abnormal-status failure path. */
     probe = -1;
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        fprintf(stderr, "probe could not initialize after parent unlocked\n");
+        goto cleanup;
+    }
     result = 0;
 
 cleanup:
