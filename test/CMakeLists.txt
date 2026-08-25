@@ -29,6 +29,17 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures")
+        # Links the production NVML pass-through wrappers and supplies its own
+        # entry table, so it needs no NVIDIA driver and no GPU at runtime.
+        add_executable(${TEST_TARGET_NAME}
+            ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/nvml/nvml_entry.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT})
     elseif (TEST_SCRIPT MATCHES ".*cu")
@@ -42,6 +53,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         target_link_libraries(${TEST_TARGET_NAME} -ldl)
+    elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures")
+        target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     else()
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread
             -lnvidia-ml -lcuda -lcudart -L${CUDA_HOME}/lib64)
@@ -61,6 +74,15 @@ set_tests_properties(postinit_owner_death PROPERTIES TIMEOUT 20)
 add_test(NAME dlsym_rtld_next
     COMMAND test_dlsym_rtld_next)
 set_tests_properties(dlsym_rtld_next PROPERTIES TIMEOUT 10)
+
+# Debug level is required: below it the LOG_DEBUG branch in NVML_OVERRIDE_CALL
+# is skipped, nothing clobbers the argument register, and a v1-arity wrapper
+# can forward the dropped argument by accident.
+add_test(NAME nvml_v2_signatures
+    COMMAND test_nvml_v2_signatures)
+set_tests_properties(nvml_v2_signatures PROPERTIES
+    ENVIRONMENT "LIBCUDA_LOG_LEVEL=4"
+    TIMEOUT 10)
 if (TARGET vgpu)
     add_test(NAME dlsym_rtld_next_preloaded
         COMMAND test_dlsym_rtld_next)
