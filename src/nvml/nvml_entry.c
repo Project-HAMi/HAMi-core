@@ -345,10 +345,10 @@ nvmlReturn_t nvmlDeviceGetFanSpeed(nvmlDevice_t device, unsigned int *speed) {
                          speed);
 }
 
-nvmlReturn_t nvmlDeviceGetFanSpeed_v2(nvmlDevice_t device,
+nvmlReturn_t nvmlDeviceGetFanSpeed_v2(nvmlDevice_t device, unsigned int fan,
                                       unsigned int *speed) {
   return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetFanSpeed_v2, device,
-                         speed);
+                         fan, speed);
 }
 
 nvmlReturn_t nvmlDeviceGetFieldValues(nvmlDevice_t device, int valuesCount,
@@ -1212,9 +1212,10 @@ nvmlReturn_t nvmlDeviceGetGridLicensableFeatures_v2(
 nvmlReturn_t nvmlDeviceGetRetiredPages_v2(nvmlDevice_t device,
                                           nvmlPageRetirementCause_t cause,
                                           unsigned int *pageCount,
-                                          unsigned long long *addresses) {
+                                          unsigned long long *addresses,
+                                          unsigned long long *timestamps) {
   return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetRetiredPages_v2,
-                         device, cause, pageCount, addresses);
+                         device, cause, pageCount, addresses, timestamps);
 }
 
 nvmlReturn_t nvmlDeviceResetGpuLockedClocks(nvmlDevice_t device) {
