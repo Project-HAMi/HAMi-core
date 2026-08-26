@@ -35,7 +35,8 @@ void context_accounting_fork_parent() {
 void context_accounting_fork_child() {
     int dev;
 
-    context_size = 0;
+    /* context_size is kept.  The parent's probe is a fair estimate for a
+     * child on the same GPU, and the child's own probe overwrites it. */
     primary_context_accounting_reset(context_accounting,
                                      CUDA_DEVICE_MAX_COUNT);
     for (dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
