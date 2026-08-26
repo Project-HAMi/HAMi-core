@@ -19,12 +19,11 @@
  *   export LD_PRELOAD=$PWD/build/libvgpu.so
  *   export CUDA_DEVICE_MEMORY_SHARED_CACHE="$CACHE"
  *   export CUDA_DEVICE_MEMORY_LIMIT=1024m
- *   export HAMI_ALLOC_RACE_WINDOW_US=20000   # widen race window (branch helper)
  *   export LIBCUDA_LOG_LEVEL=1
  *   ./build/test/test_concurrent_oom_race
  *
  * Or: ./test/run_concurrent_oom_race.sh
- *   (race-fix defaults to --expect-fixed)
+ *   (defaults to --expect-fixed)
  *
  * Suggested sizing: limit=1024m, alloc=600m so each request fits alone
  * (after two process contexts) but 2*alloc exceeds the limit.
@@ -320,10 +319,6 @@ int main(int argc, char **argv) {
     printf("CUDA_DEVICE_MEMORY_LIMIT=%s\n", limit_env ? limit_env : "(unset)");
     printf("CUDA_DEVICE_MEMORY_SHARED_CACHE=%s\n",
            cache_env ? cache_env : "(unset → fallback path)");
-    printf("HAMI_ALLOC_RACE_WINDOW_US=%s\n",
-           getenv("HAMI_ALLOC_RACE_WINDOW_US")
-               ? getenv("HAMI_ALLOC_RACE_WINDOW_US")
-               : "(unset)");
     printf("alloc_bytes=%zu rounds=%d expect_fixed=%d\n\n", alloc_bytes, rounds,
            expect_fixed);
 
@@ -535,8 +530,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     printf("INCONCLUSIVE: no dual success in %d rounds.\n"
-           "  Retry with larger HAMI_ALLOC_RACE_WINDOW_US (e.g. 50000) or more "
-           "HAMI_RACE_ROUNDS.\n",
+           "  Retry with more HAMI_RACE_ROUNDS (e.g. 100).\n",
            rounds);
     return 2;
 }

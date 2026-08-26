@@ -27,44 +27,6 @@ extern CUresult cuMemoryFree(CUdeviceptr dptr);
 pthread_once_t allocator_allocate_flag = PTHREAD_ONCE_INIT;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
-/* Optional delay after reservation, before the expensive CUDA alloc.
- * With reserve-then-alloc this only stretches the CUDA window; shared usage
- * is already committed so a concurrent peer must OOM.
- * Env: HAMI_ALLOC_RACE_WINDOW_US=<microseconds>, unset/0 = no delay. */
-static void maybe_widen_alloc_race_window(void) {
-    const char *env = getenv("HAMI_ALLOC_RACE_WINDOW_US");
-    const char *p;
-    uint64_t us;
-    uint64_t sec;
-    char *end = NULL;
-    struct timespec ts;
-
-    if (env == NULL || env[0] == '\0') {
-        return;
-    }
-    p = env;
-    while (isspace((unsigned char)*p)) {
-        p++;
-    }
-    /* strtoull("-1") becomes UINT64_MAX without ERANGE. */
-    if (*p == '\0' || *p == '-') {
-        return;
-    }
-    errno = 0;
-    us = strtoull(p, &end, 10);
-    if (end == p || *end != '\0' || errno == ERANGE || us == 0) {
-        return;
-    }
-    /* nanosleep supports >=1s; also avoids useconds_t truncation (e.g. 2^32 -> 0). */
-    sec = us / 1000000UL;
-    ts.tv_sec = (time_t)sec;
-    if ((uint64_t)ts.tv_sec != sec) {
-        return;
-    }
-    ts.tv_nsec = (int64_t)((us % 1000000UL) * 1000UL);
-    (void)nanosleep(&ts, NULL);
-}
-
 size_t round_up(size_t size, size_t unit) {
     if (size & (unit-1))
         return ((size / unit) + 1 ) * unit;
@@ -198,8 +160,6 @@ int add_chunk(CUdeviceptr *address, size_t size) {
      * outside the lock. */
     if (reserve_device_memory(dev, size) != 0)
         return CUDA_ERROR_OUT_OF_MEMORY;
-
-    maybe_widen_alloc_race_window();
 
     /* GPU allocation outside lock, the expensive part */
     if (size <= IPCSIZE) {
