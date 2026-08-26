@@ -161,6 +161,30 @@ static void test_rejects_invalid_calls(void) {
     assert(errno == EINVAL);
 }
 
+static void test_rollback_rejects_mismatched_charge(void) {
+    primary_context_accounting_t state = {0};
+    size_t bytes = 0;
+
+    assert(primary_context_record_retain(&state, CONTEXT_BYTES, &bytes) == 0);
+    errno = 0;
+    assert(primary_context_rollback_retain(&state, CONTEXT_BYTES + 1) == -1);
+    assert(errno == EINVAL);
+    assert(state.retain_count == 1);
+    assert(state.charged_bytes == CONTEXT_BYTES);
+}
+
+static void test_restore_is_ignored_while_retained(void) {
+    primary_context_accounting_t state = {0};
+    size_t bytes = 0;
+
+    /* restore_charge is only for a fully released context whose removal
+     * failed; with a retain outstanding it must not touch the charge. */
+    assert(primary_context_record_retain(&state, 0, &bytes) == 0);
+    primary_context_restore_charge(&state, CONTEXT_BYTES);
+    assert(state.charged_bytes == 0);
+    assert(state.retain_count == 1);
+}
+
 static void test_nonzero_device_accounting_is_isolated(void) {
     primary_context_accounting_t states[4] = {{0}};
     size_t bytes = 0;
@@ -227,6 +251,8 @@ int main(void) {
     test_failed_add_rolls_back_retain();
     test_failed_remove_is_retried();
     test_rejects_invalid_calls();
+    test_rollback_rejects_mismatched_charge();
+    test_restore_is_ignored_while_retained();
     test_nonzero_device_accounting_is_isolated();
     test_forked_child_resets_private_accounting();
     puts("context accounting tests passed");
