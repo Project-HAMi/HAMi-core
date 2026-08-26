@@ -59,10 +59,10 @@ static size_t context_charge_for_device(CUdevice dev) {
         device_context_size[dev] > 0) {
         return device_context_size[dev];
     }
-    /* Nothing measured for this device yet.  Fall back to the size the
-     * host PID probe recorded, which is what main charges on every device.
-     * Charging nothing here would under-report devices 1 and up. */
-    return context_size;
+    /* Device 0 trusts the host PID probe, which measured it.  Other devices
+     * are measured on their first retain; if that fails, the retain path
+     * falls back to the probed size rather than charging nothing. */
+    return dev == 0 ? context_size : 0;
 }
 
 static CUresult rollback_unaccounted_retain(CUdevice dev,
@@ -148,6 +148,13 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
         charge = measured_charge;
         LOG_INFO("Measured primary context size lazily: "
                  "dev=%d size=%lu", dev, charge);
+    } else if (charge == 0 && context_size > 0) {
+        /* Measurement failed or was skipped.  Charge the probed size, as main
+         * does on every device.  Not cached in device_context_size, so a later
+         * fresh retain can still measure this device for real. */
+        charge = context_size;
+        LOG_INFO("Primary context size unmeasured on device %d; charging the "
+                 "probed size %lu", dev, charge);
     }
     errno = 0;
     int record_result =
