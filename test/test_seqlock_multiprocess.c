@@ -1,19 +1,8 @@
 /*
- * Cross-process regression test for seqlock writer exclusion.
- *
- * test_seqlock_writer_exclusion covers two threads in one process, which only
- * exercises the pid == getpid() fast path on the cached slot pointer.  The
- * reason the exclusion has to live in the shared region, rather than in a
- * pthread mutex, is the slow path: add_gpu_device_memory_usage and
- * rm_gpu_device_memory_usage look a slot up by pid and write another process's
- * slot.  A process-local mutex cannot exclude a writer in a different process.
- *
- * Every participant here writes every slot by pid, so all but one of its writes
- * take the slow path, while sampling every slot the way get_gpu_memory_usage
- * does.  A snapshot accepted under an even sequence must have total and
- * data_size in agreement, since both move inside one critical section.
- *
- * Nothing here calls a CUDA or NVML entry point.
+ * Cross-process counterpart to test_seqlock_writer_exclusion, which only covers
+ * the pid == getpid() fast path.  Every participant writes every slot by pid, so
+ * most writes take the slow path that reaches another process's slot: the case a
+ * process-local mutex could not have covered.
  */
 #include <stdatomic.h>
 #include <stdint.h>
@@ -27,8 +16,7 @@
 
 #include "multiprocess/multiprocess_memory_limit.c"  // NOLINT(build/include)
 
-/* both live in the NVML-facing utilization watcher, which a GPU-free test must
- * not pull in */
+/* both live in the NVML-facing watcher, which this must not pull in */
 unsigned int cuda_to_nvml_map(unsigned int cudadev) { return cudadev; }
 int setspec(void) { return 0; }
 
@@ -37,8 +25,7 @@ int setspec(void) { return 0; }
 #define ITERATIONS   20000
 #define DEV          0
 
-/* placed in an anonymous shared mapping before the fork, so every participant
- * sees the same object */
+/* mapped shared before the fork so every participant sees one copy */
 typedef struct {
     _Atomic int32_t pid[PARTICIPANTS];
     _Atomic int64_t torn;
@@ -64,7 +51,6 @@ static void wait_for_everyone(void) {
     }
 }
 
-/* Sample every registered slot the way get_gpu_memory_usage does. */
 static void sample_all(void) {
     shared_region_t *region = region_info.shared_region;
     int proc_num = atomic_load_explicit(&region->proc_num, memory_order_acquire);
@@ -88,9 +74,7 @@ static void sample_all(void) {
     }
 }
 
-/* Write every slot by pid.  Only the entry matching getpid() takes the fast
- * path; the rest go through the slow path lookup, which is the case this test
- * exists for. */
+/* only the getpid() entry takes the fast path; the rest exercise the slow one */
 static void hammer(void) {
     for (int n = 0; n < ITERATIONS; n++) {
         for (int i = 0; i < PARTICIPANTS; i++) {
@@ -118,8 +102,7 @@ int main(void) {
         return 1;
     }
 
-    /* Fork before touching the region.  Initialising first would leave every
-     * child sharing the parent's cached slot instead of registering its own. */
+    /* fork first: initialising would leave children on the parent's slot */
     pid_t kids[PARTICIPANTS - 1];
     for (int k = 0; k < PARTICIPANTS - 1; k++) {
         kids[k] = fork();

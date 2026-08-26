@@ -314,7 +314,7 @@ static inline void seqlock_cpu_relax(void) {
 #elif defined(__aarch64__)
     __asm__ __volatile__("yield" ::: "memory");
 #else
-    __asm__ __volatile__("" ::: "memory");   /* barrier only, no pause opcode */
+    __asm__ __volatile__("" ::: "memory");
 #endif
 }
 
@@ -344,8 +344,7 @@ size_t get_gpu_memory_usage(const int dev) {
             while (seq1 & 1) {
                 // Exponential backoff to reduce contention
                 if (retry_count < 5) {
-                    // First 5 retries: just CPU pause (fast path).  Shared with
-                    // the writer so both sides get the portable fallback.
+                    // First 5 retries: just CPU pause (fast path)
                     seqlock_cpu_relax();
                 } else if (retry_count < 20) {
                     // Next 15 retries: 1μs delay
@@ -498,44 +497,23 @@ uint64_t nvml_get_device_memory_usage(const int dev) {
  * never publishes an odd value, so the window in which readers see a write in
  * progress is no longer than it is today.
  */
-/* The critical section is a handful of atomic adds with no syscall in it, so a
- * real wait is nanoseconds. Escalate anyway so a waiter never sits on a core:
- * pause, then yield, then short sleeps. */
-#define SEQLOCK_SPIN_LIMIT     1000u    /* pause only */
-#define SEQLOCK_YIELD_LIMIT   11000u    /* then sched_yield */
-#define SEQLOCK_RECLAIM_AFTER 31000u    /* then start trying to recover */
-#define SEQLOCK_RECLAIM_EVERY 10000u    /* and retry about once a second */
+#define SEQLOCK_SPIN_LIMIT     1000u
+#define SEQLOCK_YIELD_LIMIT   11000u
+#define SEQLOCK_RECLAIM_AFTER 31000u
+#define SEQLOCK_RECLAIM_EVERY 10000u
 
-/* A holder killed between begin and end leaves the sequence odd for good, which
- * blocks every later writer and every reader of that slot. Recovery has to prove
- * the holder is gone rather than infer it from a timeout, because a live writer
- * can be descheduled for longer than any threshold we could pick.
- *
- * The writer therefore records its pid in the slot while it holds the sequence,
- * and this only resets the counter when that pid no longer exists. Taking
- * lock_shrreg() serialises the reclaim so two waiters cannot both perform it.
- *
- * Known residual: a writer killed in the window between winning the CAS and
- * storing its pid leaves the sequence odd with seq_owner still 0. That is
- * treated as an unknown holder and never reclaimed, so the slot stays wedged as
- * it would have before this change. Closing it means publishing the sequence
- * and the owner in one atomic word, which changes how the reader interprets the
- * counter. */
+/* Releases the sequence only.  The slot belongs to slot->pid while seq_owner is
+ * whoever is writing it, and the slow paths let one process write another's
+ * slot, so clearing counters here would zero a live process's accounting.
+ * A timeout cannot stand in for the liveness check: a live writer can be
+ * descheduled for longer than any threshold. */
 static void seqlock_try_reclaim(shrreg_proc_slot_t* slot) {
     lock_shrreg();
     uint64_t seq = atomic_load_explicit(&slot->seqlock, memory_order_acquire);
     int32_t owner = atomic_load_explicit(&slot->seq_owner, memory_order_relaxed);
     if ((seq & 1) && owner > 0 && kill(owner, 0) == -1 && errno == ESRCH) {
-        LOG_WARN("seqlock owner %d is gone, reclaiming slot", owner);
-        /* the dead writer stopped partway through, so this slot's counters no
-         * longer describe anything and are cleared with the sequence */
-        int dev;
-        for (dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
-            atomic_store_explicit(&slot->used[dev].total, 0, memory_order_relaxed);
-            atomic_store_explicit(&slot->used[dev].context_size, 0, memory_order_relaxed);
-            atomic_store_explicit(&slot->used[dev].module_size, 0, memory_order_relaxed);
-            atomic_store_explicit(&slot->used[dev].data_size, 0, memory_order_relaxed);
-        }
+        LOG_WARN("seqlock writer %d died holding slot pid %d", owner,
+                 atomic_load_explicit(&slot->pid, memory_order_relaxed));
         atomic_store_explicit(&slot->seq_owner, 0, memory_order_relaxed);
         atomic_store_explicit(&slot->seqlock, seq + 1, memory_order_release);
     }
@@ -561,10 +539,7 @@ static inline void seqlock_write_begin(shrreg_proc_slot_t* slot) {
             spins++;
             continue;
         }
-        /* Acquire is all this needs: it stops the stores in the critical section
-         * being hoisted above the claim. Nothing is published here, and a reader
-         * that sees an odd sequence only backs off, so release would pair with
-         * nothing. seqlock_write_end carries the release. */
+        /* acquire, not acq_rel: nothing is published until write_end */
         if (atomic_compare_exchange_weak_explicit(
                 &slot->seqlock, &seq, seq + 1,
                 memory_order_acquire, memory_order_relaxed)) {

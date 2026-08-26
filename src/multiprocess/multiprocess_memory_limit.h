@@ -87,10 +87,8 @@ typedef struct {
     device_util_t device_util[CUDA_DEVICE_MAX_COUNT];
     _Atomic int32_t status;
     _Atomic uint64_t seqlock;      // Sequence lock for consistent snapshots
-    // Pid of the writer currently holding seqlock, 0 when no one holds it.
-    // Taken from the space reserved by unused[], so sizeof this struct and the
-    // shared region layout are unchanged: a process built without it leaves the
-    // field 0 and the reclaim path simply declines to act.
+    // Writer holding seqlock, 0 if none.  Carved from unused[] so the region
+    // layout is unchanged; an older build leaves it 0 and is never reclaimed.
     _Atomic int32_t seq_owner;
     int32_t seq_owner_pad;
     uint64_t unused[1];
