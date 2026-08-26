@@ -229,6 +229,35 @@ CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
     return res;
 }
 
+CUresult cuDevicePrimaryCtxReset_v2(CUdevice dev) {
+    size_t bytes_to_remove = 0;
+
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        return CUDA_OVERRIDE_CALL(cuda_library_entry,
+                                  cuDevicePrimaryCtxReset_v2, dev);
+    }
+    pthread_mutex_lock(&context_device_locks[dev]);
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,
+                                      cuDevicePrimaryCtxReset_v2, dev);
+    if (res == CUDA_SUCCESS) {
+        pthread_mutex_lock(&context_accounting_lock);
+        /* The driver destroys the context whatever the retain count, so
+         * every outstanding retain and the charge go with it. */
+        bytes_to_remove = context_accounting[dev].charged_bytes;
+        primary_context_accounting_reset(&context_accounting[dev], 1);
+        if (bytes_to_remove > 0 &&
+            rm_gpu_device_memory_usage(getpid(), dev, bytes_to_remove,
+                                       0) != 0) {
+            primary_context_restore_charge(&context_accounting[dev],
+                                           bytes_to_remove);
+        }
+        ctx_activate[dev] = 0;
+        pthread_mutex_unlock(&context_accounting_lock);
+    }
+    pthread_mutex_unlock(&context_device_locks[dev]);
+    return res;
+}
+
 CUresult cuCtxGetDevice(CUdevice* device) {
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxGetDevice,device);
     return res;

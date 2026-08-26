@@ -68,6 +68,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuDevicePrimaryCtxRetain),
     CUDA_OVERRIDE_ENUM(cuDevicePrimaryCtxSetFlags_v2),
     CUDA_OVERRIDE_ENUM(cuDevicePrimaryCtxRelease_v2),
+    CUDA_OVERRIDE_ENUM(cuDevicePrimaryCtxReset_v2),
     CUDA_OVERRIDE_ENUM(cuCtxGetDevice),
     CUDA_OVERRIDE_ENUM(cuCtxCreate_v2),
     CUDA_OVERRIDE_ENUM(cuCtxCreate_v3),

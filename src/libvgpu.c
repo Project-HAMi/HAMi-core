@@ -124,6 +124,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxRetain);
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxSetFlags_v2);
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxRelease_v2);
+    DLSYM_HOOK_FUNC(cuDevicePrimaryCtxReset_v2);
     DLSYM_HOOK_FUNC(cuDriverGetVersion);
     DLSYM_HOOK_FUNC(cuDeviceGetTexture1DLinearMaxWidth);
     DLSYM_HOOK_FUNC(cuDeviceSetMemPool);
