@@ -1392,6 +1392,21 @@ int update_host_pid() {
     return 0;
 }
 
+int get_current_host_pid(void) {
+    shrreg_proc_slot_t *slot;
+
+    if (region_info.shared_region == NULL ||
+        region_info.shared_region == MAP_FAILED) {
+        return 0;
+    }
+
+    slot = get_current_proc_slot();
+    if (slot == NULL) {
+        return 0;
+    }
+    return atomic_load_explicit(&slot->hostpid, memory_order_acquire);
+}
+
 int set_host_pid(int hostpid) {
     int i,j,found=0;
     for (i=0;i<region_info.shared_region->proc_num;i++){

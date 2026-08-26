@@ -69,4 +69,11 @@ nvmlReturn_t set_task_pid();
 int map_cuda_visible_devices();
 void ensure_post_init();
 
+nvmlReturn_t get_used_gpu_memory_by_pid(unsigned int process_pid, int cudadev,
+                                        uint64_t *used);
+
+void context_accounting_fork_prepare();
+void context_accounting_fork_parent();
+void context_accounting_fork_child();
+
 #endif  // SRC_INCLUDE_LIBVGPU_H_

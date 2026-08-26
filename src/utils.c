@@ -95,6 +95,70 @@ int getextrapid(unsigned int prev, unsigned int current, nvmlProcessInfo_t1 *pre
     return 0;
 }
 
+nvmlReturn_t get_used_gpu_memory_by_pid(unsigned int process_pid, int cudadev,
+                                        uint64_t *used) {
+    nvmlProcessInfo_v1_t *processes = NULL;
+    nvmlDevice_t device;
+    nvmlReturn_t result;
+    unsigned int count = SHARED_REGION_MAX_PROCESS_NUM;
+    unsigned int i;
+    int nvmldev;
+    unsigned int mapped_dev;
+
+    if (used == NULL || process_pid == 0 || cudadev < 0 ||
+        cudadev >= CUDA_DEVICE_MAX_COUNT) {
+        return NVML_ERROR_INVALID_ARGUMENT;
+    }
+    *used = 0;
+    mapped_dev = cuda_to_nvml_map((unsigned int)cudadev);
+    if (mapped_dev >= CUDA_DEVICE_MAX_COUNT) {
+        return NVML_ERROR_INVALID_ARGUMENT;
+    }
+    nvmldev = (int)mapped_dev;
+
+    result = nvmlDeviceGetHandleByIndex(nvmldev, &device);
+    if (result != NVML_SUCCESS) {
+        return result;
+    }
+
+    processes = calloc(count, sizeof(*processes));
+    if (processes == NULL) {
+        return NVML_ERROR_MEMORY;
+    }
+    result = nvmlDeviceGetComputeRunningProcesses(device, &count, processes);
+    if (result == NVML_ERROR_INSUFFICIENT_SIZE && count > 0) {
+        if ((size_t)count > SIZE_MAX / sizeof(*processes)) {
+            free(processes);
+            return NVML_ERROR_MEMORY;
+        }
+        nvmlProcessInfo_v1_t *larger =
+            realloc(processes, count * sizeof(*processes));
+        if (larger == NULL) {
+            free(processes);
+            return NVML_ERROR_MEMORY;
+        }
+        processes = larger;
+        result =
+            nvmlDeviceGetComputeRunningProcesses(device, &count, processes);
+    }
+    if (result != NVML_SUCCESS) {
+        free(processes);
+        return result;
+    }
+
+    result = NVML_ERROR_NOT_FOUND;
+    for (i = 0; i < count; i++) {
+        if (processes[i].pid == process_pid &&
+            processes[i].usedGpuMemory != NVML_VALUE_NOT_AVAILABLE) {
+            *used = processes[i].usedGpuMemory;
+            result = NVML_SUCCESS;
+            break;
+        }
+    }
+    free(processes);
+    return result;
+}
+
 nvmlReturn_t set_task_pid() {
     unsigned int running_processes=0,previous=0,merged_num=0;
     nvmlProcessInfo_v1_t tmp_pids_on_device[SHARED_REGION_MAX_PROCESS_NUM];
