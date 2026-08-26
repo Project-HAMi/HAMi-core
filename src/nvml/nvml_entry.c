@@ -1212,8 +1212,8 @@ nvmlReturn_t nvmlDeviceGetGridLicensableFeatures_v2(
 nvmlReturn_t nvmlDeviceGetRetiredPages_v2(nvmlDevice_t device,
                                           nvmlPageRetirementCause_t cause,
                                           unsigned int *pageCount,
-                                          unsigned long long *addresses,
-                                          unsigned long long *timestamps) {
+                                          unsigned long long *addresses,  // NOLINT(runtime/int)
+                                          unsigned long long *timestamps) {  // NOLINT(runtime/int)
   return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetRetiredPages_v2,
                          device, cause, pageCount, addresses, timestamps);
 }

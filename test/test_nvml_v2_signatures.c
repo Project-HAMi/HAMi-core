@@ -28,14 +28,19 @@
 
 #include "include/libnvml_hook.h"
 
+/* nvml.h types the retired-page arrays as `nvml_ull`, so mirror it
+ * exactly.  cpplint's runtime/int rule asks for a fixed-width type; it does not
+ * apply when the type is dictated by an external ABI. */
+typedef unsigned long long nvml_ull;  // NOLINT(runtime/int)
+
 /* The production wrappers, declared the way NVIDIA's nvml.h declares them. */
 nvmlReturn_t nvmlDeviceGetFanSpeed_v2(nvmlDevice_t device, unsigned int fan,
                                       unsigned int *speed);
 nvmlReturn_t nvmlDeviceGetRetiredPages_v2(nvmlDevice_t device,
                                           nvmlPageRetirementCause_t cause,
                                           unsigned int *pageCount,
-                                          unsigned long long *addresses,
-                                          unsigned long long *timestamps);
+                                          nvml_ull *addresses,
+                                          nvml_ull *timestamps);
 
 /* Stands in for the loaded libnvidia-ml.so.1 entry table. */
 entry_t nvml_library_entry[NVML_ENTRY_END];
@@ -48,9 +53,9 @@ static unsigned int seen_fan;
 static unsigned int *seen_speed;
 static unsigned int *expect_speed;
 
-static unsigned long long *seen_timestamps;
-static unsigned long long *expect_timestamps;
-static unsigned long long *seen_addresses;
+static nvml_ull *seen_timestamps;
+static nvml_ull *expect_timestamps;
+static nvml_ull *seen_addresses;
 static unsigned int *seen_page_count;
 static nvmlPageRetirementCause_t seen_cause;
 
@@ -70,8 +75,8 @@ static nvmlReturn_t stub_fan_speed_v2(nvmlDevice_t device, unsigned int fan,
 static nvmlReturn_t stub_retired_pages_v2(nvmlDevice_t device,
                                           nvmlPageRetirementCause_t cause,
                                           unsigned int *pageCount,
-                                          unsigned long long *addresses,
-                                          unsigned long long *timestamps) {
+                                          nvml_ull *addresses,
+                                          nvml_ull *timestamps) {
     (void)device;
     seen_cause = cause;
     seen_page_count = pageCount;
@@ -111,8 +116,8 @@ static int test_fan_speed_v2(void) {
 
 static int test_retired_pages_v2(void) {
     unsigned int page_count = 1;
-    unsigned long long addresses[1] = {0};
-    unsigned long long timestamps[1] = {0};
+    nvml_ull addresses[1] = {0};
+    nvml_ull timestamps[1] = {0};
 
     expect_timestamps = timestamps;
     seen_timestamps = NULL;
