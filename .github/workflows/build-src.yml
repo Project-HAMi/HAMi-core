@@ -5,6 +5,9 @@ on: [push, pull_request, workflow_dispatch]
 
 concurrency: ci-${{ github.ref }}
 
+permissions:
+  contents: read
+
 jobs:
   hook-registry-check:
     runs-on: ubuntu-latest
@@ -12,7 +15,7 @@ jobs:
     name: Hook static consistency check
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Run CUDA hook static consistency check
         run: python3 hack/check_cuda_hook_consistency.py
 
@@ -25,10 +28,10 @@ jobs:
     name: Build libvgpu
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
       - name: Build
         run: |
           make build-in-docker
