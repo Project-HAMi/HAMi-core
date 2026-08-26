@@ -1,3 +1,5 @@
+#include <errno.h>
+
 #include "include/libcuda_hook.h"
 #include "include/libvgpu.h"
 #include "cuda/context_accounting.h"
@@ -144,11 +146,22 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
         LOG_INFO("Measured primary context size lazily: "
                  "dev=%d size=%lu", dev, charge);
     }
-    if ((pidfound == 1
-             ? primary_context_record_accounted_retain(
-                   &context_accounting[dev], charge, &bytes_to_add)
-             : primary_context_record_retain(&context_accounting[dev], charge,
-                                             &bytes_to_add)) != 0) {
+    errno = 0;
+    int record_result =
+        (pidfound == 1)
+            ? primary_context_record_accounted_retain(
+                  &context_accounting[dev], charge, &bytes_to_add)
+            : primary_context_record_retain(&context_accounting[dev], charge,
+                                            &bytes_to_add);
+    /* The driver retain already succeeded.  An unknown context size must not
+     * fail the caller, so defer the charge to a later retain that knows it. */
+    if (record_result != 0 && errno == ENODATA) {
+        LOG_WARN("Primary context size unknown on device %d; charge is "
+                 "deferred to a later retain", dev);
+        record_result = primary_context_record_retain(
+            &context_accounting[dev], charge, &bytes_to_add);
+    }
+    if (record_result != 0) {
         LOG_ERROR("Cannot account primary context retain on device %d",
                   dev);
         res = rollback_unaccounted_retain(dev, 0, 0);
