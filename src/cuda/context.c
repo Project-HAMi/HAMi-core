@@ -210,9 +210,9 @@ CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
                                   cuDevicePrimaryCtxRelease_v2, dev);
     }
     pthread_mutex_lock(&context_device_locks[dev]);
-    pthread_mutex_lock(&context_accounting_lock);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRelease_v2,dev);
     if (res == CUDA_SUCCESS) {
+        pthread_mutex_lock(&context_accounting_lock);
         if (primary_context_record_release(&context_accounting[dev],
                                            &bytes_to_remove) != 0) {
             LOG_WARN("Unbalanced primary context release on device %d", dev);
@@ -224,8 +224,8 @@ CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
             }
         }
         ctx_activate[dev] = (int)context_accounting[dev].retain_count;
+        pthread_mutex_unlock(&context_accounting_lock);
     }
-    pthread_mutex_unlock(&context_accounting_lock);
     pthread_mutex_unlock(&context_device_locks[dev]);
     return res;
 }
