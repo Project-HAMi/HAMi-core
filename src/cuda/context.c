@@ -59,7 +59,10 @@ static size_t context_charge_for_device(CUdevice dev) {
         device_context_size[dev] > 0) {
         return device_context_size[dev];
     }
-    return dev == 0 ? context_size : 0;
+    /* Nothing measured for this device yet.  Fall back to the size the
+     * host PID probe recorded, which is what main charges on every device.
+     * Charging nothing here would under-report devices 1 and up. */
+    return context_size;
 }
 
 static CUresult rollback_unaccounted_retain(CUdevice dev,
