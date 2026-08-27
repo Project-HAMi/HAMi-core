@@ -87,7 +87,11 @@ typedef struct {
     device_util_t device_util[CUDA_DEVICE_MAX_COUNT];
     _Atomic int32_t status;
     _Atomic uint64_t seqlock;      // Sequence lock for consistent snapshots
-    uint64_t unused[2];
+    // Writer holding seqlock, 0 if none.  Carved from unused[] so the region
+    // layout is unchanged; an older build leaves it 0 and is never reclaimed.
+    _Atomic int32_t seq_owner;
+    int32_t seq_owner_pad;
+    uint64_t unused[1];
 } shrreg_proc_slot_t;
 
 typedef char uuid[96];
