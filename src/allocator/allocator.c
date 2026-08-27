@@ -35,10 +35,14 @@ size_t round_up(size_t size, size_t unit) {
 
 int oom_check(const int dev, size_t addon) {
     CUdevice d;
-    if (dev==-1)
-        cuCtxGetDevice(&d);
-    else
+    if (dev == -1) {
+        if (cuCtxGetDevice(&d) != CUDA_SUCCESS) {
+            LOG_WARN("oom_check: no current context, skipping enforcement");
+            return 0;
+        }
+    } else {
         d=dev;
+    }
     uint64_t limit = get_current_device_memory_limit(d);
     size_t _usage = get_gpu_memory_usage(d);
 
@@ -113,7 +117,17 @@ int add_chunk(CUdeviceptr *address, size_t size) {
     CUdevice dev;
     CUresult res;
 
-    cuCtxGetDevice(&dev);
+    if (cuCtxGetDevice(&dev) != CUDA_SUCCESS) {
+        /* No current context on this thread (for example a worker thread that
+         * never bound one). We cannot attribute or bound this allocation to a
+         * device, so forward it to the driver rather than index per-device
+         * state with an undefined id. */
+        LOG_WARN("add_chunk: no current context, forwarding allocation without tracking");
+        if (size <= IPCSIZE) {
+            return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAlloc_v2, address, size);
+        }
+        return cuMemoryAllocate(address, size, NULL);
+    }
 
     /* OOM pre-check without lock */
     if (oom_check(dev, size))
@@ -240,16 +254,22 @@ int free_raw(CUdeviceptr dptr) {
 int remove_chunk_async(
     allocated_list *a_list, CUdeviceptr dptr, CUstream hStream) {
     size_t t_size;
+    CUdevice t_dev;
     allocated_list_entry *val;
     for (val = a_list->head; val != NULL; val = val->next) {
         if (val->entry->address == dptr) {
             t_size=val->entry->length;
+            /* Release against the device recorded when the allocation was
+             * charged, captured before LIST_REMOVE frees the entry. The
+             * freeing thread may have no current context, or a different
+             * current device, so asking cuCtxGetDevice here would skip or
+             * misattribute the release and leave the usage charged, which
+             * later surfaces as a spurious OOM. */
+            t_dev = val->entry->dev;
             CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemFreeAsync,dptr,hStream);
             LIST_REMOVE(a_list,val);
             a_list->limit-=t_size;
-            CUdevice dev;
-            cuCtxGetDevice(&dev);
-            rm_gpu_device_memory_usage(getpid(),dev,t_size,2);
+            rm_gpu_device_memory_usage(getpid(), t_dev, t_size, 2);
             return 0;
         }
     }

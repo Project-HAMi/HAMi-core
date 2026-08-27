@@ -14,16 +14,18 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     get_filename_component(TEST_TARGET_NAME ${RELATIVE_TEST_PATH} NAME_WE)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${TEST_TARGET_DIR})
 
-    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
-        if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
+    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR TEST_TARGET_NAME STREQUAL "test_device_id_guard" OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
+        # Focused regression tests built against the production sources they
+        # exercise; section GC drops unrelated GPU-facing production functions.
+        if (TEST_TARGET_NAME STREQUAL "test_pid_discovery")
             add_executable(${TEST_TARGET_NAME}
                 ${TEST_SCRIPT}
-                ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_memory_limit.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/utils.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
         else()
             add_executable(${TEST_TARGET_NAME}
                 ${TEST_SCRIPT}
-                ${CMAKE_CURRENT_SOURCE_DIR}/../src/utils.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_memory_limit.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
         endif()
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
@@ -41,7 +43,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     endif()
 
     list(APPEND TEST_TARGET_NAMES_LIST ${TEST_TARGET_NAME})
-    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
+    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR TEST_TARGET_NAME STREQUAL "test_device_id_guard" OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         target_link_libraries(${TEST_TARGET_NAME} -ldl)
@@ -60,6 +62,10 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 add_test(NAME postinit_owner_death
     COMMAND test_postinit_owner_death)
 set_tests_properties(postinit_owner_death PROPERTIES TIMEOUT 20)
+
+add_test(NAME device_id_guard
+    COMMAND test_device_id_guard)
+set_tests_properties(device_id_guard PROPERTIES TIMEOUT 20)
 
 add_test(NAME dlsym_rtld_next
     COMMAND test_dlsym_rtld_next)

@@ -118,6 +118,10 @@ unsigned int nvml_to_cuda_map(unsigned int nvmldev){
 }
 
 unsigned int cuda_to_nvml_map(unsigned int cudadev){
+    if (cudadev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_ERROR("Illegal cuda device id: %u", cudadev);
+        return CUDA_DEVICE_MAX_COUNT;
+    }
     return cuda_to_nvml_map_array[cudadev];
 }
 
