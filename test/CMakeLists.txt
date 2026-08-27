@@ -14,15 +14,20 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     get_filename_component(TEST_TARGET_NAME ${RELATIVE_TEST_PATH} NAME_WE)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${TEST_TARGET_DIR})
 
-    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR TEST_TARGET_NAME STREQUAL "test_device_id_guard")
-        # Build this focused regression test with the production shared-region
-        # implementation.  It does not invoke any CUDA/NVML entry point at
-        # runtime.  Section garbage collection drops unrelated GPU-facing
-        # production functions.
-        add_executable(${TEST_TARGET_NAME}
-            ${TEST_SCRIPT}
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_memory_limit.c
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR TEST_TARGET_NAME STREQUAL "test_device_id_guard" OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
+        # Focused regression tests built against the production sources they
+        # exercise; section GC drops unrelated GPU-facing production functions.
+        if (TEST_TARGET_NAME STREQUAL "test_pid_discovery")
+            add_executable(${TEST_TARGET_NAME}
+                ${TEST_SCRIPT}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/utils.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        else()
+            add_executable(${TEST_TARGET_NAME}
+                ${TEST_SCRIPT}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_memory_limit.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        endif()
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
             _GNU_SOURCE)
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
@@ -38,7 +43,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     endif()
 
     list(APPEND TEST_TARGET_NAMES_LIST ${TEST_TARGET_NAME})
-    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR TEST_TARGET_NAME STREQUAL "test_device_id_guard")
+    if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR TEST_TARGET_NAME STREQUAL "test_device_id_guard" OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         target_link_libraries(${TEST_TARGET_NAME} -ldl)
@@ -65,6 +70,10 @@ set_tests_properties(device_id_guard PROPERTIES TIMEOUT 20)
 add_test(NAME dlsym_rtld_next
     COMMAND test_dlsym_rtld_next)
 set_tests_properties(dlsym_rtld_next PROPERTIES TIMEOUT 10)
+
+add_test(NAME pid_discovery
+    COMMAND test_pid_discovery)
+set_tests_properties(pid_discovery PROPERTIES TIMEOUT 10)
 if (TARGET vgpu)
     add_test(NAME dlsym_rtld_next_preloaded
         COMMAND test_dlsym_rtld_next)
