@@ -265,14 +265,32 @@ int free_raw_async(CUdeviceptr dptr, CUstream hStream) {
     return tmp;
 }
 
+/* Free e's heap allocations. e must not be linked into any allocated_list
+ * and must not have a live GPU allocation backing it. */
+static void free_unlisted_entry(allocated_list_entry *e) {
+    free(e->entry->allocHandle);
+    free(e->entry);
+    free(e);
+}
+
+/* Free the GPU memory behind e's still-unlisted allocation, then free e's
+ * heap allocations. Used when a driver call made after a successful
+ * cuMemAllocAsync/cuMemAllocFromPoolAsync fails: since e was never added to
+ * device_allocasync, the allocation would otherwise leak. */
+static void free_unlisted_alloc(allocated_list_entry *e, CUstream hStream) {
+    CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFreeAsync, e->entry->address, hStream);
+    free_unlisted_entry(e);
+}
+
 /* Track an allocated async chunk and account it against its pool's high-water
  * limit. Call with mutex held. */
-static int account_async_chunk(allocated_list_entry *e, size_t size, CUmemoryPool pool) {
+static int account_async_chunk(allocated_list_entry *e, size_t size, CUmemoryPool pool, CUstream hStream) {
     size_t poollimit;
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemPoolGetAttribute, pool,
                                       CU_MEMPOOL_ATTR_RESERVED_MEM_HIGH, &poollimit);
     if (res != CUDA_SUCCESS) {
         LOG_ERROR("cuMemPoolGetAttribute failed res=%d", res);
+        free_unlisted_alloc(e, hStream);
         return res;
     }
     if (poollimit != 0) {
@@ -305,6 +323,7 @@ int add_chunk_async(CUdeviceptr *address, size_t size, CUstream hStream) {
     res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemAllocAsync,&e->entry->address,size,hStream);
     if (res != CUDA_SUCCESS) {
         LOG_ERROR("cuMemoryAllocate failed res=%d",res);
+        free_unlisted_entry(e);
         return res;
     }
     *address = e->entry->address;
@@ -313,9 +332,10 @@ int add_chunk_async(CUdeviceptr *address, size_t size, CUstream hStream) {
     res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDeviceGetMemPool,&pool,dev);
     if (res != CUDA_SUCCESS) {
         LOG_ERROR("cuDeviceGetMemPool failed res=%d",res);
+        free_unlisted_alloc(e, hStream);
         return res;
     }
-    return account_async_chunk(e, size, pool);
+    return account_async_chunk(e, size, pool, hStream);
 }
 
 int add_chunk_from_pool_async(CUdeviceptr *address, size_t size, CUmemoryPool pool, CUstream hStream) {
@@ -331,11 +351,12 @@ int add_chunk_from_pool_async(CUdeviceptr *address, size_t size, CUmemoryPool po
     res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAllocFromPoolAsync, &e->entry->address, size, pool, hStream);
     if (res != CUDA_SUCCESS) {
         LOG_ERROR("cuMemAllocFromPoolAsync failed res=%d", res);
+        free_unlisted_entry(e);
         return res;
     }
     *address = e->entry->address;
     /* Account against the caller's pool, not the default. */
-    return account_async_chunk(e, size, pool);
+    return account_async_chunk(e, size, pool, hStream);
 }
 
 int allocate_async_raw(CUdeviceptr *dptr, size_t size, CUstream hStream) {
