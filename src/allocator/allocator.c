@@ -278,7 +278,13 @@ static void free_unlisted_entry(allocated_list_entry *e) {
  * cuMemAllocAsync/cuMemAllocFromPoolAsync fails: since e was never added to
  * device_allocasync, the allocation would otherwise leak. */
 static void free_unlisted_alloc(allocated_list_entry *e, CUstream hStream) {
-    CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFreeAsync, e->entry->address, hStream);
+    CUresult r = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFreeAsync, e->entry->address, hStream);
+    if (r != CUDA_SUCCESS) {
+        LOG_ERROR("cuMemFreeAsync failed (%d) while cleaning up unlisted allocation %p; "
+                  "leaking to avoid double-free", r, (void *)e->entry->address);
+        /* retain e's metadata -- don't lose the only record of this address */
+        return;
+    }
     free_unlisted_entry(e);
 }
 

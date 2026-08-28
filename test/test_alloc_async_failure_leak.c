@@ -18,26 +18,40 @@
 //   happened, so it never calls cuMemFreeAsync itself -> the device
 //   allocation is leaked permanently, on every occurrence.
 //
-// This test does not depend on libvgpu being preloaded: it reproduces the
-// exact "succeed, then fail on the very next driver call" shape directly
-// against the real CUDA driver, using two deterministic, portable ways to
-// force a driver call to fail (an invalid device ordinal for
-// cuDeviceGetMemPool, and an out-of-range attribute enum for
-// cuMemPoolGetAttribute -- the two calls fixed for #2864), then verifies
-// that applying the fix's cleanup (cuMemFreeAsync on the just-allocated
-// pointer) actually reclaims the memory, i.e. that cuMemGetInfo's free byte
-// count returns to baseline instead of drifting down on every iteration.
+// Unlike an earlier version of this test, this one does not call
+// cuDeviceGetMemPool/cuMemPoolGetAttribute itself with bad arguments -- doing
+// that only fails the test's own direct driver calls, not the allocator's
+// internal ones, so it could not actually catch a regression here. Instead
+// it:
+//   1. Drives the allocation through the real hooked entry points
+//      (cuMemAllocAsync / cuMemAllocFromPoolAsync), which this process picks
+//      up from libvgpu.so via LD_PRELOAD -- exactly as a real application
+//      would, so the calls go through allocator.c's add_chunk_async() /
+//      add_chunk_from_pool_async() for real.
+//   2. Forces the *allocator's* internal cuDeviceGetMemPool /
+//      cuMemPoolGetAttribute calls (not the test's) to fail on the very next
+//      call, via the fault-injecting stand-in driver in
+//      fault_inject_driver.c (see that file for how the substitution works).
+//   3. Asserts via cuMemGetInfo that free device memory before and after the
+//      forced-failure allocations is unchanged, i.e. nothing leaked.
 //
-// Build (standalone, no HAMi headers needed):
-//   gcc test_alloc_async_failure_leak.c -o test_alloc_async_failure_leak \
-//       -I/usr/local/cuda/include -L/usr/local/cuda/lib64/stubs -lcuda
-// Or drop into HAMi-core/test/ and `make build-in-docker` (auto-discovered).
+// This requires the test binary to run with:
+//   LD_PRELOAD=<path to libvgpu.so>
+//   LD_LIBRARY_PATH=<dir containing the fault-injecting libcuda.so.1>:...
+// See test/CMakeLists.txt (the alloc_async_failure_leak CTest entry) for how
+// both are wired up automatically when the vgpu target is built.
 //
-// Run (expect PASS on stock CUDA and, after the #2864 fix, under libvgpu):
-//   ./test_alloc_async_failure_leak
+// To confirm this test actually exercises the fix (and isn't vacuously
+// passing): temporarily revert the free_unlisted_alloc change in
+// src/allocator/allocator.c, rebuild, and re-run this test -- it must fail
+// with "bytes not reclaimed (leak reproduced)".
+//
+// Run standalone (from a build directory with the vgpu target already built):
+//   ctest -R alloc_async_failure_leak --output-on-failure
 
 #include <cuda.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifndef TEST_DEVICE_ID
@@ -89,29 +103,28 @@ int main(void) {
     int failures = 0;
     size_t free0, free1, total;
 
-    /* [A] Force cuDeviceGetMemPool (the call in add_chunk_async right after
-     * cuMemAllocAsync) to fail, then apply the fix's cleanup. */
-    printf("[A] cuMemAllocAsync succeeds, cuDeviceGetMemPool forced to fail\n");
+    /* [A] Force the allocator's internal cuDeviceGetMemPool call (the one
+     * add_chunk_async() makes right after cuMemAllocAsync succeeds) to fail
+     * on the next call only, then drive the allocation through the real
+     * hooked cuMemAllocAsync entry point. */
+    printf("[A] cuMemAllocAsync succeeds, allocator's cuDeviceGetMemPool forced to fail\n");
     CHECK_DRV(cuMemGetInfo(&free0, &total));
     for (int i = 0; i < ITERATIONS; i++) {
         CUdeviceptr d = 0;
-        CHECK_DRV(cuMemAllocAsync(&d, ALLOC_BYTES, stream));
-
-        /* Portable, deterministic failure: no such device ordinal exists.
-         * Stands in for real-world causes (mempool unsupported on this
-         * GPU/driver combo, transient resource exhaustion, etc.) that the
-         * code must also survive without leaking. */
-        CUmemoryPool pool;
-        CUresult f = cuDeviceGetMemPool(&pool, (CUdevice)-1);
-        describe("cuDeviceGetMemPool(invalid device)", f);
-        if (f == CUDA_SUCCESS) {
+        setenv("HAMI_TEST_FAIL_NEXT_GETMEMPOOL", "1", 1);
+        CUresult res = cuMemAllocAsync(&d, ALLOC_BYTES, stream);
+        describe("cuMemAllocAsync (forced post-alloc failure)", res);
+        if (res == CUDA_SUCCESS) {
             fprintf(stderr, "expected forced failure but call succeeded\n");
             failures++;
+            /* Allocation did succeed after all: free it so it doesn't
+             * pollute the leak check below. */
+            cuMemFreeAsync(d, stream);
         }
-
-        /* This is the fix: on the post-allocation driver-call failure,
-         * free the GPU memory the earlier call already handed back. */
-        CHECK_DRV(cuMemFreeAsync(d, stream));
+        /* No cuMemFreeAsync here: the point of this test is that the
+         * allocator itself must have freed the GPU memory when its internal
+         * cuDeviceGetMemPool call failed. Freeing it ourselves would hide a
+         * regression instead of catching it. */
     }
     CHECK_DRV(cuStreamSynchronize(stream));
     CHECK_DRV(cuMemGetInfo(&free1, &total));
@@ -121,10 +134,12 @@ int main(void) {
         failures++;
     }
 
-    /* [B] Force cuMemPoolGetAttribute (the call in account_async_chunk,
-     * shared by add_chunk_async and add_chunk_from_pool_async) to fail,
-     * then apply the fix's cleanup. */
-    printf("[B] cuMemAllocFromPoolAsync succeeds, cuMemPoolGetAttribute forced to fail\n");
+    /* [B] Force the allocator's internal cuMemPoolGetAttribute call (the one
+     * account_async_chunk() makes, shared by add_chunk_async() and
+     * add_chunk_from_pool_async()) to fail on the next call only, then drive
+     * the allocation through the real hooked cuMemAllocFromPoolAsync entry
+     * point. */
+    printf("[B] cuMemAllocFromPoolAsync succeeds, allocator's cuMemPoolGetAttribute forced to fail\n");
     CUmemPoolProps props;
     memset(&props, 0, sizeof(props));
     props.allocType = CU_MEM_ALLOCATION_TYPE_PINNED;
@@ -136,20 +151,15 @@ int main(void) {
     CHECK_DRV(cuMemGetInfo(&free0, &total));
     for (int i = 0; i < ITERATIONS; i++) {
         CUdeviceptr d = 0;
-        CHECK_DRV(cuMemAllocFromPoolAsync(&d, ALLOC_BYTES, pool, stream));
-
-        /* Portable, deterministic failure: attribute enum out of range. */
-        size_t attr_val;
-        CUresult f = cuMemPoolGetAttribute(pool, (CUmemPool_attribute)0x7fffffff, &attr_val);
-        describe("cuMemPoolGetAttribute(invalid attribute)", f);
-        if (f == CUDA_SUCCESS) {
+        setenv("HAMI_TEST_FAIL_NEXT_POOLATTR", "1", 1);
+        CUresult res = cuMemAllocFromPoolAsync(&d, ALLOC_BYTES, pool, stream);
+        describe("cuMemAllocFromPoolAsync (forced post-alloc failure)", res);
+        if (res == CUDA_SUCCESS) {
             fprintf(stderr, "expected forced failure but call succeeded\n");
             failures++;
+            cuMemFreeAsync(d, stream);
         }
-
-        /* This is the fix: on the post-allocation driver-call failure,
-         * free the GPU memory the earlier call already handed back. */
-        CHECK_DRV(cuMemFreeAsync(d, stream));
+        /* Same reasoning as [A]: no cuMemFreeAsync here on purpose. */
     }
     CHECK_DRV(cuStreamSynchronize(stream));
     CHECK_DRV(cuMemGetInfo(&free1, &total));
