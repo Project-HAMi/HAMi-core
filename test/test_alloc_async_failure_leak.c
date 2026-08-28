@@ -30,16 +30,19 @@
 //      add_chunk_from_pool_async() for real.
 //   2. Forces the *allocator's* internal cuDeviceGetMemPool /
 //      cuMemPoolGetAttribute calls (not the test's) to fail on the very next
-//      call, via the fault-injecting stand-in driver in
-//      fault_inject_driver.c (see that file for how the substitution works).
+//      call, via the fault-injecting dlopen() interposer in
+//      fault_inject_driver.c (see that file for how the substitution works
+//      without shadowing the real driver for anything else).
 //   3. Asserts via cuMemGetInfo that free device memory before and after the
 //      forced-failure allocations is unchanged, i.e. nothing leaked.
 //
-// This requires the test binary to run with:
-//   LD_PRELOAD=<path to libvgpu.so>
-//   LD_LIBRARY_PATH=<dir containing the fault-injecting libcuda.so.1>:...
-// See test/CMakeLists.txt (the alloc_async_failure_leak CTest entry) for how
-// both are wired up automatically when the vgpu target is built.
+// This requires the test binary to run with LD_PRELOAD listing, in order,
+// the fault-injecting shim ahead of libvgpu.so:
+//   LD_PRELOAD=<path to fault_inject_driver.so>:<path to libvgpu.so>
+// LD_LIBRARY_PATH is left untouched -- the real driver loads normally, same
+// as for every other test. See test/CMakeLists.txt (the
+// alloc_async_failure_leak CTest entry) for how this is wired up
+// automatically when the vgpu target is built.
 //
 // To confirm this test actually exercises the fix (and isn't vacuously
 // passing): temporarily revert the free_unlisted_alloc change in
