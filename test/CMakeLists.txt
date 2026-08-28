@@ -93,17 +93,23 @@ if (TARGET vgpu)
         ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:vgpu>"
         TIMEOUT 10)
 
-    # fault_inject_driver_312 is prepended to the existing LD_PRELOAD list,
-    # ahead of libvgpu.so, not in place of it: libvgpu.so is still needed so
-    # the four wrappers fixed for issue #312 go through their real hooked
-    # code path, and fault_inject_driver_312 only interposes dlopen() to
-    # force one-shot failures out of the underlying driver call. Needs a
-    # real GPU to run; not exercised in CI (see fault_inject_driver_312.c
-    # and test_312_failure_path_log_guard.c for details).
+    # libvgpu.so must load before fault_inject_driver_312 in LD_PRELOAD.
+    # fault_inject_driver_312 exports two things: a dlopen() interposer (to
+    # fake the real driver once libvgpu.so dlopen()s "libcuda.so.1"), and,
+    # for dlsym() to find via that redirected handle, direct symbols named
+    # after the four calls this PR fixes. libvgpu.so exports those same
+    # four names too -- its actual wrappers, the code under test. If the
+    # injector loaded first, its direct symbols would win global resolution
+    # for the test binary's own calls, bypassing libvgpu.so's wrappers
+    # entirely. Loading libvgpu.so first lets its wrappers win that
+    # resolution; the dlopen() interposition still works either way, since
+    # only the injector defines dlopen() among the two. Needs a real GPU to
+    # run; not exercised in CI (see fault_inject_driver_312.c and
+    # test_312_failure_path_log_guard.c for details).
     add_test(NAME failure_path_log_guard_312
         COMMAND test_312_failure_path_log_guard)
     set_tests_properties(failure_path_log_guard_312 PROPERTIES
-        ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:fault_inject_driver_312>:$<TARGET_FILE:vgpu>"
+        ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:vgpu>:$<TARGET_FILE:fault_inject_driver_312>"
         TIMEOUT 30)
     add_dependencies(test_312_failure_path_log_guard fault_inject_driver_312)
 endif()

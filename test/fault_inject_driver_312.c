@@ -12,8 +12,18 @@
 // driver via a saved real dlopen(). Nothing outside these four entry points
 // is touched.
 //
-// Load order matters: LD_PRELOAD="fault_inject_driver_312.so:libvgpu.so" --
-// this library first so it observes libvgpu.so's dlopen("libcuda.so.1").
+// Load order matters, and it's the opposite of what the dlopen()-interposition
+// framing above might suggest: LD_PRELOAD="libvgpu.so:fault_inject_driver_312.so"
+// -- libvgpu.so first. This library also exports direct, globally-visible
+// symbols named cuMemPoolGetAttribute/cuMemGetInfo_v2/cuMemAddressReserve/
+// cuDeviceGetCount (so dlsym() against the dlopen()-redirected handle can find
+// them); if it were listed before libvgpu.so, those symbols would win global
+// symbol resolution for any *direct* caller too, including this test binary's
+// own calls, which would then bypass libvgpu.so's wrappers -- the code under
+// test -- entirely. Listing libvgpu.so first lets its identically-named
+// wrapper symbols win that direct resolution, while the dlopen() interposition
+// (unique to this library among the preloaded set) still redirects libvgpu.so's
+// internal dlopen("libcuda.so.1") call regardless of relative order.
 //
 // Env vars (each is one-shot: read once, then unset by the fake itself):
 //   HAMI_TEST_FAIL_NEXT_POOLATTR    -> next cuMemPoolGetAttribute fails

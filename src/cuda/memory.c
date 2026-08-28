@@ -492,7 +492,7 @@ CUresult cuMemGetInfo_v2(size_t* free, size_t* total) {
     size_t limit = get_current_device_memory_limit(cuda_to_nvml_map(dev));
     CUresult res;
     if (limit == 0) {
-        res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
+        res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemGetInfo_v2, free, total);
         if (res != CUDA_SUCCESS) {
             return res;
         }
@@ -501,7 +501,7 @@ CUresult cuMemGetInfo_v2(size_t* free, size_t* total) {
         LOG_INFO("after free=%ld total=%ld", *free, *total);
         return CUDA_SUCCESS;
     } else {
-        res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
+        res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemGetInfo_v2, free, total);
         if (res != CUDA_SUCCESS) {
             return res;
         }
