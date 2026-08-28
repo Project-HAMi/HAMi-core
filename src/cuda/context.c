@@ -64,17 +64,11 @@ static size_t context_charge_for_device(CUdevice dev) {
     return dev == 0 ? context_size : 0;
 }
 
-static CUresult rollback_unaccounted_retain(CUdevice dev,
-                                            int retain_recorded,
-                                            size_t bytes_to_add) {
+/* Only reached when the retain could not be recorded at all, so there is no
+ * local accounting to undo: hand the context back and report the failure. */
+static CUresult release_unaccounted_retain(CUdevice dev) {
     CUresult release_result;
 
-    if (retain_recorded &&
-        primary_context_rollback_retain(&context_accounting[dev],
-                                        bytes_to_add) != 0) {
-        LOG_ERROR("Failed to roll back local context accounting on device %d",
-                  dev);
-    }
     release_result = CUDA_OVERRIDE_CALL(cuda_library_entry,
                                         cuDevicePrimaryCtxRelease_v2, dev);
     if (release_result != CUDA_SUCCESS) {
@@ -172,19 +166,26 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
     if (record_result != 0) {
         LOG_ERROR("Cannot account primary context retain on device %d",
                   dev);
-        res = rollback_unaccounted_retain(dev, 0, 0);
+        res = release_unaccounted_retain(dev);
         pthread_mutex_unlock(&context_accounting_lock);
         pthread_mutex_unlock(&context_device_locks[dev]);
         return res;
     }
-    if (bytes_to_add > 0) {
-        if (add_gpu_device_memory_usage(getpid(), dev, bytes_to_add, 0) != 0) {
-            LOG_ERROR("Failed to charge primary context memory on device %d",
-                      dev);
-            res = rollback_unaccounted_retain(dev, 1, bytes_to_add);
-            pthread_mutex_unlock(&context_accounting_lock);
-            pthread_mutex_unlock(&context_device_locks[dev]);
-            return res;
+    if (bytes_to_add > 0 &&
+        add_gpu_device_memory_usage(getpid(), dev, bytes_to_add, 0) != 0) {
+        size_t retried = 0;
+
+        /* The driver retain already succeeded.  A shared region that will not
+         * take the charge must not fail the caller, for the same reason an
+         * unknown size does not: drop the charge, keep the retain, and let a
+         * later retain try again. */
+        LOG_WARN("Cannot charge primary context memory on device %d; the "
+                 "retain is kept and the charge is deferred", dev);
+        if (primary_context_rollback_retain(&context_accounting[dev],
+                                            bytes_to_add) != 0 ||
+            primary_context_record_retain(&context_accounting[dev], 0,
+                                          &retried) != 0) {
+            LOG_ERROR("Cannot reconcile context accounting on device %d", dev);
         }
     }
     pthread_mutex_unlock(&context_accounting_lock);
