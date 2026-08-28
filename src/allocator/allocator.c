@@ -244,12 +244,11 @@ int remove_chunk_async(
     for (val = a_list->head; val != NULL; val = val->next) {
         if (val->entry->address == dptr) {
             t_size=val->entry->length;
+            CUdevice t_dev = val->entry->dev;  /* capture before LIST_REMOVE frees entry */
             CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemFreeAsync,dptr,hStream);
             LIST_REMOVE(a_list,val);
             a_list->limit-=t_size;
-            CUdevice dev;
-            cuCtxGetDevice(&dev);
-            rm_gpu_device_memory_usage(getpid(),dev,t_size,2);
+            rm_gpu_device_memory_usage(getpid(),t_dev,t_size,2);
             return 0;
         }
     }
