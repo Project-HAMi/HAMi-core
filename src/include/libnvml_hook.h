@@ -28,13 +28,13 @@ typedef nvmlReturn_t (*driver_sym_t)();
   ({                                                                           \
     LOG_DEBUG("Hijacking %s", #sym);                                           \
     driver_sym_t _entry = NVML_FIND_ENTRY(table, sym);                         \
-    _entry(__VA_ARGS__);                                                       \
+    _entry ? _entry(__VA_ARGS__) : NVML_ERROR_FUNCTION_NOT_FOUND;              \
   })
 
 #define NVML_OVERRIDE_CALL_NO_LOG(table, sym, ...)                             \
   ({                                                                           \
     driver_sym_t _entry = NVML_FIND_ENTRY(table, sym);                         \
-    _entry(__VA_ARGS__);                                                       \
+    _entry ? _entry(__VA_ARGS__) : NVML_ERROR_FUNCTION_NOT_FOUND;              \
   })
 
 /**

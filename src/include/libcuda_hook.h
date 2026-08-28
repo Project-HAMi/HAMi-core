@@ -36,6 +36,7 @@ typedef CUresult (*cuda_sym_t)();
     cuda_sym_t _entry = (cuda_sym_t)CUDA_FIND_ENTRY(table, sym);               \
     if (_entry == NULL) {                                                      \
       LOG_ERROR("Hijack failed: %s is NULL", #sym);                            \
+      return CUDA_ERROR_NOT_FOUND;                                             \
     }                                                                          \
     _entry(__VA_ARGS__);                                                       \
   })

@@ -853,6 +853,7 @@ void postInit(){
     allocator_init();
     map_cuda_visible_devices();
 
+    nvmlInit();
     // Use the process-death-safe shared file lock to serialize host PID detection
     int lock_acquired = lock_postinit();
     nvmlReturn_t res = NVML_SUCCESS;
