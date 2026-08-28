@@ -139,12 +139,9 @@ int main(void) {
 
     int failures = 0;
 
-    /* Baseline reads before any allocation. */
     size_t usage0_before = get_gpu_memory_usage((int)dev0);
     size_t usage1_before = get_gpu_memory_usage((int)dev1);
 
-    /* [1] Allocate on device 0 (device 0's context current) via the real
-     * hooked cuMemAllocAsync entry point. */
     printf("[1] cuMemAllocAsync on device 0 (device 0 current)\n");
     CUdeviceptr d = 0;
     CHECK_DRV(cuMemAllocAsync(&d, ALLOC_BYTES, stream0));
@@ -169,12 +166,9 @@ int main(void) {
         failures++;
     }
 
-    /* [2] Switch current context to device 1. */
     printf("[2] cuCtxSetCurrent(device 1)\n");
     CHECK_DRV(cuCtxSetCurrent(ctx1));
 
-    /* [3] Free the device-0 allocation via its own (device-0) stream, with
-     * device 1 current -- the exact mismatch remove_chunk_async() mishandled. */
     printf("[3] cuMemFreeAsync(device-0 pointer, device-0 stream) with device 1 current\n");
     CUresult fres = cuMemFreeAsync(d, stream0);
     describe("cuMemFreeAsync", fres);
@@ -195,8 +189,6 @@ int main(void) {
     printf("  device1 usage after_free=%zu (expected %zu, unchanged)\n",
            usage1_after_free, usage1_before);
 
-    /* [4] The real allocation's device (0) must be decremented back to
-     * baseline; the uninvolved device (1) must be untouched. */
     if (usage0_after_free != usage0_before) {
         fprintf(stderr,
                 "FAIL: device0 usage did not return to baseline after free "
@@ -214,10 +206,6 @@ int main(void) {
         failures++;
     }
 
-    /* [5] Allocate again, this time correctly on device 1 with device 1
-     * current, and confirm its usage now reflects a normal, uncorrupted
-     * increment -- proving device 1's counter recovered rather than staying
-     * permanently corrupted by the earlier wrong-device decrement. */
     printf("[5] cuMemAllocAsync on device 1 (device 1 current)\n");
     CUstream stream1;
     CHECK_DRV(cuStreamCreate(&stream1, CU_STREAM_NON_BLOCKING));

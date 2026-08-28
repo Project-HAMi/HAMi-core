@@ -248,7 +248,7 @@ int remove_chunk_async(
             CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemFreeAsync,dptr,hStream);
             LIST_REMOVE(a_list,val);
             a_list->limit-=t_size;
-            rm_gpu_device_memory_usage(getpid(),t_dev,t_size,2);
+            rm_gpu_device_memory_usage(getpid(), t_dev, t_size, 2);
             return 0;
         }
     }
