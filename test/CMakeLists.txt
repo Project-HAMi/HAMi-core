@@ -10,8 +10,9 @@ set(TEST_TARGET_NAMES_LIST)
 file(GLOB_RECURSE TEST_SCRIPTS "${TEST_CPP_SOURCE_DIR}/*.c" "${TEST_CPP_SOURCE_DIR}/*.cu")
 
 # fault_inject_driver.c is not a test executable: it is a fault-injecting
-# stand-in for libcuda.so.1 (see the file itself for why), built as a shared
-# library below and consumed only by the alloc_async_failure_leak test.
+# LD_PRELOAD companion for the real CUDA driver (see the file itself for how
+# it works), built as a shared library below and consumed only by the
+# alloc_async_failure_leak test.
 set(FAULT_INJECT_DRIVER_SRC ${TEST_CPP_SOURCE_DIR}/fault_inject_driver.c)
 list(REMOVE_ITEM TEST_SCRIPTS ${FAULT_INJECT_DRIVER_SRC})
 
@@ -64,18 +65,13 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
 endforeach()
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-# Build the fault-injecting libcuda.so.1 stand-in used by
-# test_alloc_async_failure_leak. It must be named exactly "libcuda.so.1"
-# (no extra version suffix) and live in its own directory so that directory
-# can be prepended to LD_LIBRARY_PATH for just that one test, without
-# shadowing the real driver for every other test.
-set(FAULT_INJECT_DRIVER_DIR ${CMAKE_CURRENT_BINARY_DIR}/fault_inject_driver)
+# Build the fault-injecting companion used by test_alloc_async_failure_leak.
+# It is a normal shared library (no special name/soname needed): it works by
+# interposing dlopen() via LD_PRELOAD, not by being found under the real
+# driver's name, so the real driver still loads normally for everything else
+# (see fault_inject_driver.c for the full explanation).
 add_library(fault_inject_driver SHARED ${FAULT_INJECT_DRIVER_SRC})
 set_target_properties(fault_inject_driver PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${FAULT_INJECT_DRIVER_DIR}
-    OUTPUT_NAME cuda
-    PREFIX lib
-    SUFFIX .so.1
     POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(fault_inject_driver -ldl)
 
@@ -97,15 +93,20 @@ if (TARGET vgpu)
         ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:vgpu>"
         TIMEOUT 10)
 
-    # LD_PRELOAD routes cuMemAllocAsync/cuMemAllocFromPoolAsync through
-    # libvgpu.so's real hooks, and LD_LIBRARY_PATH puts the fault-injecting
-    # libcuda.so.1 stand-in ahead of the real driver so load_cuda_libraries()
-    # picks it up. Needs a real GPU to run; not exercised in CI (see
-    # fault_inject_driver.c and test_alloc_async_failure_leak.c for details).
+    # fault_inject_driver is prepended to the existing LD_PRELOAD list, ahead
+    # of libvgpu.so, not in place of it: libvgpu.so is still needed so
+    # cuMemAllocAsync/cuMemAllocFromPoolAsync go through allocator.c's real
+    # hooks, and fault_inject_driver only interposes dlopen() to fake
+    # cuDeviceGetMemPool/cuMemPoolGetAttribute -- every other CUDA symbol,
+    # including the ones libvgpu.so itself resolves against the real driver,
+    # is untouched. LD_LIBRARY_PATH is deliberately left alone so the real
+    # driver loads exactly as it does for every other test. Needs a real GPU
+    # to run; not exercised in CI (see fault_inject_driver.c and
+    # test_alloc_async_failure_leak.c for details).
     add_test(NAME alloc_async_failure_leak
         COMMAND test_alloc_async_failure_leak)
     set_tests_properties(alloc_async_failure_leak PROPERTIES
-        ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:vgpu>;LD_LIBRARY_PATH=${FAULT_INJECT_DRIVER_DIR}:$ENV{LD_LIBRARY_PATH}"
+        ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:fault_inject_driver>:$<TARGET_FILE:vgpu>"
         TIMEOUT 30)
     add_dependencies(test_alloc_async_failure_leak fault_inject_driver)
 endif()
