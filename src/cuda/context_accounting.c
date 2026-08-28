@@ -1,9 +1,3 @@
-/*
- * SPDX-License-Identifier: Apache-2.0
- *
- * Copyright (c) 2026 The HAMi Authors.
- */
-
 #include "cuda/context_accounting.h"
 
 #include <errno.h>

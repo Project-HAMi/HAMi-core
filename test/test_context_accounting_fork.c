@@ -1,10 +1,4 @@
 /*
- * SPDX-License-Identifier: Apache-2.0
- *
- * Copyright (c) 2026 The HAMi Authors.
- */
-
-/*
  * GPU-free test of the fork handlers in src/cuda/context.c, driven through a
  * real pthread_atfork registration and a real fork(), the way libvgpu.c wires
  * them.  test_context_accounting covers what primary_context_accounting_reset

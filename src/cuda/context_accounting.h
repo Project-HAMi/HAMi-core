@@ -1,9 +1,3 @@
-/*
- * SPDX-License-Identifier: Apache-2.0
- *
- * Copyright (c) 2026 The HAMi Authors.
- */
-
 #ifndef SRC_CUDA_CONTEXT_ACCOUNTING_H_
 #define SRC_CUDA_CONTEXT_ACCOUNTING_H_
 
