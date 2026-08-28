@@ -123,6 +123,12 @@ int main(void) {
             /* Allocation did succeed after all: free it so it doesn't
              * pollute the leak check below. */
             cuMemFreeAsync(d, stream);
+        } else if (res != CUDA_ERROR_NOT_SUPPORTED) {
+            /* Some other failure got here before the injected
+             * cuDeviceGetMemPool failure could -- this run isn't actually
+             * exercising the leak-cleanup path, so don't let it pass. */
+            fprintf(stderr, "expected CUDA_ERROR_NOT_SUPPORTED but got %d\n", res);
+            failures++;
         }
         /* No cuMemFreeAsync here: the point of this test is that the
          * allocator itself must have freed the GPU memory when its internal
@@ -161,6 +167,11 @@ int main(void) {
             fprintf(stderr, "expected forced failure but call succeeded\n");
             failures++;
             cuMemFreeAsync(d, stream);
+        } else if (res != CUDA_ERROR_NOT_SUPPORTED) {
+            /* Some other failure got here before the injected
+             * cuMemPoolGetAttribute failure could -- same reasoning as [A]. */
+            fprintf(stderr, "expected CUDA_ERROR_NOT_SUPPORTED but got %d\n", res);
+            failures++;
         }
         /* Same reasoning as [A]: no cuMemFreeAsync here on purpose. */
     }
