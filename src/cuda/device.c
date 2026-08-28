@@ -21,7 +21,11 @@ CUresult cuDeviceGet(CUdevice *device,int ordinal){
 CUresult cuDeviceGetCount( int* count ) {
     LOG_DEBUG("into cuDeviceGetCount");
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDeviceGetCount,count);
-    LOG_DEBUG("cuDeviceGetCount res=%d count=%d",res,*count);
+    if (res == CUDA_SUCCESS) {
+        LOG_DEBUG("cuDeviceGetCount res=%d count=%d",res,*count);
+    } else {
+        LOG_DEBUG("cuDeviceGetCount res=%d",res);
+    }
     return res;
 }
 

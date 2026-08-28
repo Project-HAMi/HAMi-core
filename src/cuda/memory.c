@@ -490,14 +490,21 @@ CUresult cuMemGetInfo_v2(size_t* free, size_t* total) {
     CHECK_DRV_API(cuCtxGetDevice(&dev));
     size_t usage = get_current_device_memory_usage(cuda_to_nvml_map(dev));
     size_t limit = get_current_device_memory_limit(cuda_to_nvml_map(dev));
+    CUresult res;
     if (limit == 0) {
-        CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
+        res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
+        if (res != CUDA_SUCCESS) {
+            return res;
+        }
         LOG_INFO("orig free=%ld total=%ld", *free, *total);
         *free = *total - usage;
         LOG_INFO("after free=%ld total=%ld", *free, *total);
         return CUDA_SUCCESS;
     } else {
-        CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
+        res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
+        if (res != CUDA_SUCCESS) {
+            return res;
+        }
         LOG_INFO("orig free=%ld total=%ld limit=%ld usage=%ld",
             *free, *total, limit, usage);
         // Ensure total memory does not exceed the physical or imposed limit.
@@ -583,7 +590,9 @@ CUresult cuMemAddressReserve(CUdeviceptr* ptr, size_t size,
     size_t alignment, CUdeviceptr addr, unsigned long long flags ) {
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,
         cuMemAddressReserve, ptr, size, alignment, addr, flags);
-    LOG_INFO("cuMemAddressReserve:%lx %llx", size, *ptr);
+    if (res == CUDA_SUCCESS) {
+        LOG_INFO("cuMemAddressReserve:%lx %llx", size, *ptr);
+    }
     return res;
 }
 
@@ -667,7 +676,11 @@ CUresult cuMemPoolSetAttribute(CUmemoryPool pool, CUmemPool_attribute attr, void
 
 CUresult cuMemPoolGetAttribute(CUmemoryPool pool, CUmemPool_attribute attr, void *value) {
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemPoolGetAttribute,pool,attr,value);
-    LOG_INFO("cuMemPoolGetAttribute %d %ld",attr,*(long *)value);
+    if (res == CUDA_SUCCESS) {
+        LOG_INFO("cuMemPoolGetAttribute attr=%d", attr);
+    } else {
+        LOG_INFO("cuMemPoolGetAttribute attr=%d failed res=%d", attr, res);
+    }
     return res;
 }
 
