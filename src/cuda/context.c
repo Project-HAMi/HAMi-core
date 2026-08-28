@@ -6,7 +6,6 @@
 #include "multiprocess/multiprocess_memory_limit.h"
 
 extern size_t context_size;
-extern int ctx_activate[CUDA_DEVICE_MAX_COUNT];
 extern int pidfound;
 
 static size_t device_context_size[CUDA_DEVICE_MAX_COUNT];
@@ -41,7 +40,6 @@ void context_accounting_fork_child() {
                                      CUDA_DEVICE_MAX_COUNT);
     for (dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
         device_context_size[dev] = 0;
-        ctx_activate[dev] = 0;
         context_device_locks[dev] =
             (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
     }
@@ -83,7 +81,6 @@ static CUresult rollback_unaccounted_retain(CUdevice dev,
         LOG_ERROR("Failed to release an unaccounted primary context on "
                   "device %d: %d", dev, release_result);
     }
-    ctx_activate[dev] = (int)context_accounting[dev].retain_count;
     return CUDA_ERROR_OUT_OF_MEMORY;
 }
 
@@ -190,7 +187,6 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
             return res;
         }
     }
-    ctx_activate[dev] = (int)context_accounting[dev].retain_count;
     pthread_mutex_unlock(&context_accounting_lock);
     pthread_mutex_unlock(&context_device_locks[dev]);
     return res;
@@ -223,7 +219,6 @@ CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
                                                bytes_to_remove);
             }
         }
-        ctx_activate[dev] = (int)context_accounting[dev].retain_count;
         pthread_mutex_unlock(&context_accounting_lock);
     }
     pthread_mutex_unlock(&context_device_locks[dev]);
@@ -252,7 +247,6 @@ CUresult cuDevicePrimaryCtxReset_v2(CUdevice dev) {
             primary_context_restore_charge(&context_accounting[dev],
                                            bytes_to_remove);
         }
-        ctx_activate[dev] = 0;
         pthread_mutex_unlock(&context_accounting_lock);
     }
     pthread_mutex_unlock(&context_device_locks[dev]);
