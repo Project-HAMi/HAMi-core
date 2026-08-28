@@ -18,6 +18,20 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         # GPU-free: builds the production accounting unit into the test.
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/context_accounting.c)
+    elseif (TEST_TARGET_NAME STREQUAL "test_context_accounting_fork")
+        # GPU-free: links the production fork handlers from context.c and
+        # drives them through pthread_atfork.  Section garbage collection
+        # drops the CUDA hooks, which nothing here references.
+        add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/context.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/context_accounting.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
         if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
             add_executable(${TEST_TARGET_NAME}
@@ -46,6 +60,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
 
     list(APPEND TEST_TARGET_NAMES_LIST ${TEST_TARGET_NAME})
     if (TEST_TARGET_NAME STREQUAL "test_context_accounting" OR
+        TEST_TARGET_NAME STREQUAL "test_context_accounting_fork" OR
         TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR
         TEST_TARGET_NAME STREQUAL "test_pid_discovery")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
@@ -70,6 +85,10 @@ set_tests_properties(postinit_owner_death PROPERTIES TIMEOUT 20)
 add_test(NAME context_accounting
     COMMAND test_context_accounting)
 set_tests_properties(context_accounting PROPERTIES TIMEOUT 20)
+
+add_test(NAME context_accounting_fork
+    COMMAND test_context_accounting_fork)
+set_tests_properties(context_accounting_fork PROPERTIES TIMEOUT 20)
 
 add_test(NAME dlsym_rtld_next
     COMMAND test_dlsym_rtld_next)
