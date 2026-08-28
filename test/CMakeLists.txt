@@ -1,6 +1,8 @@
 
 find_package(CUDA REQUIRED)
 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/..)
+
 set(TEST_CPP_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(TEST_TARGET_NAMES_LIST) 
 
@@ -22,21 +24,26 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -D_GNU_SOURCE -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
-    elseif (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
-        # Build this focused regression test with the production shared-region
-        # implementation.  It does not invoke any CUDA/NVML entry point at
-        # runtime.  Section garbage collection drops unrelated GPU-facing
-        # production functions.
-        add_executable(${TEST_TARGET_NAME}
-            ${TEST_SCRIPT}
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_memory_limit.c
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+    elseif (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
+        if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
+            add_executable(${TEST_TARGET_NAME}
+                ${TEST_SCRIPT}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_memory_limit.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        else()
+            add_executable(${TEST_TARGET_NAME}
+                ${TEST_SCRIPT}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/utils.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        endif()
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
             _GNU_SOURCE)
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
+        add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT})
     elseif (TEST_SCRIPT MATCHES ".*cu")
         cuda_add_executable(${TEST_TARGET_NAME}  ${TEST_SCRIPT})
     else()
@@ -45,8 +52,11 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
 
     list(APPEND TEST_TARGET_NAMES_LIST ${TEST_TARGET_NAME})
     if (TEST_SCRIPT MATCHES "test_shared_region_concurrency.c" OR
-            TEST_TARGET_NAME STREQUAL "test_postinit_owner_death")
+            TEST_TARGET_NAME STREQUAL "test_postinit_owner_death" OR
+            TEST_TARGET_NAME STREQUAL "test_pid_discovery")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
+    elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
+        target_link_libraries(${TEST_TARGET_NAME} -ldl)
     else()
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread
             -lnvidia-ml -lcuda -lcudart -L${CUDA_HOME}/lib64)
@@ -69,6 +79,21 @@ set_tests_properties(shared_region_concurrency PROPERTIES TIMEOUT 90)
 add_test(NAME postinit_owner_death
     COMMAND test_postinit_owner_death)
 set_tests_properties(postinit_owner_death PROPERTIES TIMEOUT 20)
+
+add_test(NAME dlsym_rtld_next
+    COMMAND test_dlsym_rtld_next)
+set_tests_properties(dlsym_rtld_next PROPERTIES TIMEOUT 10)
+
+add_test(NAME pid_discovery
+    COMMAND test_pid_discovery)
+set_tests_properties(pid_discovery PROPERTIES TIMEOUT 10)
+if (TARGET vgpu)
+    add_test(NAME dlsym_rtld_next_preloaded
+        COMMAND test_dlsym_rtld_next)
+    set_tests_properties(dlsym_rtld_next_preloaded PROPERTIES
+        ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:vgpu>"
+        TIMEOUT 10)
+endif()
 
 
 add_custom_target(python_test ALL

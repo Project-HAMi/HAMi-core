@@ -12,42 +12,8 @@
 #include "include/libcuda_hook.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
-const char* unified_lock="/tmp/vgpulock/lock";
-static int lock_fd = -1;
 extern size_t context_size;
 extern int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
-
-// 0 unified_lock lock success
-// -1 unified_lock lock fail
-int try_lock_unified_lock() {
-    lock_fd = open(unified_lock, O_CREAT | O_RDWR, 0666);
-    if (lock_fd == -1) {
-        LOG_ERROR("failed to open unified_lock file: %s", unified_lock);
-        return -1;
-    }
-    if (flock(lock_fd, LOCK_EX) == -1) {
-        LOG_ERROR("flock failed on unified_lock");
-        close(lock_fd);
-        lock_fd = -1;
-        return -1;
-    }
-    LOG_INFO("try_lock_unified_lock: acquired");
-    return 0;
-}
-
-// 0 unified_lock unlock success
-// -1 unified_lock unlock fail
-int try_unlock_unified_lock() {
-    if (lock_fd == -1) {
-        LOG_ERROR("try_unlock_unified_lock: no lock held");
-        return -1;
-    }
-    int res = flock(lock_fd, LOCK_UN);
-    close(lock_fd);
-    lock_fd = -1;
-    LOG_INFO("try unlock_unified_lock:%d", res);
-    return res == 0 ? 0 : -1;
-}
 
 int mergepid(unsigned int *prev, unsigned int *current, nvmlProcessInfo_t1 *sub, nvmlProcessInfo_t1 *merged) {
     int i,j;
@@ -79,7 +45,7 @@ int getextrapid(unsigned int prev, unsigned int current, nvmlProcessInfo_t1 *pre
     for (i=0; i< current; i++) {
         LOG_INFO("current pids[%d]=%d",i,pids_on_device[i].pid);
     }
-    if (current-prev<=0)
+    if (current <= prev)
         return 0;
     for (i=0; i<current; i++) {
         found = 0;
@@ -182,6 +148,10 @@ int parse_cuda_visible_env() {
     if (need_cuda_virtualize()) {
         for (int i = 0; i < strlen(s); i++) {
             if ((s[i] == ',') || (i == 0)) {
+                if (count >= CUDA_DEVICE_MAX_COUNT) {
+                    LOG_ERROR("CUDA_VISIBLE_DEVICES exceeds max count");
+                    break;
+                }
                 int tmp = (i==0) ? atoi(s) : atoi(s + i +1);
                 cuda_to_nvml_map_array[count] = tmp; 
                 count++;

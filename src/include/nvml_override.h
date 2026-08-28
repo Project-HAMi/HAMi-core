@@ -1,13 +1,7 @@
 #ifndef __NVML_OVERRIDE_H__
 #define __NVML_OVERRIDE_H__
 
-typedef struct nvmlProcessInfo_st1
-{
-    unsigned int        pid;                //!< Process ID
-    unsigned long long  usedGpuMemory;      //!< Amount of used GPU memory in bytes.
-                                            //! Under WDDM, \ref NVML_VALUE_NOT_AVAILABLE is always reported
-                                            //! because Windows KMD manages all the memory and not the NVIDIA driver
-} nvmlProcessInfo_t1;
+
 
 
 nvmlReturn_t nvmlInternalGetExportTable(const void **ppExportTable,

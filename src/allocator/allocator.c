@@ -51,7 +51,10 @@ int oom_check(const int dev, size_t addon) {
     if (new_allocated > limit) {
         LOG_ERROR("Device %d OOM %lu / %lu", d, new_allocated, limit);
 
-        if (clear_proc_slot_nolock(1) > 0)
+        lock_shrreg();
+        int cleared = clear_proc_slot_nolock(1);
+        unlock_shrreg();
+        if (cleared > 0)
             return oom_check(dev,addon);
         return 1;
     }
@@ -116,7 +119,7 @@ int add_chunk(CUdeviceptr *address, size_t size) {
     if (oom_check(dev, size))
         return CUDA_ERROR_OUT_OF_MEMORY;
 
-    /* GPU allocation outside lock — the expensive part */
+    /* GPU allocation outside lock, the expensive part */
     if (size <= IPCSIZE) {
         res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAlloc_v2, address, size);
     } else {
@@ -127,7 +130,7 @@ int add_chunk(CUdeviceptr *address, size_t size) {
         return res;
     }
 
-    /* Tracking inside lock — pure in-memory ops, microseconds */
+    /* Tracking inside lock, pure in-memory ops, microseconds */
     pthread_mutex_lock(&mutex);
 
     if (oom_check(dev, size)) {
