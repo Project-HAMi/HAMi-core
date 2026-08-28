@@ -124,6 +124,12 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
     if (measure_context) {
         int attempt;
 
+        /* The delta is the process's own device memory across the retain, the
+         * same method set_task_pid() uses.  context_device_locks[dev] does not
+         * exclude cuMemAlloc, so an allocation by another thread of this
+         * process inside the window is charged as context memory and cached
+         * for the process lifetime.  Measuring once, on the first retain of a
+         * device, keeps the exposure to that one window. */
         for (attempt = 0; attempt < 10; attempt++) {
             if (get_used_gpu_memory_by_pid((unsigned int)hostpid, dev,
                                            &after) == NVML_SUCCESS &&
