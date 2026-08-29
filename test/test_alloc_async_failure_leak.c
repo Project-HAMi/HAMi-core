@@ -33,8 +33,14 @@
 //      call, via the fault-injecting dlopen() interposer in
 //      fault_inject_driver.c (see that file for how the substitution works
 //      without shadowing the real driver for anything else).
-//   3. Asserts via cuMemGetInfo that free device memory before and after the
-//      forced-failure allocations is unchanged, i.e. nothing leaked.
+//   3. Asserts, via cuMemPoolGetAttribute(CU_MEMPOOL_ATTR_USED_MEM_CURRENT)
+//      on the specific pool each scenario allocates from, that the pool's
+//      used-memory accounting before and after the forced-failure
+//      allocations is unchanged, i.e. nothing leaked. (Global cuMemGetInfo
+//      free memory is not used for this: cuMemFreeAsync can return an
+//      allocation to its pool while the pool keeps the physical backing
+//      memory reserved, so cuMemGetInfo can show reduced free memory with
+//      no actual leak.)
 //
 // This requires the test binary to run with LD_PRELOAD listing, in order,
 // the fault-injecting shim ahead of libvgpu.so:
@@ -53,6 +59,7 @@
 //   ctest -R alloc_async_failure_leak --output-on-failure
 
 #include <cuda.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -104,14 +111,20 @@ int main(void) {
     CHECK_DRV(cuStreamCreate(&stream, CU_STREAM_NON_BLOCKING));
 
     int failures = 0;
-    size_t free0, free1, total;
+    cuuint64_t used0 = 0, used1 = 0;
 
     /* [A] Force the allocator's internal cuDeviceGetMemPool call (the one
      * add_chunk_async() makes right after cuMemAllocAsync succeeds) to fail
      * on the next call only, then drive the allocation through the real
      * hooked cuMemAllocAsync entry point. */
     printf("[A] cuMemAllocAsync succeeds, allocator's cuDeviceGetMemPool forced to fail\n");
-    CHECK_DRV(cuMemGetInfo(&free0, &total));
+    /* This is the test's own call (not armed with any injected failure yet),
+     * so it reaches the real driver and returns the device's real default
+     * pool -- the same pool add_chunk_async()'s internal, separately-forced
+     * cuDeviceGetMemPool call would have returned. */
+    CUmemoryPool devicePool;
+    CHECK_DRV(cuDeviceGetMemPool(&devicePool, dev));
+    CHECK_DRV(cuMemPoolGetAttribute(devicePool, CU_MEMPOOL_ATTR_USED_MEM_CURRENT, &used0));
     for (int i = 0; i < ITERATIONS; i++) {
         CUdeviceptr d = 0;
         setenv("HAMI_TEST_FAIL_NEXT_GETMEMPOOL", "1", 1);
@@ -136,10 +149,12 @@ int main(void) {
          * regression instead of catching it. */
     }
     CHECK_DRV(cuStreamSynchronize(stream));
-    CHECK_DRV(cuMemGetInfo(&free1, &total));
-    printf("  free before=%zu after=%zu (iterations=%d)\n", free0, free1, ITERATIONS);
-    if (free1 < free0) {
-        fprintf(stderr, "FAIL: %zu bytes not reclaimed (leak reproduced)\n", free0 - free1);
+    CHECK_DRV(cuMemPoolGetAttribute(devicePool, CU_MEMPOOL_ATTR_USED_MEM_CURRENT, &used1));
+    printf("  pool used_mem before=%lu after=%lu (iterations=%d)\n",
+           (uint64_t)used0, (uint64_t)used1, ITERATIONS);
+    if (used1 != used0) {
+        fprintf(stderr, "FAIL: pool used-memory changed by %ld bytes (leak reproduced)\n",
+                (int64_t)used1 - (int64_t)used0);
         failures++;
     }
 
@@ -157,7 +172,7 @@ int main(void) {
     CUmemoryPool pool;
     CHECK_DRV(cuMemPoolCreate(&pool, &props));
 
-    CHECK_DRV(cuMemGetInfo(&free0, &total));
+    CHECK_DRV(cuMemPoolGetAttribute(pool, CU_MEMPOOL_ATTR_USED_MEM_CURRENT, &used0));
     for (int i = 0; i < ITERATIONS; i++) {
         CUdeviceptr d = 0;
         setenv("HAMI_TEST_FAIL_NEXT_POOLATTR", "1", 1);
@@ -176,10 +191,12 @@ int main(void) {
         /* Same reasoning as [A]: no cuMemFreeAsync here on purpose. */
     }
     CHECK_DRV(cuStreamSynchronize(stream));
-    CHECK_DRV(cuMemGetInfo(&free1, &total));
-    printf("  free before=%zu after=%zu (iterations=%d)\n", free0, free1, ITERATIONS);
-    if (free1 < free0) {
-        fprintf(stderr, "FAIL: %zu bytes not reclaimed (leak reproduced)\n", free0 - free1);
+    CHECK_DRV(cuMemPoolGetAttribute(pool, CU_MEMPOOL_ATTR_USED_MEM_CURRENT, &used1));
+    printf("  pool used_mem before=%lu after=%lu (iterations=%d)\n",
+           (uint64_t)used0, (uint64_t)used1, ITERATIONS);
+    if (used1 != used0) {
+        fprintf(stderr, "FAIL: pool used-memory changed by %ld bytes (leak reproduced)\n",
+                (int64_t)used1 - (int64_t)used0);
         failures++;
     }
     cuMemPoolDestroy(pool);
