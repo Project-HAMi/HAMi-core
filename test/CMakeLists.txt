@@ -32,6 +32,24 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_alloc_async_free_wrong_device")
+        # Needs get_gpu_memory_usage() from multiprocess_memory_limit.c linked
+        # directly into the test binary (same reasoning as
+        # test_postinit_owner_death above), on top of the normal CUDA driver
+        # link every allocation test needs. -ffunction-sections/--gc-sections
+        # let the linker drop the parts of multiprocess_memory_limit.c this
+        # test never calls, instead of requiring their own transitive deps
+        # (e.g. cuda_to_nvml_map from multiprocess_utilization_watcher.c).
+        add_executable(${TEST_TARGET_NAME}
+            ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_memory_limit.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT})
     elseif (TEST_SCRIPT MATCHES ".*cu")
@@ -46,6 +64,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         target_link_libraries(${TEST_TARGET_NAME} -ldl)
     else()
+        # test_alloc_async_free_wrong_device also lands here: it needs the
+        # same CUDA driver link as every other allocation test.
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread
             -lnvidia-ml -lcuda -lcudart -L${CUDA_HOME}/lib64)
     endif()
@@ -74,6 +94,17 @@ if (TARGET vgpu)
     set_tests_properties(dlsym_rtld_next_preloaded PROPERTIES
         ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:vgpu>"
         TIMEOUT 10)
+
+    # Needs >= 2 real GPUs to reproduce the cross-device free; the test
+    # itself detects a single-GPU environment and exits with
+    # SKIP_EXIT_CODE (125) instead of failing -- SKIP_RETURN_CODE tells
+    # CTest to report that as skipped rather than passed/failed.
+    add_test(NAME alloc_async_free_wrong_device
+        COMMAND test_alloc_async_free_wrong_device)
+    set_tests_properties(alloc_async_free_wrong_device PROPERTIES
+        ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:vgpu>"
+        SKIP_RETURN_CODE 125
+        TIMEOUT 30)
 endif()
 
 
