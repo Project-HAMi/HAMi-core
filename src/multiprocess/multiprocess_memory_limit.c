@@ -1072,6 +1072,20 @@ void init_proc_slot_withlock() {
     shared_region_t* region = region_info.shared_region;
 
     int proc_num = atomic_load_explicit(&region->proc_num, memory_order_acquire);
+
+    // A full sweep reads /proc/<pid>/stat once per occupied slot, so it costs
+    // O(proc_num) filesystem syscalls while the region lock is held. Running it
+    // on every join makes N processes starting together O(N^2) serialised work.
+    // Reclaiming a slot whose process already died is not needed for the join
+    // itself to be correct: oom_check() sweeps before it reports OOM, which is
+    // where a stale slot actually changes an outcome. So sweep here only when
+    // slots are scarce -- and do it before deciding the table is full, so a
+    // table filled with dead slots is recovered instead of being fatal.
+    if (proc_num >= SHARED_REGION_SWEEP_THRESHOLD) {
+        clear_proc_slot_nolock(1);
+        proc_num = atomic_load_explicit(&region->proc_num, memory_order_acquire);
+    }
+
     if (proc_num >= SHARED_REGION_MAX_PROCESS_NUM) {
         exit_withlock(-1);
     }
@@ -1123,7 +1137,9 @@ void init_proc_slot_withlock() {
         atomic_fetch_add_explicit(&region->proc_num, 1, memory_order_release);
     }
 
-    clear_proc_slot_nolock(1);
+    // Slots that exit cleanup already marked dead carry PID 0, and dropping
+    // those reads no files at all, so that part stays on the join path.
+    clear_proc_slot_nolock(0);
     unlock_shrreg();
 }
 
