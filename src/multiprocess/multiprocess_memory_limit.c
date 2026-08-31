@@ -919,6 +919,7 @@ void lock_shrreg() {
         struct timespec sem_ts;
         get_timespec(SEM_WAIT_TIME, &sem_ts);
 
+        SEQ_POINT_MARK(SEQ_BEFORE_ACQUIRE_SEMLOCK);
         int status = sem_timedwait(&region->sem, &sem_ts);
         SEQ_POINT_MARK(SEQ_ACQUIRE_SEMLOCK_OK);
 
