@@ -135,6 +135,7 @@ uint64_t get_current_device_memory_limit(const int dev);
 int set_current_device_memory_limit(const int dev,size_t newlimit);
 int set_current_device_sm_limit(int dev, int limit);
 int update_host_pid();
+int get_current_host_pid(void);
 int set_host_pid(int hostpid);
 
 uint64_t get_current_device_memory_monitor(const int dev);

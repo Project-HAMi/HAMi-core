@@ -44,7 +44,6 @@ _Static_assert(POSTINIT_FILE_LOCK_OFFSET > (off_t)sizeof(shared_region_t),
 
 int pidfound;
 
-int ctx_activate[32];
 
 static shared_region_info_t region_info = {0, -1, PTHREAD_ONCE_INIT, NULL, 0, NULL};
 static atomic_flag postinit_local_lock = ATOMIC_FLAG_INIT;
@@ -1402,6 +1401,21 @@ int update_host_pid() {
         }
     }
     return 0;
+}
+
+int get_current_host_pid(void) {
+    shrreg_proc_slot_t *slot;
+
+    if (region_info.shared_region == NULL ||
+        region_info.shared_region == MAP_FAILED) {
+        return 0;
+    }
+
+    slot = get_current_proc_slot();
+    if (slot == NULL) {
+        return 0;
+    }
+    return atomic_load_explicit(&slot->hostpid, memory_order_acquire);
 }
 
 int set_host_pid(int hostpid) {

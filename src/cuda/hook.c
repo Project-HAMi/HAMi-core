@@ -36,6 +36,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuDevicePrimaryCtxRetain"},
     {.name = "cuDevicePrimaryCtxSetFlags_v2"},
     {.name = "cuDevicePrimaryCtxRelease_v2"},
+    {.name = "cuDevicePrimaryCtxReset_v2"},
     {.name = "cuCtxGetDevice"},
     {.name = "cuCtxCreate_v2"},
     {.name = "cuCtxCreate_v3"},

@@ -124,6 +124,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxRetain);
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxSetFlags_v2);
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxRelease_v2);
+    DLSYM_HOOK_FUNC(cuDevicePrimaryCtxReset_v2);
     DLSYM_HOOK_FUNC(cuDriverGetVersion);
     DLSYM_HOOK_FUNC(cuDeviceGetTexture1DLinearMaxWidth);
     DLSYM_HOOK_FUNC(cuDeviceSetMemPool);
@@ -846,7 +847,11 @@ void preInit(){
     load_cuda_libraries();
     //nvmlInit();
     ENSURE_INITIALIZED();
-    pthread_atfork(NULL, NULL, childReinitPostInit);
+    if (pthread_atfork(context_accounting_fork_prepare,
+                       context_accounting_fork_parent,
+                       childReinitPostInit) != 0) {
+        LOG_WARN("Failed to register context accounting fork handlers");
+    }
 }
 
 void postInit(){
@@ -879,6 +884,7 @@ void postInit(){
 }
 
 void childReinitPostInit() {
+    context_accounting_fork_child();
     LOG_DEBUG("Reset postInit state after fork");
     post_cuinit_flag = PTHREAD_ONCE_INIT;
     pidfound = 0;
