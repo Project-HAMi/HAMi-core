@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -130,6 +131,27 @@ static void test_failed_remove_is_retried(void) {
     assert(bytes == 0);
     assert(primary_context_record_release(&state, &bytes) == 0);
     assert(bytes == CONTEXT_BYTES);
+}
+
+static void test_implausible_measurement_is_rejected(void) {
+    /* A context measured at about the probed size is trusted. */
+    assert(primary_context_size_is_plausible(CONTEXT_BYTES, CONTEXT_BYTES) == 1);
+    assert(primary_context_size_is_plausible(
+               CONTEXT_BYTES * PRIMARY_CONTEXT_SIZE_PLAUSIBLE_FACTOR,
+               CONTEXT_BYTES) == 1);
+
+    /* A delta beyond that carries another thread's allocation, not context
+     * memory, and must not be cached for the life of the process. */
+    assert(primary_context_size_is_plausible(
+               CONTEXT_BYTES * PRIMARY_CONTEXT_SIZE_PLAUSIBLE_FACTOR + 1,
+               CONTEXT_BYTES) == 0);
+
+    /* Nothing measured, and nothing to compare against. */
+    assert(primary_context_size_is_plausible(0, CONTEXT_BYTES) == 0);
+    assert(primary_context_size_is_plausible(CONTEXT_BYTES, 0) == 1);
+
+    /* A probed size near the top of the range must not overflow the bound. */
+    assert(primary_context_size_is_plausible(CONTEXT_BYTES, SIZE_MAX) == 1);
 }
 
 static void test_rejects_invalid_calls(void) {
@@ -268,6 +290,7 @@ int main(void) {
     test_rollback_rejects_mismatched_charge();
     test_restore_is_ignored_while_retained();
     test_failed_charge_keeps_the_retain();
+    test_implausible_measurement_is_rejected();
     test_nonzero_device_accounting_is_isolated();
     test_forked_child_resets_private_accounting();
     puts("context accounting tests passed");

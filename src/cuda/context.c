@@ -125,11 +125,9 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
         int attempt;
 
         /* The delta is the process's own device memory across the retain, the
-         * same method set_task_pid() uses.  context_device_locks[dev] does not
-         * exclude cuMemAlloc, so an allocation by another thread of this
-         * process inside the window is charged as context memory and cached
-         * for the process lifetime.  Measuring once, on the first retain of a
-         * device, keeps the exposure to that one window. */
+         * same method set_task_pid() uses.  This window is not exclusive
+         * against cuMemAlloc, so the result is checked below before it is
+         * trusted. */
         for (attempt = 0; attempt < 10; attempt++) {
             if (get_used_gpu_memory_by_pid((unsigned int)hostpid, dev,
                                            &after) == NVML_SUCCESS &&
@@ -140,6 +138,16 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
             usleep(1000);
         }
     }
+    if (measured_charge > 0 &&
+        !primary_context_size_is_plausible(measured_charge, context_size)) {
+        /* Another thread allocated inside the window.  Caching this would
+         * overcharge the device for the life of the process, so discard it and
+         * let a later retain measure again. */
+        LOG_WARN("Discarding an implausible primary context measurement on "
+                 "device %d: %lu against a probed %lu",
+                 dev, measured_charge, context_size);
+        measured_charge = 0;
+    }
     pthread_mutex_lock(&context_accounting_lock);
     if (measured_charge > 0) {
         device_context_size[dev] = measured_charge;
@@ -147,9 +155,9 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
         LOG_INFO("Measured primary context size lazily: "
                  "dev=%d size=%lu", dev, charge);
     } else if (charge == 0 && context_size > 0) {
-        /* Measurement failed or was skipped.  Charge the probed size, as main
-         * does on every device.  Not cached in device_context_size, so a later
-         * fresh retain can still measure this device for real. */
+        /* Not measured, or the measurement was discarded.  Charge the probed
+         * size, as main does on every device.  Not cached in
+         * device_context_size, so a later retain can still measure for real. */
         charge = context_size;
         LOG_INFO("Primary context size unmeasured on device %d; charging the "
                  "probed size %lu", dev, charge);

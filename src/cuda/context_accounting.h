@@ -34,6 +34,15 @@ int primary_context_rollback_retain(primary_context_accounting_t *state,
 void primary_context_restore_charge(primary_context_accounting_t *state,
                                     size_t context_bytes);
 
+/*
+ * A primary context costs about the same on one device as on another, so the
+ * size the host PID probe recorded bounds a plausible measurement.  The retain
+ * window is not exclusive against cuMemAlloc, so a delta far above that bound
+ * is another thread's allocation rather than context memory.
+ */
+#define PRIMARY_CONTEXT_SIZE_PLAUSIBLE_FACTOR 4
+int primary_context_size_is_plausible(size_t measured, size_t probed);
+
 /* Clear process-local accounting inherited across fork(). */
 void primary_context_accounting_reset(primary_context_accounting_t *states,
                                       size_t state_count);

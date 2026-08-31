@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <stdint.h>
 
 static int record_retain(primary_context_accounting_t *state,
                          size_t context_bytes, size_t *bytes_to_add,
@@ -38,6 +39,20 @@ int primary_context_record_accounted_retain(
     primary_context_accounting_t *state, size_t context_bytes,
     size_t *bytes_to_add) {
     return record_retain(state, context_bytes, bytes_to_add, 1);
+}
+
+int primary_context_size_is_plausible(size_t measured, size_t probed) {
+    if (measured == 0) {
+        return 0;
+    }
+    if (probed == 0) {
+        /* No probed size to compare against, so nothing to reject on. */
+        return 1;
+    }
+    if (probed > SIZE_MAX / PRIMARY_CONTEXT_SIZE_PLAUSIBLE_FACTOR) {
+        return 1;
+    }
+    return measured <= probed * PRIMARY_CONTEXT_SIZE_PLAUSIBLE_FACTOR;
 }
 
 int primary_context_record_release(primary_context_accounting_t *state,
