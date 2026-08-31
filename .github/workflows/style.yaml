@@ -13,4 +13,4 @@ jobs:
     - uses: reviewdog/action-cpplint@master
       with:
         github_token: ${{ secrets.github_token }}
-        args: --linelength=120
+        flags: --linelength=120 --extensions=h,hpp,c,cpp,cc,cu,hh,ipp
