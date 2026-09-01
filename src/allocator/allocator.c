@@ -184,7 +184,10 @@ int remove_chunk(allocated_list *a_list, CUdeviceptr dptr) {
     CUdevice t_dev;
 
     if (a_list->length == 0) {
-        return -1;
+        /* Nothing tracked here, so the pointer was not allocated through this
+         * list. Forward the free to the real driver rather than returning -1
+         * (see the not-found path below). */
+        return cuMemoryFree(dptr);
     }
 
     pthread_mutex_lock(&mutex);
@@ -206,7 +209,12 @@ int remove_chunk(allocated_list *a_list, CUdeviceptr dptr) {
     }
 
     pthread_mutex_unlock(&mutex);
-    return -1;
+    /* Not tracked in this list (e.g. a stream-ordered allocation reaching the
+     * synchronous free path): forward the free to the real driver instead of
+     * returning -1, which leaves the allocation live and surfaces to the caller
+     * as an unrecognized CUresult. Mirrors the not-found path in
+     * remove_chunk_async. */
+    return cuMemoryFree(dptr);
 }
 
 int remove_chunk_only(CUdeviceptr dptr) {
