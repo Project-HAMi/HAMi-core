@@ -39,8 +39,7 @@ extern size_t context_size;
 /* This is the symbol search function */
 fp_dlsym real_dlsym = NULL;
 
-FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
-    LOG_DEBUG("into dlsym %s",symbol);
+static void initialize_dlsym(void) {
     if (real_dlsym == NULL) {
         const char* glibc_versions[] = {
                 "GLIBC_2.2.5",  // for amd64
@@ -59,24 +58,47 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
                 break;
             }
         }
-        char *path_search=getenv("CUDA_REDIRECT");
-        if ((path_search!=NULL) && (strlen(path_search)>0)){
-            vgpulib = dlopen(path_search,RTLD_LAZY);
-        }else{
-            vgpulib = dlopen("/usr/local/vgpu/libvgpu.so",RTLD_LAZY);
-        }
         if (real_dlsym == NULL) {
             LOG_ERROR("real dlsym not found");
             void *libc_handle = dlopen("libc.so.6", RTLD_LAZY);
             if (libc_handle) {
-                real_dlsym = dlsym(libc_handle, "dlsym");
+                for (int i = 0; glibc_versions[i] != NULL; i++) {
+                    real_dlsym = dlvsym(libc_handle, "dlsym",
+                                        glibc_versions[i]);
+                    if (real_dlsym != NULL) {
+                        break;
+                    }
+                }
             }
             if (real_dlsym == NULL)
                 LOG_ERROR("real dlsym not found after trying libc.so.6");
         }
     }
-    if (handle == RTLD_NEXT) {
-        return real_dlsym(RTLD_NEXT, symbol);
+
+    if (vgpulib == NULL) {
+        char *path_search = getenv("CUDA_REDIRECT");
+        if (path_search != NULL && strlen(path_search) > 0) {
+            vgpulib = dlopen(path_search, RTLD_LAZY);
+        } else {
+            vgpulib = dlopen("/usr/local/vgpu/libvgpu.so", RTLD_LAZY);
+        }
+    }
+}
+
+/* Called by dlsym_entry.S before its caller-preserving RTLD_NEXT tail jump. */
+__attribute__((visibility("hidden")))
+fp_dlsym libvgpu_get_real_dlsym(void) {
+    initialize_dlsym();
+    return real_dlsym;
+}
+
+/* RTLD_NEXT is handled in dlsym_entry.S on supported architectures. */
+__attribute__((visibility("hidden")))
+void* libvgpu_dlsym_dispatch(void* handle, const char* symbol) {
+    LOG_DEBUG("into dlsym %s", symbol);
+    initialize_dlsym();
+    if (real_dlsym == NULL) {
+        return NULL;
     }
     if (symbol[0] == 'c' && symbol[1] == 'u') {
         //Compatible with cuda 12.8+ fix
@@ -97,6 +119,17 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
 #endif
     return real_dlsym(handle, symbol);
 }
+
+#if !defined(__x86_64__) && !defined(__aarch64__)
+/* Preserve the existing fallback on architectures without an assembly entry. */
+FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
+    if (handle == RTLD_NEXT) {
+        fp_dlsym next_dlsym = libvgpu_get_real_dlsym();
+        return next_dlsym == NULL ? NULL : next_dlsym(handle, symbol);
+    }
+    return libvgpu_dlsym_dispatch(handle, symbol);
+}
+#endif
 
 void* __dlsym_hook_section(void* handle, const char* symbol) {
     int it;

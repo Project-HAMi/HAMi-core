@@ -8,6 +8,11 @@ set(TEST_TARGET_NAMES_LIST)
 
 
 file(GLOB_RECURSE TEST_SCRIPTS "${TEST_CPP_SOURCE_DIR}/*.c" "${TEST_CPP_SOURCE_DIR}/*.cu")
+set(DLSYM_CALLER_SOURCE
+    "${TEST_CPP_SOURCE_DIR}/dlsym_rtld_next_caller.c")
+list(REMOVE_ITEM TEST_SCRIPTS ${DLSYM_CALLER_SOURCE})
+add_library(dlsym_rtld_next_caller SHARED ${DLSYM_CALLER_SOURCE})
+target_link_libraries(dlsym_rtld_next_caller -ldl)
 foreach(TEST_SCRIPT ${TEST_SCRIPTS}) 
     file(RELATIVE_PATH RELATIVE_TEST_PATH ${TEST_CPP_SOURCE_DIR} ${TEST_SCRIPT})
     get_filename_component(TEST_TARGET_DIR ${RELATIVE_TEST_PATH} DIRECTORY)
@@ -64,7 +69,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
-        target_link_libraries(${TEST_TARGET_NAME} -ldl)
+        target_link_libraries(${TEST_TARGET_NAME}
+            -ldl dlsym_rtld_next_caller)
     elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     else()
