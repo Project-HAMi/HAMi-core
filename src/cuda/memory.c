@@ -145,12 +145,18 @@ CUresult cuMemAllocManaged(CUdeviceptr* dptr, size_t bytesize, unsigned int flag
     ENSURE_RUNNING();
     CUdevice dev;
     CHECK_DRV_API(cuCtxGetDevice(&dev));
-    if (oom_check(dev,bytesize)){
+    if (reserve_device_memory(dev, bytesize) != 0) {
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemAllocManaged, dptr, bytesize, flags);
     if (res == CUDA_SUCCESS) {
-        add_chunk_only(*dptr, bytesize, dev);
+        if (add_chunk_only(*dptr, bytesize, dev) != 0) {
+            CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFree_v2, *dptr);
+            release_device_memory(dev, bytesize);
+            return CUDA_ERROR_OUT_OF_MEMORY;
+        }
+    } else {
+        release_device_memory(dev, bytesize);
     }
     return res;
 }
@@ -161,17 +167,40 @@ CUresult cuMemAllocPitch_v2(CUdeviceptr* dptr, size_t* pPitch, size_t WidthInByt
     size_t guess_pitch = (ElementSizeBytes == 0 || WidthInBytes == 0) ? 0 :
         (((WidthInBytes - 1) / ElementSizeBytes) + 1) * ElementSizeBytes;
     size_t bytesize = guess_pitch * Height;
+    size_t actual;
     ENSURE_RUNNING();
     CUdevice dev;
     CHECK_DRV_API(cuCtxGetDevice(&dev));
-    if (oom_check(dev,bytesize)){
+    if (reserve_device_memory(dev, bytesize) != 0) {
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemAllocPitch_v2, dptr, pPitch, WidthInBytes, Height, ElementSizeBytes);
-    if (res == CUDA_SUCCESS) {
-        add_chunk_only(*dptr, bytesize, dev);
+    if (res != CUDA_SUCCESS) {
+        release_device_memory(dev, bytesize);
+        return res;
     }
-    return res;
+    /* Driver pitch may exceed guess_pitch due to alignment; account for real size. */
+    if (Height != 0 && pPitch != NULL && *pPitch > SIZE_MAX / Height) {
+        CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFree_v2, *dptr);
+        release_device_memory(dev, bytesize);
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+    actual = (pPitch != NULL) ? (*pPitch * Height) : bytesize;
+    if (actual > bytesize) {
+        if (reserve_device_memory(dev, actual - bytesize) != 0) {
+            CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFree_v2, *dptr);
+            release_device_memory(dev, bytesize);
+            return CUDA_ERROR_OUT_OF_MEMORY;
+        }
+    } else if (actual < bytesize) {
+        release_device_memory(dev, bytesize - actual);
+    }
+    if (add_chunk_only(*dptr, actual, dev) != 0) {
+        CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFree_v2, *dptr);
+        release_device_memory(dev, actual);
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+    return CUDA_SUCCESS;
 }
 
 CUresult cuMemFree_v2(CUdeviceptr dptr) {
@@ -595,13 +624,21 @@ CUresult cuMemCreate ( CUmemGenericAllocationHandle* handle, size_t size, const 
     if (do_oom_check && cuCtxGetDevice(&dev) != CUDA_SUCCESS) {
         dev = prop->location.id;
     }
-    if (do_oom_check && oom_check(dev, size)) {
+    if (do_oom_check && reserve_device_memory(dev, size) != 0) {
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,
         cuMemCreate, handle, size, prop, flags);
-    if (do_oom_check && res == CUDA_SUCCESS) {
-        add_chunk_only(*handle, size, dev);
+    if (do_oom_check) {
+        if (res == CUDA_SUCCESS) {
+            if (add_chunk_only(*handle, size, dev) != 0) {
+                CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemRelease, *handle);
+                release_device_memory(dev, size);
+                return CUDA_ERROR_OUT_OF_MEMORY;
+            }
+        } else {
+            release_device_memory(dev, size);
+        }
     }
     return res;
 }
