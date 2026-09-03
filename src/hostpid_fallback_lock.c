@@ -117,6 +117,271 @@ static int sleep_before_retry(unsigned int delay_us,
     return 0;
 }
 
+static int validate_directory_metadata(const struct stat *directory_stat,
+                                       uid_t trusted_owner) {
+    mode_t writable = S_IWGRP | S_IWOTH;
+
+    if (!S_ISDIR(directory_stat->st_mode) ||
+        directory_stat->st_uid != trusted_owner) {
+        errno = EACCES;
+        return -1;
+    }
+    if ((directory_stat->st_mode & writable) != 0 &&
+        (directory_stat->st_mode & S_ISVTX) == 0) {
+        errno = EACCES;
+        return -1;
+    }
+    return 0;
+}
+
+static int validate_supported_filesystem(int fd);
+
+#ifdef __linux__
+static int validate_path_component(int fd,
+                                   const struct stat *component_stat,
+                                   uid_t trusted_owner) {
+    if (validate_directory_metadata(component_stat, trusted_owner) != 0) {
+        return -1;
+    }
+    return validate_supported_filesystem(fd);
+}
+#endif
+
+static int open_directory_without_symlinks(const char *path,
+                                           uid_t trusted_owner,
+                                           int validate_components) {
+#ifdef __linux__
+    const char *cursor;
+    int directory_fd;
+
+    if (path == NULL || path[0] != '/') {
+        errno = EINVAL;
+        return -1;
+    }
+    directory_fd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (directory_fd < 0) {
+        return -1;
+    }
+    if (validate_components) {
+        struct stat root_stat;
+
+        if (fstat(directory_fd, &root_stat) != 0 ||
+            validate_path_component(directory_fd, &root_stat,
+                                    trusted_owner) != 0) {
+            int saved_errno = errno;
+
+            close(directory_fd);
+            errno = saved_errno;
+            return -1;
+        }
+    }
+    cursor = path;
+    while (*cursor == '/') {
+        cursor++;
+    }
+    while (*cursor != '\0') {
+        char component[NAME_MAX + 1U];
+        const char *end = cursor;
+        size_t length;
+        int next_fd;
+
+        while (*end != '\0' && *end != '/') {
+            end++;
+        }
+        length = (size_t)(end - cursor);
+        if (length == 0U || length > NAME_MAX) {
+            close(directory_fd);
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+        memcpy(component, cursor, length);
+        component[length] = '\0';
+        if (strcmp(component, ".") == 0 || strcmp(component, "..") == 0) {
+            close(directory_fd);
+            errno = EINVAL;
+            return -1;
+        }
+        next_fd = openat(directory_fd, component,
+                         O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        if (next_fd < 0) {
+            int saved_errno = errno;
+
+            close(directory_fd);
+            errno = saved_errno;
+            return -1;
+        }
+        if (validate_components) {
+            struct stat component_stat;
+
+            if (fstat(next_fd, &component_stat) != 0 ||
+                validate_path_component(next_fd, &component_stat,
+                                        trusted_owner) != 0) {
+                int saved_errno = errno;
+
+                close(next_fd);
+                close(directory_fd);
+                errno = saved_errno;
+                return -1;
+            }
+        }
+        close(directory_fd);
+        directory_fd = next_fd;
+        cursor = end;
+        while (*cursor == '/') {
+            cursor++;
+        }
+    }
+    return directory_fd;
+#else
+    (void)trusted_owner;
+    (void)validate_components;
+    return open(path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+#endif
+}
+
+#ifdef __linux__
+static int filesystem_type_supported(uint64_t filesystem_type) {
+#ifdef EXT4_SUPER_MAGIC
+    if (filesystem_type == (uint64_t)EXT4_SUPER_MAGIC) {
+        return 1;
+    }
+#endif
+#ifdef XFS_SUPER_MAGIC
+    if (filesystem_type == (uint64_t)XFS_SUPER_MAGIC) {
+        return 1;
+    }
+#endif
+#ifdef TMPFS_MAGIC
+    if (filesystem_type == (uint64_t)TMPFS_MAGIC) {
+        return 1;
+    }
+#endif
+#ifdef BTRFS_SUPER_MAGIC
+    if (filesystem_type == (uint64_t)BTRFS_SUPER_MAGIC) {
+        return 1;
+    }
+#endif
+#ifdef F2FS_SUPER_MAGIC
+    if (filesystem_type == (uint64_t)F2FS_SUPER_MAGIC) {
+        return 1;
+    }
+#endif
+#ifdef OVERLAYFS_SUPER_MAGIC
+    if (filesystem_type == (uint64_t)OVERLAYFS_SUPER_MAGIC) {
+        return 1;
+    }
+#endif
+#ifdef RAMFS_MAGIC
+    if (filesystem_type == (uint64_t)RAMFS_MAGIC) {
+        return 1;
+    }
+#endif
+#ifdef ZFS_SUPER_MAGIC
+    if (filesystem_type == (uint64_t)ZFS_SUPER_MAGIC) {
+        return 1;
+    }
+#endif
+    return 0;
+}
+#endif
+
+static int validate_supported_filesystem(int fd) {
+#ifdef __linux__
+    struct statfs filesystem_stat;
+
+    if (fstatfs(fd, &filesystem_stat) != 0) {
+        return -1;
+    }
+    if (filesystem_type_supported((uint64_t)filesystem_stat.f_type)) {
+        return 0;
+    }
+    errno = EOPNOTSUPP;
+    return -1;
+#else
+    (void)fd;
+    return 0;
+#endif
+}
+
+static int validate_readonly_filesystem(int fd) {
+    struct statvfs filesystem_stat;
+
+    if (fstatvfs(fd, &filesystem_stat) != 0) {
+        return -1;
+    }
+    if ((filesystem_stat.f_flag & ST_RDONLY) == 0) {
+        errno = EACCES;
+        return -1;
+    }
+    return validate_supported_filesystem(fd);
+}
+
+static int validate_lock_object(int fd, const char *path,
+                                uid_t trusted_owner,
+                                const struct stat *opened_stat,
+                                int require_readonly) {
+    struct stat current_stat;
+    struct stat descriptor_stat;
+    int current_fd;
+
+    if (validate_directory_metadata(opened_stat, trusted_owner) != 0) {
+        return -1;
+    }
+    if (fstat(fd, &descriptor_stat) != 0) {
+        return -1;
+    }
+    if (descriptor_stat.st_dev != opened_stat->st_dev ||
+        descriptor_stat.st_ino != opened_stat->st_ino) {
+        errno = ESTALE;
+        return -1;
+    }
+    if (validate_directory_metadata(&descriptor_stat, trusted_owner) != 0) {
+        return -1;
+    }
+    if (fcntl(fd, F_GETFD) < 0) {
+        return -1;
+    }
+    current_fd = open_directory_without_symlinks(path, trusted_owner,
+                                                  require_readonly);
+    if (current_fd < 0) {
+        return -1;
+    }
+    if (fstat(current_fd, &current_stat) != 0) {
+        int saved_errno = errno;
+
+        close(current_fd);
+        errno = saved_errno;
+        return -1;
+    }
+    if (current_stat.st_dev != opened_stat->st_dev ||
+        current_stat.st_ino != opened_stat->st_ino) {
+        close(current_fd);
+        errno = ESTALE;
+        return -1;
+    }
+    if (validate_directory_metadata(&current_stat, trusted_owner) != 0) {
+        int saved_errno = errno;
+
+        close(current_fd);
+        errno = saved_errno;
+        return -1;
+    }
+    if (require_readonly) {
+        if (validate_readonly_filesystem(fd) != 0 ||
+            validate_readonly_filesystem(current_fd) != 0) {
+            int saved_errno = errno;
+
+            close(current_fd);
+            errno = saved_errno;
+            return -1;
+        }
+    }
+    if (close(current_fd) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
 static void discard_active_fd(int fd) {
     int expected = fd;
 
@@ -129,12 +394,12 @@ static void discard_active_fd(int fd) {
 static int acquire_at_until(const char *path, uid_t trusted_owner,
                             const struct timespec *deadline,
                             int require_readonly) {
+    struct stat opened_stat;
     unsigned int retry_us = HOSTPID_FALLBACK_LOCK_INITIAL_RETRY_US;
     int expected = -1;
+    int descriptor_flags;
     int fd;
 
-    (void)trusted_owner;
-    (void)require_readonly;
     if (path == NULL || path[0] != '/' || deadline == NULL) {
         errno = EINVAL;
         return -1;
@@ -142,8 +407,34 @@ static int acquire_at_until(const char *path, uid_t trusted_owner,
     if (deadline_expired(deadline) != 0) {
         return -1;
     }
-    fd = open(path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    fd = open_directory_without_symlinks(path, trusted_owner,
+                                         require_readonly);
     if (fd < 0) {
+        return -1;
+    }
+    descriptor_flags = fcntl(fd, F_GETFD);
+    if (descriptor_flags < 0 ||
+        fcntl(fd, F_SETFD, descriptor_flags | FD_CLOEXEC) != 0) {
+        int saved_errno = errno;
+
+        close(fd);
+        errno = saved_errno;
+        return -1;
+    }
+    if (fstat(fd, &opened_stat) != 0) {
+        int saved_errno = errno;
+
+        close(fd);
+        errno = saved_errno;
+        return -1;
+    }
+    if (validate_lock_object(fd, path, trusted_owner, &opened_stat,
+                             require_readonly) != 0 ||
+        deadline_expired(deadline) != 0) {
+        int saved_errno = errno;
+
+        close(fd);
+        errno = saved_errno;
         return -1;
     }
     if (!atomic_compare_exchange_strong_explicit(
