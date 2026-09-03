@@ -643,6 +643,195 @@ static void test_path_trust(const char *path) {
 #endif
 }
 
+static void test_permission_change_while_waiting(const char *path) {
+    int failures_before = failures;
+    int ready[2];
+    pid_t child;
+    char byte;
+
+    check(hostpid_fallback_lock_acquire_at(path, getuid(), 500) == 0,
+          "permission change holder acquire");
+    if (pipe(ready) != 0) {
+        check(0, "permission change ready pipe");
+        hostpid_fallback_lock_release();
+        return;
+    }
+    waiter_ready_fd = ready[1];
+    hostpid_fallback_lock_set_before_flock_hook(
+        signal_waiter_ready);
+    child = fork();
+    check(child >= 0, "permission change waiter fork");
+    if (child == 0) {
+        close(ready[0]);
+        hostpid_fallback_lock_after_fork();
+        if (hostpid_fallback_lock_acquire_at(path, getuid(), 1000) == 0) {
+            hostpid_fallback_lock_release();
+            _exit(2);
+        }
+        _exit(errno == EACCES ? 0 : 3);
+    }
+    if (child > 0) {
+        close(ready[1]);
+        check(read(ready[0], &byte, 1) == 1,
+              "permission change waiter passed initial validation");
+        close(ready[0]);
+        hostpid_fallback_lock_set_before_flock_hook(NULL);
+        check(chmod(path, 0777) == 0,
+              "permission change makes lock object untrusted");
+        check(hostpid_fallback_lock_release() == 0,
+              "permission change holder release");
+        check(wait_for_child(child, 0) == 0,
+              "permission change is rejected after lock acquisition");
+        check(chmod(path, 0700) == 0,
+              "permission change restores lock object");
+    } else {
+        close(ready[0]);
+        close(ready[1]);
+        hostpid_fallback_lock_set_before_flock_hook(NULL);
+        hostpid_fallback_lock_release();
+    }
+    if (failures == failures_before) {
+        puts("permission_change_rejected=passed");
+    }
+}
+
+static void test_path_replacement(const char *path) {
+    char old_path[4096];
+    int failures_before = failures;
+    int reset_ready[2];
+    pid_t child;
+    char byte;
+
+    snprintf(old_path, sizeof(old_path), "%s.old", path);
+    check(hostpid_fallback_lock_acquire_at(path, getuid(), 500) == 0,
+          "replacement holder acquire");
+    if (pipe(reset_ready) != 0) {
+        check(0, "replacement reset pipe");
+        hostpid_fallback_lock_release();
+        return;
+    }
+    waiter_ready_fd = reset_ready[1];
+    hostpid_fallback_lock_set_before_flock_hook(signal_waiter_ready);
+    child = fork();
+    check(child >= 0, "replacement contender fork");
+    if (child == 0) {
+        close(reset_ready[0]);
+        hostpid_fallback_lock_after_fork();
+        if (hostpid_fallback_lock_acquire_at(path, getuid(), 1000) == 0) {
+            hostpid_fallback_lock_release();
+            _exit(2);
+        }
+        _exit(errno == ESTALE ? 0 : 3);
+    }
+    if (child > 0) {
+        close(reset_ready[1]);
+        check(read(reset_ready[0], &byte, 1) == 1,
+              "replacement waiter passed initial validation");
+        close(reset_ready[0]);
+        hostpid_fallback_lock_set_before_flock_hook(NULL);
+        check(rename(path, old_path) == 0, "replace original path");
+        check(mkdir(path, 0700) == 0, "create replacement path");
+        check(hostpid_fallback_lock_release() == 0,
+              "release replaced original object");
+        check(wait_for_child(child, 0) == 0,
+              "replacement is detected after acquisition");
+        rmdir(path);
+        check(rename(old_path, path) == 0, "restore original path");
+    } else {
+        close(reset_ready[0]);
+        close(reset_ready[1]);
+        hostpid_fallback_lock_set_before_flock_hook(NULL);
+        hostpid_fallback_lock_release();
+    }
+    if (failures == failures_before) {
+        puts("path_replacement_rejected=passed");
+    }
+}
+
+static void test_ancestor_change_while_waiting(void) {
+#ifdef __linux__
+    char fixture[] = "/tmp/hami-hostpid-ancestor-change.XXXXXX";
+    char lock_path[PATH_MAX];
+    char original_parent[PATH_MAX];
+    char parent[PATH_MAX];
+    int failures_before = failures;
+    int ready[2];
+    pid_t child;
+    char byte;
+    char *fixture_root;
+
+    fixture_root = mkdtemp(fixture);
+    check(fixture_root != NULL, "ancestor change fixture root");
+    if (fixture_root == NULL) {
+        return;
+    }
+    check(join_path(parent, sizeof(parent), fixture_root, "/parent") == 0,
+          "ancestor change parent path");
+    check(join_path(original_parent, sizeof(original_parent), fixture_root,
+                    "/parent-original") == 0,
+          "ancestor change original parent path");
+    check(join_path(lock_path, sizeof(lock_path), parent, "/lock") == 0,
+          "ancestor change lock path");
+    check(mkdir(parent, 0700) == 0, "ancestor change parent");
+    check(mkdir(lock_path, 0700) == 0, "ancestor change lock object");
+    check(hostpid_fallback_lock_acquire_at(lock_path, getuid(), 500) == 0,
+          "ancestor change holder acquire");
+    if (pipe(ready) != 0) {
+        check(0, "ancestor change ready pipe");
+        hostpid_fallback_lock_release();
+        rmdir(lock_path);
+        rmdir(parent);
+        rmdir(fixture_root);
+        return;
+    }
+    waiter_ready_fd = ready[1];
+    hostpid_fallback_lock_set_before_flock_hook(signal_waiter_ready);
+    child = fork();
+    check(child >= 0, "ancestor change waiter fork");
+    if (child == 0) {
+        close(ready[0]);
+        hostpid_fallback_lock_after_fork();
+        if (hostpid_fallback_lock_acquire_at(lock_path, getuid(), 1000) ==
+            0) {
+            hostpid_fallback_lock_release();
+            _exit(2);
+        }
+        _exit(errno == ELOOP || errno == ENOTDIR ? 0 : 3);
+    }
+    if (child > 0) {
+        close(ready[1]);
+        check(read(ready[0], &byte, 1) == 1,
+              "ancestor change waiter passed initial validation");
+        close(ready[0]);
+        hostpid_fallback_lock_set_before_flock_hook(NULL);
+        check(rename(parent, original_parent) == 0,
+              "ancestor change moves trusted parent");
+        check(symlink(original_parent, parent) == 0,
+              "ancestor change installs symlink parent");
+        check(hostpid_fallback_lock_release() == 0,
+              "ancestor change holder release");
+        check(wait_for_child(child, 0) == 0,
+              "ancestor change is rejected after lock acquisition");
+        check(unlink(parent) == 0, "ancestor change removes symlink parent");
+        check(rename(original_parent, parent) == 0,
+              "ancestor change restores trusted parent");
+    } else {
+        close(ready[0]);
+        close(ready[1]);
+        hostpid_fallback_lock_set_before_flock_hook(NULL);
+        hostpid_fallback_lock_release();
+    }
+    rmdir(lock_path);
+    rmdir(parent);
+    rmdir(fixture_root);
+    if (failures == failures_before) {
+        puts("ancestor_change_rejected=passed");
+    }
+#else
+    puts("ancestor change test skipped: Linux required");
+#endif
+}
+
 int main(int argc, char **argv) {
     char directory[] = "/tmp/hami-hostpid-global-lock.XXXXXX";
     char *path;
@@ -682,6 +871,9 @@ int main(int argc, char **argv) {
     test_owner_death(path);
     test_fork_cleanup(path);
     test_exec_cleanup(path, argv[0]);
+    test_permission_change_while_waiting(path);
+    test_path_replacement(path);
+    test_ancestor_change_while_waiting();
 
     if (hostpid_fallback_lock_active_fd() >= 0) {
         hostpid_fallback_lock_release();
