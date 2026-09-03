@@ -54,7 +54,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         # GPU-free: builds the production lock into the test.
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_fallback_lock.c)
-        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE _GNU_SOURCE)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE HOSTPID_FALLBACK_LOCK_TESTING)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT})
     elseif (TEST_SCRIPT MATCHES ".*cu")

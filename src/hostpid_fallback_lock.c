@@ -22,6 +22,15 @@
 
 static _Atomic int active_lock_fd = -1;
 
+#ifdef HOSTPID_FALLBACK_LOCK_TESTING
+static hostpid_fallback_lock_test_hook before_flock_hook;
+
+void hostpid_fallback_lock_set_before_flock_hook(
+    hostpid_fallback_lock_test_hook hook) {
+    before_flock_hook = hook;
+}
+#endif
+
 static int monotonic_now(struct timespec *now) {
     if (clock_gettime(CLOCK_MONOTONIC, now) != 0) {
         return -1;
@@ -134,9 +143,9 @@ static int validate_directory_metadata(const struct stat *directory_stat,
     return 0;
 }
 
+#ifdef __linux__
 static int validate_supported_filesystem(int fd);
 
-#ifdef __linux__
 static int validate_path_component(int fd,
                                    const struct stat *component_stat,
                                    uid_t trusted_owner) {
@@ -444,6 +453,11 @@ static int acquire_at_until(const char *path, uid_t trusted_owner,
         errno = EDEADLK;
         return -1;
     }
+#ifdef HOSTPID_FALLBACK_LOCK_TESTING
+    if (before_flock_hook != NULL) {
+        before_flock_hook();
+    }
+#endif
     for (;;) {
         int expired;
 
@@ -485,6 +499,17 @@ static int acquire_at_until(const char *path, uid_t trusted_owner,
         } else {
             retry_us = HOSTPID_FALLBACK_LOCK_MAX_RETRY_US;
         }
+    }
+
+    if (validate_lock_object(fd, path, trusted_owner, &opened_stat,
+                             require_readonly) != 0 ||
+        deadline_expired(deadline) != 0) {
+        int saved_errno = errno;
+
+        flock(fd, LOCK_UN);
+        discard_active_fd(fd);
+        errno = saved_errno;
+        return -1;
     }
     return 0;
 }

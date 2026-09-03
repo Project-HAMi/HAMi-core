@@ -9,6 +9,12 @@
 #define HOSTPID_FALLBACK_LOCK_TIMEOUT_MS 30000U
 #endif
 
+#ifdef HOSTPID_FALLBACK_LOCK_TESTING
+typedef void (*hostpid_fallback_lock_test_hook)(void);
+void hostpid_fallback_lock_set_before_flock_hook(
+    hostpid_fallback_lock_test_hook hook);
+#endif
+
 int hostpid_fallback_lock_acquire(void);
 int hostpid_fallback_lock_deadline_after_ms(struct timespec *deadline,
                                             unsigned int timeout_ms);
