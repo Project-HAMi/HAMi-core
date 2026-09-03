@@ -50,6 +50,11 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_hostpid_fallback_lock")
+        # GPU-free: builds the production lock into the test.
+        add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_fallback_lock.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE _GNU_SOURCE)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT})
     elseif (TEST_SCRIPT MATCHES ".*cu")
@@ -61,6 +66,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     list(APPEND TEST_TARGET_NAMES_LIST ${TEST_TARGET_NAME})
     if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_fallback_lock"
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
@@ -103,6 +109,10 @@ set_tests_properties(nvml_v2_signatures PROPERTIES
 add_test(NAME pid_discovery
     COMMAND test_pid_discovery)
 set_tests_properties(pid_discovery PROPERTIES TIMEOUT 10)
+
+add_test(NAME hostpid_fallback_lock
+    COMMAND test_hostpid_fallback_lock)
+set_tests_properties(hostpid_fallback_lock PROPERTIES TIMEOUT 30)
 if (TARGET vgpu)
     add_test(NAME dlsym_rtld_next_preloaded
         COMMAND test_dlsym_rtld_next)
