@@ -545,6 +545,104 @@ static void test_exec_cleanup(const char *path, const char *program) {
     check(hostpid_fallback_lock_release() == 0, "exec holder release");
 }
 
+static void test_path_trust(const char *path) {
+    char file_path[] = "/tmp/hami-hostpid-lock-file.XXXXXX";
+    char link_path[] = "/tmp/hami-hostpid-lock-link.XXXXXX";
+    char ancestor_directory[] = "/tmp/hami-hostpid-lock-ancestor.XXXXXX";
+    char ancestor_link[PATH_MAX];
+    char ancestor_nested_target[PATH_MAX];
+    char ancestor_target[PATH_MAX];
+    char missing_path[] = "/tmp/hami-hostpid-lock-missing.XXXXXX";
+    char nested_path[PATH_MAX];
+    int file_fd;
+
+    errno = 0;
+    check(hostpid_fallback_lock_acquire_at("relative", getuid(), 50) == -1 &&
+              errno == EINVAL,
+          "relative path is rejected");
+
+    file_fd = mkstemp(missing_path);
+    check(file_fd >= 0, "missing path fixture name");
+    if (file_fd >= 0) {
+        close(file_fd);
+        unlink(missing_path);
+        errno = 0;
+        check(hostpid_fallback_lock_acquire_at(missing_path, getuid(), 50) ==
+                  -1 && errno == ENOENT,
+              "missing path is rejected");
+    }
+
+    file_fd = mkstemp(file_path);
+    check(file_fd >= 0, "regular file fixture");
+    if (file_fd >= 0) {
+        close(file_fd);
+        check(hostpid_fallback_lock_acquire_at(file_path, getuid(), 50) == -1,
+              "regular file is rejected");
+        unlink(file_path);
+    }
+
+    file_fd = mkstemp(link_path);
+    check(file_fd >= 0, "symlink fixture name");
+    if (file_fd >= 0) {
+        close(file_fd);
+        unlink(link_path);
+        check(symlink(path, link_path) == 0, "symlink fixture");
+        check(hostpid_fallback_lock_acquire_at(link_path, getuid(), 50) == -1,
+              "symlink is rejected");
+        unlink(link_path);
+    }
+
+    errno = 0;
+    check(hostpid_fallback_lock_acquire_at(path, getuid() + 1U, 50) == -1 &&
+              errno == EACCES,
+          "unexpected owner is rejected");
+
+#ifdef __linux__
+    check(mkdtemp(ancestor_directory) != NULL,
+          "symlink ancestor fixture directory");
+    check(join_path(ancestor_target, sizeof(ancestor_target),
+                    ancestor_directory, "/target") == 0,
+          "symlink ancestor target path");
+    check(join_path(ancestor_link, sizeof(ancestor_link),
+                    ancestor_directory, "/link") == 0,
+          "symlink ancestor link path");
+    check(join_path(ancestor_nested_target,
+                    sizeof(ancestor_nested_target), ancestor_target,
+                    "/nested") == 0,
+          "symlink ancestor nested target path");
+    check(join_path(nested_path, sizeof(nested_path), ancestor_link,
+                    "/nested") == 0,
+          "symlink ancestor nested path");
+    check(mkdir(ancestor_target, 0700) == 0,
+          "symlink ancestor target directory");
+    check(mkdir(ancestor_nested_target, 0700) == 0,
+          "symlink ancestor nested directory");
+    check(symlink(ancestor_target, ancestor_link) == 0,
+          "symlink ancestor fixture");
+    errno = 0;
+    check(hostpid_fallback_lock_acquire_at(nested_path, getuid(), 50) == -1,
+          "symlink ancestor is rejected");
+    unlink(ancestor_link);
+    rmdir(ancestor_nested_target);
+    rmdir(ancestor_target);
+    rmdir(ancestor_directory);
+
+    snprintf(nested_path, sizeof(nested_path), "/tmp/../tmp/%s",
+             strrchr(path, '/') + 1);
+    errno = 0;
+    check(hostpid_fallback_lock_acquire_at(nested_path, getuid(), 50) == -1 &&
+              errno == EINVAL,
+          "parent traversal is rejected");
+#else
+    (void)ancestor_directory;
+    (void)ancestor_link;
+    (void)ancestor_nested_target;
+    (void)ancestor_target;
+    (void)nested_path;
+    puts("ancestor path tests skipped: Linux required");
+#endif
+}
+
 int main(int argc, char **argv) {
     char directory[] = "/tmp/hami-hostpid-global-lock.XXXXXX";
     char *path;
@@ -577,6 +675,7 @@ int main(int argc, char **argv) {
 
     test_absolute_deadline_api(path);
     test_basic_contract(path);
+    test_path_trust(path);
     test_live_holder_timeout(path);
     test_deadline_not_renewed(path);
     test_waiter_cancellation(path);
