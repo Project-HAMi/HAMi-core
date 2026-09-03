@@ -249,6 +249,18 @@ static int open_directory_without_symlinks(const char *path,
 }
 
 #ifdef __linux__
+/*
+ * ZFS is out of tree, so <linux/magic.h> never defines its magic and the
+ * check below would be compiled away.  OVERLAYFS_SUPER_MAGIC only arrived in
+ * 4.6, so an older build host drops overlay support the same way.
+ */
+#ifndef OVERLAYFS_SUPER_MAGIC
+#define OVERLAYFS_SUPER_MAGIC 0x794c7630
+#endif
+#ifndef ZFS_SUPER_MAGIC
+#define ZFS_SUPER_MAGIC 0x2fc12fc1
+#endif
+
 static int filesystem_type_supported(uint64_t filesystem_type) {
 #ifdef EXT4_SUPER_MAGIC
     if (filesystem_type == (uint64_t)EXT4_SUPER_MAGIC) {
