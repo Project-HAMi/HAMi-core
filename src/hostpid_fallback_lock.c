@@ -340,6 +340,7 @@ static int validate_readonly_filesystem(int fd) {
 static int validate_lock_object(int fd, const char *path,
                                 uid_t trusted_owner,
                                 const struct stat *opened_stat,
+                                int validate_components,
                                 int require_readonly) {
     struct stat current_stat;
     struct stat descriptor_stat;
@@ -363,7 +364,7 @@ static int validate_lock_object(int fd, const char *path,
         return -1;
     }
     current_fd = open_directory_without_symlinks(path, trusted_owner,
-                                                  require_readonly);
+                                                  validate_components);
     if (current_fd < 0) {
         return -1;
     }
@@ -414,6 +415,7 @@ static void discard_active_fd(int fd) {
 
 static int acquire_at_until(const char *path, uid_t trusted_owner,
                             const struct timespec *deadline,
+                            int validate_components,
                             int require_readonly) {
     struct stat opened_stat;
     unsigned int retry_us = HOSTPID_FALLBACK_LOCK_INITIAL_RETRY_US;
@@ -429,7 +431,7 @@ static int acquire_at_until(const char *path, uid_t trusted_owner,
         return -1;
     }
     fd = open_directory_without_symlinks(path, trusted_owner,
-                                         require_readonly);
+                                         validate_components);
     if (fd < 0) {
         return -1;
     }
@@ -450,7 +452,7 @@ static int acquire_at_until(const char *path, uid_t trusted_owner,
         return -1;
     }
     if (validate_lock_object(fd, path, trusted_owner, &opened_stat,
-                             require_readonly) != 0 ||
+                             validate_components, require_readonly) != 0 ||
         deadline_expired(deadline) != 0) {
         int saved_errno = errno;
 
@@ -514,7 +516,7 @@ static int acquire_at_until(const char *path, uid_t trusted_owner,
     }
 
     if (validate_lock_object(fd, path, trusted_owner, &opened_stat,
-                             require_readonly) != 0 ||
+                             validate_components, require_readonly) != 0 ||
         deadline_expired(deadline) != 0) {
         int saved_errno = errno;
 
@@ -533,16 +535,16 @@ int hostpid_fallback_lock_acquire_at(const char *path, uid_t trusted_owner,
     if (hostpid_fallback_lock_deadline_after_ms(&deadline, timeout_ms) != 0) {
         return -1;
     }
-    return acquire_at_until(path, trusted_owner, &deadline, 0);
+    return acquire_at_until(path, trusted_owner, &deadline, 0, 0);
 }
 
 int hostpid_fallback_lock_acquire_at_until(
     const char *path, uid_t trusted_owner, const struct timespec *deadline) {
-    return acquire_at_until(path, trusted_owner, deadline, 0);
+    return acquire_at_until(path, trusted_owner, deadline, 0, 0);
 }
 
 int hostpid_fallback_lock_acquire_until(const struct timespec *deadline) {
-    return acquire_at_until(HOSTPID_FALLBACK_LOCK_PATH, 0, deadline, 1);
+    return acquire_at_until(HOSTPID_FALLBACK_LOCK_PATH, 0, deadline, 1, 1);
 }
 
 int hostpid_fallback_lock_acquire(void) {
