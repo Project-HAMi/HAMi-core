@@ -13,16 +13,16 @@
 typedef void (*hostpid_fallback_lock_test_hook)(void);
 void hostpid_fallback_lock_set_before_flock_hook(
     hostpid_fallback_lock_test_hook hook);
+int hostpid_fallback_lock_acquire_at(const char *path, uid_t trusted_owner,
+                                     unsigned int timeout_ms);
+int hostpid_fallback_lock_acquire_at_until(
+    const char *path, uid_t trusted_owner, const struct timespec *deadline);
 #endif
 
 int hostpid_fallback_lock_acquire(void);
 int hostpid_fallback_lock_deadline_after_ms(struct timespec *deadline,
                                             unsigned int timeout_ms);
 int hostpid_fallback_lock_acquire_until(const struct timespec *deadline);
-int hostpid_fallback_lock_acquire_at(const char *path, uid_t trusted_owner,
-                                     unsigned int timeout_ms);
-int hostpid_fallback_lock_acquire_at_until(
-    const char *path, uid_t trusted_owner, const struct timespec *deadline);
 int hostpid_fallback_lock_release(void);
 void hostpid_fallback_lock_after_fork(void);
 int hostpid_fallback_lock_active_fd(void);

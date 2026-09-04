@@ -528,6 +528,10 @@ static int acquire_at_until(const char *path, uid_t trusted_owner,
     return 0;
 }
 
+#ifdef HOSTPID_FALLBACK_LOCK_TESTING
+/* Tests point the lock at a fixture directory.  Nothing else does, and the
+ * fixtures live under /tmp, whose ancestors are not owned by the test user,
+ * so the ancestor checks stay off here. */
 int hostpid_fallback_lock_acquire_at(const char *path, uid_t trusted_owner,
                                      unsigned int timeout_ms) {
     struct timespec deadline;
@@ -542,6 +546,7 @@ int hostpid_fallback_lock_acquire_at_until(
     const char *path, uid_t trusted_owner, const struct timespec *deadline) {
     return acquire_at_until(path, trusted_owner, deadline, 0, 0);
 }
+#endif
 
 int hostpid_fallback_lock_acquire_until(const struct timespec *deadline) {
     return acquire_at_until(HOSTPID_FALLBACK_LOCK_PATH, 0, deadline, 1, 1);
