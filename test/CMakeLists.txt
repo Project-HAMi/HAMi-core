@@ -50,6 +50,19 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_cuctxcreate_version_map")
+        # Links the production cuGetProcAddress resolver and supplies its own
+        # __dlsym_hook_section, so it needs no NVIDIA driver and no GPU at
+        # runtime.  Section garbage collection drops the CUDA-facing entry
+        # points in hook.c that the test never calls.
+        add_executable(${TEST_TARGET_NAME}
+            ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/hook.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT})
     elseif (TEST_SCRIPT MATCHES ".*cu")
@@ -66,6 +79,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         target_link_libraries(${TEST_TARGET_NAME} -ldl)
     elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures")
+        target_link_libraries(${TEST_TARGET_NAME} -lpthread)
+    elseif (TEST_TARGET_NAME STREQUAL "test_cuctxcreate_version_map")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     else()
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread
