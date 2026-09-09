@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <string.h>
@@ -21,6 +22,7 @@
 #define HOSTPID_FALLBACK_LOCK_MAX_RETRY_US 100000U
 
 static _Atomic int active_lock_fd = -1;
+static atomic_flag operation_in_progress = ATOMIC_FLAG_INIT;
 
 #ifdef HOSTPID_FALLBACK_LOCK_TESTING
 static hostpid_fallback_lock_test_hook before_flock_hook;
@@ -413,7 +415,47 @@ static void discard_active_fd(int fd) {
     close(fd);
 }
 
-static int acquire_at_until(const char *path, uid_t trusted_owner,
+/* Cancellation stays deferred until every temporary descriptor is closed or
+ * the acquired descriptor is published. The cleanup handler below then owns
+ * that descriptor until the operation returns to its caller. */
+static int begin_operation(int *cancel_state) {
+    int result = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, cancel_state);
+
+    if (result != 0) {
+        errno = result;
+        return -1;
+    }
+    if (atomic_flag_test_and_set_explicit(&operation_in_progress,
+                                          memory_order_acquire)) {
+        pthread_setcancelstate(*cancel_state, NULL);
+        errno = EBUSY;
+        return -1;
+    }
+    return 0;
+}
+
+static void cancel_operation(void *acquired_fd) {
+    int fd = *(int *)acquired_fd;
+
+    if (fd >= 0) {
+        discard_active_fd(fd);
+    }
+    atomic_flag_clear_explicit(&operation_in_progress, memory_order_release);
+}
+
+static int finish_operation(int result, int acquired_fd, int cancel_state) {
+    int saved_errno = errno;
+
+    pthread_cleanup_push(cancel_operation, &acquired_fd);
+    pthread_setcancelstate(cancel_state, NULL);
+    pthread_testcancel();
+    pthread_cleanup_pop(0);
+    atomic_flag_clear_explicit(&operation_in_progress, memory_order_release);
+    errno = saved_errno;
+    return result;
+}
+
+static int acquire_unlocked(const char *path, uid_t trusted_owner,
                             const struct timespec *deadline,
                             int validate_components,
                             int require_readonly) {
@@ -528,6 +570,25 @@ static int acquire_at_until(const char *path, uid_t trusted_owner,
     return 0;
 }
 
+static int acquire_at_until(const char *path, uid_t trusted_owner,
+                            const struct timespec *deadline,
+                            int validate_components, int require_readonly) {
+    int cancel_state;
+    int result;
+    int acquired_fd = -1;
+
+    if (begin_operation(&cancel_state) != 0) {
+        return -1;
+    }
+    result = acquire_unlocked(path, trusted_owner, deadline,
+                               validate_components, require_readonly);
+    if (result == 0) {
+        acquired_fd = atomic_load_explicit(&active_lock_fd,
+                                           memory_order_acquire);
+    }
+    return finish_operation(result, acquired_fd, cancel_state);
+}
+
 #ifdef HOSTPID_FALLBACK_LOCK_TESTING
 /* Tests point the lock at a fixture directory.  Nothing else does, and the
  * fixtures live under /tmp, whose ancestors are not owned by the test user,
@@ -562,7 +623,7 @@ int hostpid_fallback_lock_acquire(void) {
     return hostpid_fallback_lock_acquire_until(&deadline);
 }
 
-int hostpid_fallback_lock_release(void) {
+static int release_unlocked(void) {
     int fd = atomic_exchange_explicit(&active_lock_fd, -1,
                                       memory_order_acq_rel);
     int result = 0;
@@ -589,6 +650,17 @@ int hostpid_fallback_lock_release(void) {
     return result;
 }
 
+int hostpid_fallback_lock_release(void) {
+    int cancel_state;
+    int result;
+
+    if (begin_operation(&cancel_state) != 0) {
+        return -1;
+    }
+    result = release_unlocked();
+    return finish_operation(result, -1, cancel_state);
+}
+
 void hostpid_fallback_lock_after_fork(void) {
     int fd = atomic_exchange_explicit(&active_lock_fd, -1,
                                       memory_order_acq_rel);
@@ -596,6 +668,7 @@ void hostpid_fallback_lock_after_fork(void) {
     if (fd >= 0) {
         close(fd);
     }
+    atomic_flag_clear_explicit(&operation_in_progress, memory_order_release);
 }
 
 int hostpid_fallback_lock_active_fd(void) {
