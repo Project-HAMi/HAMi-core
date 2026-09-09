@@ -8,6 +8,7 @@
 #include "include/log_utils.h"
 #include "include/libcuda_hook.h"
 #include "include/libvgpu.h"
+#include "cuda/context_fork.h"
 #include "include/utils.h"
 #include "include/nvml_override.h"
 #include "allocator/allocator.h"
@@ -19,7 +20,6 @@ extern void initial_virtual_map(void);
 extern int set_host_pid(int hostpid);
 extern void allocator_init(void);
 void preInit();
-void childReinitPostInit();
 char *(*real_realpath)(const char *path, char *resolved_path);
 void *vgpulib;
 
@@ -847,9 +847,7 @@ void preInit(){
     load_cuda_libraries();
     //nvmlInit();
     ENSURE_INITIALIZED();
-    if (pthread_atfork(context_accounting_fork_prepare,
-                       context_accounting_fork_parent,
-                       childReinitPostInit) != 0) {
+    if (context_accounting_register_fork_handlers() != 0) {
         LOG_WARN("Failed to register context accounting fork handlers");
     }
 }
@@ -881,13 +879,6 @@ void postInit(){
     //add_gpu_device_memory_usage(getpid(),0,context_size,0);
     env_utilization_switch = set_env_utilization_switch();
     init_utilization_watcher();
-}
-
-void childReinitPostInit() {
-    context_accounting_fork_child();
-    LOG_DEBUG("Reset postInit state after fork");
-    post_cuinit_flag = PTHREAD_ONCE_INIT;
-    pidfound = 0;
 }
 
 void ensure_post_init() {

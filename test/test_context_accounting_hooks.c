@@ -1,0 +1,86 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+#include <stdio.h>
+
+#include "context_hook_fixture.h"
+
+static void test_reset_preserves_retained_usage(void) {
+    CUcontext ctx;
+    const CUdevice dev = 0;
+
+    assert(cuDevicePrimaryCtxRetain(&ctx, dev) == CUDA_SUCCESS);
+    assert(cuDevicePrimaryCtxRetain(&ctx, dev) == CUDA_SUCCESS);
+    assert(context_charge[dev] == TEST_CONTEXT_BYTES);
+    assert(cuDevicePrimaryCtxReset_v2(dev) == CUDA_SUCCESS);
+    assert(driver_refs[dev] == 2);
+    assert(context_charge[dev] == 0);
+    assert(cuDevicePrimaryCtxRetain(&ctx, dev) == CUDA_SUCCESS);
+    assert(context_charge[dev] == TEST_CONTEXT_BYTES);
+    assert(cuDevicePrimaryCtxRelease_v2(dev) == CUDA_SUCCESS);
+    assert(driver_refs[dev] == 2);
+    assert(context_charge[dev] == TEST_CONTEXT_BYTES);
+    assert(cuDevicePrimaryCtxRelease_v2(dev) == CUDA_SUCCESS);
+    assert(context_charge[dev] == TEST_CONTEXT_BYTES);
+    assert(cuDevicePrimaryCtxRelease_v2(dev) == CUDA_SUCCESS);
+    assert(context_charge[dev] == 0);
+}
+
+static void test_unrelated_allocation_is_not_charged_as_context(void) {
+    CUcontext ctx;
+    const CUdevice dev = 1;
+
+    allocation_during_retain = TEST_CONTEXT_BYTES / 2;
+    assert(cuDevicePrimaryCtxRetain(&ctx, dev) == CUDA_SUCCESS);
+    assert(application_bytes[dev] == TEST_CONTEXT_BYTES / 2);
+    assert(context_charge[dev] == TEST_CONTEXT_BYTES);
+    assert(nvml_queries == 0);
+    allocation_during_retain = 0;
+    assert(cuDevicePrimaryCtxRelease_v2(dev) == CUDA_SUCCESS);
+    assert(context_charge[dev] == 0);
+}
+
+static void test_failed_reset_removal_keeps_the_charge(void) {
+    CUcontext ctx;
+    const CUdevice dev = 2;
+
+    assert(cuDevicePrimaryCtxRetain(&ctx, dev) == CUDA_SUCCESS);
+    fail_remove = 1;
+    assert(cuDevicePrimaryCtxReset_v2(dev) == CUDA_SUCCESS);
+    assert(context_charge[dev] == TEST_CONTEXT_BYTES);
+    fail_remove = 0;
+    assert(cuDevicePrimaryCtxRetain(&ctx, dev) == CUDA_SUCCESS);
+    assert(context_charge[dev] == TEST_CONTEXT_BYTES);
+    assert(cuDevicePrimaryCtxRelease_v2(dev) == CUDA_SUCCESS);
+    assert(context_charge[dev] == TEST_CONTEXT_BYTES);
+    assert(cuDevicePrimaryCtxRelease_v2(dev) == CUDA_SUCCESS);
+    assert(context_charge[dev] == 0);
+}
+
+static void test_driver_errors_do_not_change_accounting(void) {
+    CUcontext ctx;
+    const CUdevice dev = 3;
+
+    driver_error = CUDA_ERROR_OUT_OF_MEMORY;
+    assert(cuDevicePrimaryCtxRetain(&ctx, dev) == driver_error);
+    assert(context_charge[dev] == 0);
+    driver_error = CUDA_SUCCESS;
+    assert(cuDevicePrimaryCtxRetain(&ctx, dev) == CUDA_SUCCESS);
+    driver_error = CUDA_ERROR_INVALID_CONTEXT;
+    assert(cuDevicePrimaryCtxReset_v2(dev) == driver_error);
+    assert(cuDevicePrimaryCtxRelease_v2(dev) == driver_error);
+    assert(driver_refs[dev] == 1);
+    assert(context_charge[dev] == TEST_CONTEXT_BYTES);
+    driver_error = CUDA_SUCCESS;
+    assert(cuDevicePrimaryCtxRelease_v2(dev) == CUDA_SUCCESS);
+    assert(context_charge[dev] == 0);
+}
+
+int main(void) {
+    test_reset_preserves_retained_usage();
+    test_unrelated_allocation_is_not_charged_as_context();
+    test_failed_reset_removal_keeps_the_charge();
+    test_driver_errors_do_not_change_accounting();
+    puts("context accounting hook tests passed");
+    return 0;
+}
