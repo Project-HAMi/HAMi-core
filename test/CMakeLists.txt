@@ -83,7 +83,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_cuctxcreate_version_map")
-        target_link_libraries(${TEST_TARGET_NAME} -lpthread)
+        target_link_libraries(${TEST_TARGET_NAME} -lpthread -ldl)
     else()
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread
             -lnvidia-ml -lcuda -lcudart -L${CUDA_HOME}/lib64)
