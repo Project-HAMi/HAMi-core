@@ -24,17 +24,31 @@ typedef nvmlReturn_t (*driver_sym_t)();
 
 #define NVML_FIND_ENTRY(table, sym) ({ (table)[NVML_OVERRIDE_ENUM(sym)].fn_ptr; })
 
+/* An entry stays NULL when the loaded NVML does not export that symbol, which
+ * a real driver never does but a partial implementation can. Calling through
+ * the NULL pointer crashes the caller; reporting the symbol as missing lets it
+ * decide, the way the NVML API already expects it to. */
 #define NVML_OVERRIDE_CALL(table, sym, ...)                                    \
   ({                                                                           \
     LOG_DEBUG("Hijacking %s", #sym);                                           \
     driver_sym_t _entry = NVML_FIND_ENTRY(table, sym);                         \
-    _entry(__VA_ARGS__);                                                       \
+    nvmlReturn_t _ret = NVML_ERROR_FUNCTION_NOT_FOUND;                         \
+    if (_entry == NULL) {                                                      \
+      LOG_WARN("%s is not provided by the loaded NVML", #sym);                 \
+    } else {                                                                   \
+      _ret = _entry(__VA_ARGS__);                                              \
+    }                                                                          \
+    _ret;                                                                      \
   })
 
 #define NVML_OVERRIDE_CALL_NO_LOG(table, sym, ...)                             \
   ({                                                                           \
     driver_sym_t _entry = NVML_FIND_ENTRY(table, sym);                         \
-    _entry(__VA_ARGS__);                                                       \
+    nvmlReturn_t _ret = NVML_ERROR_FUNCTION_NOT_FOUND;                         \
+    if (_entry != NULL) {                                                      \
+      _ret = _entry(__VA_ARGS__);                                              \
+    }                                                                          \
+    _ret;                                                                      \
   })
 
 /**
