@@ -183,10 +183,6 @@ int remove_chunk(allocated_list *a_list, CUdeviceptr dptr) {
     size_t t_size;
     CUdevice t_dev;
 
-    if (a_list->length == 0) {
-        return -1;
-    }
-
     pthread_mutex_lock(&mutex);
 
     allocated_list_entry *val;
@@ -206,7 +202,9 @@ int remove_chunk(allocated_list *a_list, CUdeviceptr dptr) {
     }
 
     pthread_mutex_unlock(&mutex);
-    return -1;
+    /* External-memory mappings and other untracked pointers still belong
+     * to the driver. Do not adjust accounting for memory we did not track. */
+    return cuMemoryFree(dptr);
 }
 
 int remove_chunk_only(CUdeviceptr dptr) {

@@ -490,28 +490,27 @@ CUresult cuMemGetInfo_v2(size_t* free, size_t* total) {
     CHECK_DRV_API(cuCtxGetDevice(&dev));
     size_t usage = get_current_device_memory_usage(cuda_to_nvml_map(dev));
     size_t limit = get_current_device_memory_limit(cuda_to_nvml_map(dev));
-    if (limit == 0) {
-        CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
-        LOG_INFO("orig free=%ld total=%ld", *free, *total);
-        *free = *total - usage;
-        LOG_INFO("after free=%ld total=%ld", *free, *total);
-        return CUDA_SUCCESS;
-    } else {
-        CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
-        LOG_INFO("orig free=%ld total=%ld limit=%ld usage=%ld",
-            *free, *total, limit, usage);
-        // Ensure total memory does not exceed the physical or imposed limit.
-        size_t actual_limit = (limit > *total) ? *total : limit;
-        size_t clamped = (usage > limit) ? limit : usage;
-        if (usage > limit) {
-            LOG_WARN("CUDA meminfo: usage %lu exceeds limit %lu, clamping", usage, limit);
-        }
-        *free = (actual_limit > clamped) ? (actual_limit - clamped) : 0;
-        *total = actual_limit;
-        LOG_INFO("after free=%ld total=%ld limit=%ld usage=%ld",
-            *free, *total, limit, usage);
-        return CUDA_SUCCESS;
+    // OptiX can omit either output. Query into local storage so both the
+    // driver call and logging are independent of the caller's pointers.
+    size_t real_free, real_total;
+    CHECK_DRV_API(CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemGetInfo_v2,
+                                    &real_free, &real_total));
+    LOG_INFO("orig free=%zu total=%zu limit=%zu usage=%zu",
+             real_free, real_total, limit, usage);
+    size_t visible_total = (limit == 0 || limit > real_total) ? real_total : limit;
+    size_t visible_free = (usage < visible_total) ? visible_total - usage : 0;
+    if (limit != 0 && usage > limit) {
+        LOG_WARN("CUDA meminfo: usage %zu exceeds limit %zu, clamping", usage, limit);
     }
+    if (free != NULL) {
+        *free = visible_free;
+    }
+    if (total != NULL) {
+        *total = visible_total;
+    }
+    LOG_INFO("after free=%zu total=%zu limit=%zu usage=%zu",
+             visible_free, visible_total, limit, usage);
+    return CUDA_SUCCESS;
 }
 #endif
 
