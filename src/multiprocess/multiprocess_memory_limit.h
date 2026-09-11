@@ -129,6 +129,9 @@ typedef struct {
 
 void ensure_initialized();
 
+// Parses a limit from the environment. Exposed for tests.
+size_t get_limit_from_env(const char* env_name);
+
 int is_gpu_core_limit_enabled(void);
 int get_current_device_sm_limit(int dev);
 uint64_t get_current_device_memory_limit(const int dev);

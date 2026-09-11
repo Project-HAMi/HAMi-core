@@ -16,9 +16,11 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
 
     if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
+            OR TEST_TARGET_NAME STREQUAL "test_env_limit_parsing"
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
         if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
-                OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup")
+                OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
+                OR TEST_TARGET_NAME STREQUAL "test_env_limit_parsing")
             # Build this focused regression test with the production shared-region
             # implementation.  It does not invoke any CUDA/NVML entry point at
             # runtime.  Section garbage collection drops unrelated GPU-facing
@@ -61,6 +63,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     list(APPEND TEST_TARGET_NAMES_LIST ${TEST_TARGET_NAME})
     if (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
+            OR TEST_TARGET_NAME STREQUAL "test_env_limit_parsing"
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
@@ -103,6 +106,10 @@ set_tests_properties(nvml_v2_signatures PROPERTIES
 add_test(NAME pid_discovery
     COMMAND test_pid_discovery)
 set_tests_properties(pid_discovery PROPERTIES TIMEOUT 10)
+
+add_test(NAME env_limit_parsing
+    COMMAND test_env_limit_parsing)
+set_tests_properties(env_limit_parsing PROPERTIES TIMEOUT 10)
 if (TARGET vgpu)
     add_test(NAME dlsym_rtld_next_preloaded
         COMMAND test_dlsym_rtld_next)
