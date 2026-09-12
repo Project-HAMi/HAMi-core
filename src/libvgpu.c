@@ -82,7 +82,11 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
         //Compatible with cuda 12.8+ fix
         if (strcmp(symbol,"cuGetExportTable")!=0)
             pthread_once(&pre_cuinit_flag,(void(*)(void))preInit);
-        void *f = real_dlsym(vgpulib,symbol);
+        // Preserve the caller's lookup scope when no redirect library was loaded.
+        // Passing NULL to dlsym means RTLD_DEFAULT, which can resolve back to
+        // this preload library when a driver performs an internal lookup.
+        void *lookup_handle = vgpulib != NULL ? vgpulib : handle;
+        void *f = real_dlsym(lookup_handle, symbol);
         if (f!=NULL)
             return f;
     }
