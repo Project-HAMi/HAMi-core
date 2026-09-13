@@ -20,6 +20,7 @@ static size_t context_charge[CUDA_DEVICE_MAX_COUNT];
 static size_t application_bytes[CUDA_DEVICE_MAX_COUNT];
 static size_t allocation_during_retain;
 static unsigned int nvml_queries;
+static int fail_add;
 static int fail_remove;
 static CUresult driver_error;
 
@@ -62,6 +63,9 @@ cuda_entry_t cuda_library_entry[OVERRIDE_cuCtxSynchronize + 1] = {
 int add_gpu_device_memory_usage(int32_t pid, int dev, size_t bytes, int type) {
     (void)pid;
     assert(type == 0);
+    if (fail_add) {
+        return -1;
+    }
     context_charge[dev] += bytes;
     return 0;
 }

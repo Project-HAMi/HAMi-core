@@ -76,11 +76,32 @@ static void test_driver_errors_do_not_change_accounting(void) {
     assert(context_charge[dev] == 0);
 }
 
+static void test_failed_charge_is_deferred(void) {
+    CUcontext ctx;
+    const CUdevice dev = 4;
+
+    fail_add = 1;
+    assert(cuDevicePrimaryCtxRetain(&ctx, dev) == CUDA_SUCCESS);
+    assert(driver_refs[dev] == 1);
+    assert(context_charge[dev] == 0);
+    fail_add = 0;
+    assert(cuDevicePrimaryCtxRetain(&ctx, dev) == CUDA_SUCCESS);
+    assert(driver_refs[dev] == 2);
+    assert(context_charge[dev] == TEST_CONTEXT_BYTES);
+    assert(cuDevicePrimaryCtxRelease_v2(dev) == CUDA_SUCCESS);
+    assert(driver_refs[dev] == 1);
+    assert(context_charge[dev] == TEST_CONTEXT_BYTES);
+    assert(cuDevicePrimaryCtxRelease_v2(dev) == CUDA_SUCCESS);
+    assert(driver_refs[dev] == 0);
+    assert(context_charge[dev] == 0);
+}
+
 int main(void) {
     test_reset_preserves_retained_usage();
     test_unrelated_allocation_is_not_charged_as_context();
     test_failed_reset_removal_keeps_the_charge();
     test_driver_errors_do_not_change_accounting();
+    test_failed_charge_is_deferred();
     puts("context accounting hook tests passed");
     return 0;
 }
