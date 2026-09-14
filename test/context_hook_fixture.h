@@ -6,7 +6,6 @@
 #include <string.h>
 
 #include "include/libcuda_hook.h"
-#include "include/libvgpu.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
 #define TEST_CONTEXT_BYTES 104857600UL
