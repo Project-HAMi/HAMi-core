@@ -8,6 +8,11 @@ set(TEST_TARGET_NAMES_LIST)
 
 
 file(GLOB_RECURSE TEST_SCRIPTS "${TEST_CPP_SOURCE_DIR}/*.c" "${TEST_CPP_SOURCE_DIR}/*.cu")
+set(DLSYM_CALLER_SOURCE
+    "${TEST_CPP_SOURCE_DIR}/dlsym_rtld_next_caller.c")
+list(REMOVE_ITEM TEST_SCRIPTS ${DLSYM_CALLER_SOURCE})
+add_library(dlsym_rtld_next_caller SHARED ${DLSYM_CALLER_SOURCE})
+target_link_libraries(dlsym_rtld_next_caller -ldl)
 foreach(TEST_SCRIPT ${TEST_SCRIPTS}) 
     file(RELATIVE_PATH RELATIVE_TEST_PATH ${TEST_CPP_SOURCE_DIR} ${TEST_SCRIPT})
     get_filename_component(TEST_TARGET_DIR ${RELATIVE_TEST_PATH} DIRECTORY)
@@ -30,6 +35,16 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             _GNU_SOURCE)
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
             -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+    elseif (TEST_SCRIPT MATCHES "test_shared_region_concurrency.c")
+        add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_memory_limit.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            SHRREG_SEQUENCE_POINT_CALLBACK=shrreg_test_sequence_point)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -D_GNU_SOURCE -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
@@ -80,12 +95,14 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     if (TEST_TARGET_NAME STREQUAL "test_context_accounting"
             OR TEST_TARGET_NAME STREQUAL "test_context_accounting_fork"
             OR TEST_TARGET_NAME STREQUAL "test_context_accounting_hooks"
+            OR TEST_SCRIPT MATCHES "test_shared_region_concurrency.c"
             OR TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
-        target_link_libraries(${TEST_TARGET_NAME} -ldl)
+        target_link_libraries(${TEST_TARGET_NAME}
+            -ldl dlsym_rtld_next_caller)
     elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     else()
@@ -100,6 +117,13 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
 endforeach()
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
+add_test(NAME shared_region_concurrency
+    COMMAND test_shared_region_concurrency)
+# The test waits on the start barrier and on registration in sequence, each
+# bounded by SHRREG_TEST_TIMEOUT_MS (20s default), so it can spend 40s before
+# printing which stage stalled. Keep this above that budget or ctest kills it
+# first and the diagnostic is lost.
+set_tests_properties(shared_region_concurrency PROPERTIES TIMEOUT 90)
 add_test(NAME postinit_owner_death
     COMMAND test_postinit_owner_death)
 set_tests_properties(postinit_owner_death PROPERTIES TIMEOUT 20)
@@ -143,6 +167,16 @@ if (TARGET vgpu)
         ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:vgpu>"
         TIMEOUT 10)
 endif()
+
+# GPU + LD_PRELOAD regression for cross-process cuMemAlloc TOCTOU (#273).
+# Uses the wrapper so --expect-fixed and limit/cache env are set.
+# Wrapper exits 77 when no NVIDIA GPU is present (skip, not fail).
+add_test(NAME concurrent_oom_race
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/run_concurrent_oom_race.sh --expect-fixed)
+set_tests_properties(concurrent_oom_race PROPERTIES
+    TIMEOUT 180
+    SKIP_RETURN_CODE 77
+    ENVIRONMENT "LIBVGPU=${CMAKE_BINARY_DIR}/libvgpu.so;TEST_BIN=${CMAKE_CURRENT_BINARY_DIR}/test_concurrent_oom_race")
 
 
 add_custom_target(python_test ALL

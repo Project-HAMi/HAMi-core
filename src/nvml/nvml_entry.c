@@ -16,6 +16,11 @@ const char *nvmlErrorString(nvmlReturn_t result) {
   const char *(*_entry)(nvmlReturn_t) =
       NVML_FIND_ENTRY(nvml_library_entry, nvmlErrorString);
 
+  if (_entry == NULL) {
+    /* Describing an error is the one call that must never fail: returning it
+     * from a handler for an earlier failure would turn that into a crash. */
+    return "Unknown Error";
+  }
   return _entry(result);
 }
 

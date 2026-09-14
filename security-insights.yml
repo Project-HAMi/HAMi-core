@@ -1,0 +1,117 @@
+header:
+  schema-version: 2.2.0
+  last-updated: '2026-08-26'
+  last-reviewed: '2026-08-26'
+  url: https://raw.githubusercontent.com/Project-HAMi/HAMi-core/main/security-insights.yml
+  comment: |
+    HAMi-core is one of the codebases that make up the HAMi project. It is
+    consumed as the libvgpu git submodule by Project-HAMi/HAMi, which builds
+    and releases it, so the project section below describes HAMi.
+
+project:
+  name: HAMi
+  homepage: https://project-hami.io
+  administrators:
+    - name: limengxuan
+      affiliation: Dynamia AI
+      social: https://github.com/archlitchi
+      primary: true
+  documentation:
+    quickstart-guide: https://project-hami.io/docs/installation/online-installation
+    detailed-guide: https://project-hami.io/docs
+    code-of-conduct: https://github.com/Project-HAMi/community/blob/main/CODE-OF-CONDUCT.md
+  repositories:
+    - name: HAMi
+      url: https://github.com/Project-HAMi/HAMi
+      comment: |
+        Scheduler, webhook and device plugin. Vendors HAMi-core as the
+        libvgpu submodule and runs the release pipeline for both images.
+    - name: HAMi-core
+      url: https://github.com/Project-HAMi/HAMi-core
+      comment: |
+        This repository. The libvgpu.so CUDA and NVML interception layer that
+        enforces per-container GPU memory and compute limits.
+  vulnerability-reporting:
+    reports-accepted: true
+    bug-bounty-available: false
+    policy: https://github.com/Project-HAMi/HAMi/security/policy
+    in-scope:
+      - A workload reaching another tenant's GPU memory, device or namespace
+    out-of-scope:
+      - A workload exceeding its own GPU quota by unsetting LD_PRELOAD
+      - A workload exceeding its own GPU quota via a statically linked CUDA runtime
+      - A workload exceeding its own GPU quota via ptrace on its own process
+    comment: |
+      Reports are accepted through the HAMi advisory form at
+      https://github.com/Project-HAMi/HAMi/security/advisories/new.
+
+      HAMi-core is a cooperative quota mechanism on a trusted cluster, not a
+      hard isolation boundary. The out-of-scope cases are triaged as bugs.
+
+repository:
+  url: https://github.com/Project-HAMi/HAMi-core
+  status: active
+  accepts-change-request: true
+  accepts-automated-change-request: true
+  core-team:
+    - name: limengxuan
+      affiliation: Dynamia AI
+      social: https://github.com/archlitchi
+      primary: true
+    - name: Chauncey
+      affiliation: DaoCloud
+      social: https://github.com/chaunceyjiang
+      primary: false
+  documentation:
+    contributing-guide: https://github.com/Project-HAMi/HAMi-core/blob/main/CONTRIBUTING.md
+    security-policy: https://github.com/Project-HAMi/HAMi-core/blob/main/SECURITY.md
+  license:
+    url: https://github.com/Project-HAMi/HAMi-core/blob/main/LICENSE
+    expression: Apache-2.0
+  release:
+    automated-pipeline: true
+    changelog: https://github.com/Project-HAMi/HAMi/releases/tag/{version}
+    distribution-points:
+      - uri: pkg:docker/projecthami/hamicore
+        comment: |
+          The primary artifact. HAMi-core carries no tags of its own; it is
+          consumed as the libvgpu submodule and released on HAMi's version
+          line by the release-image-hamicore job in Project-HAMi/HAMi, for
+          linux/amd64 and linux/arm64.
+
+          Each release is signed with keyless cosign. The signature is stored
+          as an OCI 1.1 referrer of type
+          application/vnd.dev.sigstore.bundle.v0.3+json, not as a legacy .sig
+          tag, so it is found through the registry referrers API. Verify with:
+
+          cosign verify projecthami/hamicore:{version}
+            --certificate-identity-regexp 'https://github.com/Project-HAMi/HAMi/.*'
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      - uri: pkg:docker/projecthami/hami
+        comment: |
+          The same libvgpu.so is also copied into the main HAMi image, at
+          /k8s-vgpu/lib/nvidia/libvgpu.so.{version}.
+      - uri: https://github.com/Project-HAMi/HAMi-core
+        comment: |
+          Source is distributed only from this repository, over HTTPS.
+    attestations:
+      - name: Release SBOM
+        predicate-uri: https://spdx.dev/Document
+        location: https://hub.docker.com/r/projecthami/hamicore/tags
+        comment: |
+          Built by buildx with sbom: true and attached to the image index as
+          an in-toto attestation, one per platform. Retrieve with
+          docker buildx imagetools inspect
+          projecthami/hamicore:{version} --format '{{ json .SBOM }}'
+      - name: Release provenance
+        predicate-uri: https://slsa.dev/provenance/v1
+        location: https://hub.docker.com/r/projecthami/hamicore/tags
+        comment: |
+          Built by buildx with provenance: mode=max. Retrieve with
+          docker buildx imagetools inspect
+          projecthami/hamicore:{version} --format '{{ json .Provenance }}'
+  security:
+    assessments:
+      self:
+        comment: |
+          No self assessment has been completed.
