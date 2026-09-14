@@ -51,16 +51,3 @@ void primary_context_restore_charge(primary_context_accounting_t *state,
         state->charged_bytes = context_bytes;
     }
 }
-
-void primary_context_accounting_reset(primary_context_accounting_t *states,
-                                      size_t state_count) {
-    size_t i;
-
-    if (states == NULL) {
-        return;
-    }
-    for (i = 0; i < state_count; i++) {
-        states[i].retain_count = 0;
-        states[i].charged_bytes = 0;
-    }
-}

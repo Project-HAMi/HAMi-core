@@ -1,3 +1,5 @@
+#include <string.h>
+
 #include "include/libcuda_hook.h"
 #include "cuda/context_accounting.h"
 #include "multiprocess/multiprocess_memory_limit.h"
@@ -33,8 +35,7 @@ static void context_accounting_fork_child(void) {
 
     /* context_size is kept.  The parent's probe is a fair estimate for a
      * child on the same GPU, and the child's own probe overwrites it. */
-    primary_context_accounting_reset(context_accounting,
-                                     CUDA_DEVICE_MAX_COUNT);
+    memset(context_accounting, 0, sizeof(context_accounting));
     for (dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
         context_device_locks[dev] =
             (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;

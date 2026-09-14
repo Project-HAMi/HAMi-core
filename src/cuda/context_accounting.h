@@ -23,8 +23,4 @@ int primary_context_record_release(primary_context_accounting_t *state,
 void primary_context_restore_charge(primary_context_accounting_t *state,
                                     size_t context_bytes);
 
-/* Clear process-local accounting inherited across fork(). */
-void primary_context_accounting_reset(primary_context_accounting_t *states,
-                                      size_t state_count);
-
 #endif  // SRC_CUDA_CONTEXT_ACCOUNTING_H_
