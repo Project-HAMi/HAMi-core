@@ -62,7 +62,6 @@ CUresult cuDevicePrimaryCtxGetState( CUdevice dev, unsigned int* flags, int* act
 }
 
 CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
-    size_t charge;
     size_t bytes_to_add = 0;
 
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
@@ -79,13 +78,9 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
     }
 
     pthread_mutex_lock(&context_accounting_lock);
-    /* Allocation hooks do not share this lock, so a before/after NVML delta
-     * can include unrelated memory. Use the established probe charge on each
-     * device until an exclusive measurement is available. */
-    charge = context_size;
     /* An unknown size records the retain without a charge; a later retain
      * that knows the size charges it once. */
-    if (primary_context_record_retain(&context_accounting[dev], charge,
+    if (primary_context_record_retain(&context_accounting[dev], context_size,
                                       &bytes_to_add) != 0) {
         LOG_ERROR("Cannot account primary context retain on device %d",
                   dev);
