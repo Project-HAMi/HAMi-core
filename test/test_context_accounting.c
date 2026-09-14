@@ -4,7 +4,6 @@
 #include <assert.h>
 #include <errno.h>
 #include <limits.h>
-#include <stdint.h>
 #include <stdio.h>
 
 #include "../src/cuda/context_accounting.h"

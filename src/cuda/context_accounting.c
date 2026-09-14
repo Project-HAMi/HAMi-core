@@ -2,7 +2,6 @@
 
 #include <errno.h>
 #include <limits.h>
-#include <stdint.h>
 
 int primary_context_record_retain(primary_context_accounting_t *state,
                                   size_t context_bytes,
