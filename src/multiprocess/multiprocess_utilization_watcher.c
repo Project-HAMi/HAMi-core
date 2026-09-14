@@ -219,7 +219,7 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
         continue;
       userutil[cudadev] = 0;
       nvmlDevice_t device;
-      CHECK_NVML_API(nvmlDeviceGetHandleByIndex(cudadev, &device));
+      CHECK_NVML_API(nvmlDeviceGetHandleByIndex(devi, &device));
 
       // OPTIMIZATION: Do slow NVML queries WITHOUT holding lock
       // This prevents blocking memory allocation operations
