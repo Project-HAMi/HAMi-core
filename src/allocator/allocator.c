@@ -315,8 +315,11 @@ static void free_unlisted_alloc(allocated_list_entry *e, CUstream hStream) {
     CUresult r = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFreeAsync, e->entry->address, hStream);
     if (r != CUDA_SUCCESS) {
         LOG_ERROR("cuMemFreeAsync failed (%d) while cleaning up unlisted allocation %p; "
-                  "leaking to avoid double-free", r, (void *)e->entry->address);
-        /* retain e's metadata -- don't lose the only record of this address */
+                  "retaining tracking entry in device_allocasync", r, (void *)e->entry->address);
+        /* Retain e's metadata in device_allocasync so the live allocation
+         * remains tracked and reachable for later cleanup. */
+        e->entry->length = 0;
+        LIST_ADD(device_allocasync, e);
         return;
     }
     free_unlisted_entry(e);

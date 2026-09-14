@@ -95,10 +95,28 @@ static void describe(const char *label, CUresult res) {
 }
 
 int main(void) {
-    CHECK_DRV(cuInit(0));
+    CUresult err = cuInit(0);
+    if (err != CUDA_SUCCESS) {
+        const char *name = NULL;
+        cuGetErrorName(err, &name);
+        printf("SKIP: cuInit failed: %d (%s), no NVIDIA GPU/driver available\n",
+               (int)err, name ? name : "?");
+        return 77;
+    }
+
+    int devCount = 0;
+    err = cuDeviceGetCount(&devCount);
+    if (err != CUDA_SUCCESS || devCount <= 0) {
+        printf("SKIP: no CUDA devices found (devCount=%d)\n", devCount);
+        return 77;
+    }
 
     CUdevice dev;
-    CHECK_DRV(cuDeviceGet(&dev, TEST_DEVICE_ID));
+    err = cuDeviceGet(&dev, TEST_DEVICE_ID);
+    if (err != CUDA_SUCCESS) {
+        printf("SKIP: cuDeviceGet(%d) failed: %d\n", TEST_DEVICE_ID, (int)err);
+        return 77;
+    }
 
     CUcontext ctx;
 #if CUDA_VERSION >= 13000
@@ -123,7 +141,14 @@ int main(void) {
      * pool -- the same pool add_chunk_async()'s internal, separately-forced
      * cuDeviceGetMemPool call would have returned. */
     CUmemoryPool devicePool;
-    CHECK_DRV(cuDeviceGetMemPool(&devicePool, dev));
+    err = cuDeviceGetMemPool(&devicePool, dev);
+    if (err == CUDA_ERROR_NOT_SUPPORTED) {
+        printf("SKIP: CUDA memory pools not supported on this device\n");
+        cuStreamDestroy(stream);
+        cuCtxDestroy(ctx);
+        return 77;
+    }
+    CHECK_DRV(err);
     CHECK_DRV(cuMemPoolGetAttribute(devicePool, CU_MEMPOOL_ATTR_USED_MEM_CURRENT, &used0));
     for (int i = 0; i < ITERATIONS; i++) {
         CUdeviceptr d = 0;

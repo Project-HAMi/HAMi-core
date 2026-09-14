@@ -166,7 +166,8 @@ if (TARGET vgpu)
         COMMAND test_alloc_async_failure_leak)
     set_tests_properties(alloc_async_failure_leak PROPERTIES
         ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:fault_inject_driver>:$<TARGET_FILE:vgpu>"
-        TIMEOUT 30)
+        TIMEOUT 30
+        SKIP_RETURN_CODE 77)
     add_dependencies(test_alloc_async_failure_leak fault_inject_driver)
 endif()
 
