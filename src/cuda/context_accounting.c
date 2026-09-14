@@ -43,10 +43,3 @@ int primary_context_record_release(primary_context_accounting_t *state,
     }
     return 0;
 }
-
-void primary_context_restore_charge(primary_context_accounting_t *state,
-                                    size_t context_bytes) {
-    if (state != NULL && state->retain_count == 0 && context_bytes > 0) {
-        state->charged_bytes = context_bytes;
-    }
-}

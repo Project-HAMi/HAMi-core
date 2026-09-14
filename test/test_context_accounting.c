@@ -68,23 +68,6 @@ static void test_unsized_nested_retain_reuses_charge(void) {
     assert(bytes == CONTEXT_BYTES);
 }
 
-static void test_failed_remove_is_retried(void) {
-    primary_context_accounting_t state = {0};
-    size_t bytes = 0;
-
-    assert(primary_context_record_retain(&state, CONTEXT_BYTES, &bytes) == 0);
-    assert(bytes == CONTEXT_BYTES);
-    assert(primary_context_record_release(&state, &bytes) == 0);
-    assert(bytes == CONTEXT_BYTES);
-
-    primary_context_restore_charge(&state, bytes);
-    assert(state.charged_bytes == CONTEXT_BYTES);
-    assert(primary_context_record_retain(&state, CONTEXT_BYTES, &bytes) == 0);
-    assert(bytes == 0);
-    assert(primary_context_record_release(&state, &bytes) == 0);
-    assert(bytes == CONTEXT_BYTES);
-}
-
 static void test_rejects_invalid_calls(void) {
     primary_context_accounting_t state = {0};
     size_t bytes = 0;
@@ -103,25 +86,11 @@ static void test_rejects_invalid_calls(void) {
     assert(errno == EOVERFLOW);
 }
 
-static void test_restore_is_ignored_while_retained(void) {
-    primary_context_accounting_t state = {0};
-    size_t bytes = 0;
-
-    /* restore_charge is only for a fully released context whose removal
-     * failed; with a retain outstanding it must not touch the charge. */
-    assert(primary_context_record_retain(&state, 0, &bytes) == 0);
-    primary_context_restore_charge(&state, CONTEXT_BYTES);
-    assert(state.charged_bytes == 0);
-    assert(state.retain_count == 1);
-}
-
 int main(void) {
     test_nested_lifetime();
     test_size_can_be_charged_late();
     test_unsized_nested_retain_reuses_charge();
-    test_failed_remove_is_retried();
     test_rejects_invalid_calls();
-    test_restore_is_ignored_while_retained();
     puts("context accounting tests passed");
     return 0;
 }

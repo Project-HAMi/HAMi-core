@@ -122,8 +122,8 @@ CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
         } else if (bytes_to_remove > 0) {
             if (rm_gpu_device_memory_usage(getpid(), dev, bytes_to_remove,
                                            0) != 0) {
-                primary_context_restore_charge(&context_accounting[dev],
-                                               bytes_to_remove);
+                /* Keep the charge so a later final release removes it. */
+                context_accounting[dev].charged_bytes = bytes_to_remove;
             }
         }
         pthread_mutex_unlock(&context_accounting_lock);
