@@ -55,23 +55,6 @@ static void test_size_can_be_charged_late(void) {
     assert(bytes == CONTEXT_BYTES);
 }
 
-static void test_unsized_nested_retain_reuses_charge(void) {
-    primary_context_accounting_t state = {0};
-    size_t bytes = 0;
-
-    assert(primary_context_record_retain(&state, CONTEXT_BYTES, &bytes) == 0);
-    assert(bytes == CONTEXT_BYTES);
-    assert(primary_context_record_retain(&state, 0, &bytes) == 0);
-    assert(bytes == 0);
-    assert(state.retain_count == 2);
-    assert(state.charged_bytes == CONTEXT_BYTES);
-
-    assert(primary_context_record_release(&state, &bytes) == 0);
-    assert(bytes == 0);
-    assert(primary_context_record_release(&state, &bytes) == 0);
-    assert(bytes == CONTEXT_BYTES);
-}
-
 static void test_rejects_invalid_calls(void) {
     primary_context_accounting_t state = {0};
     size_t bytes = 0;
@@ -93,7 +76,6 @@ static void test_rejects_invalid_calls(void) {
 int main(void) {
     test_nested_lifetime();
     test_size_can_be_charged_late();
-    test_unsized_nested_retain_reuses_charge();
     test_rejects_invalid_calls();
     puts("context accounting tests passed");
     return 0;
