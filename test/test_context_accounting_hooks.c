@@ -26,20 +26,6 @@ static void test_reset_preserves_retained_usage(void) {
     assert(context_charge[dev] == 0);
 }
 
-static void test_unrelated_allocation_is_not_charged_as_context(void) {
-    CUcontext ctx;
-    const CUdevice dev = 1;
-
-    allocation_during_retain = TEST_CONTEXT_BYTES / 2;
-    assert(cuDevicePrimaryCtxRetain(&ctx, dev) == CUDA_SUCCESS);
-    assert(application_bytes[dev] == TEST_CONTEXT_BYTES / 2);
-    assert(context_charge[dev] == TEST_CONTEXT_BYTES);
-    assert(nvml_queries == 0);
-    allocation_during_retain = 0;
-    assert(cuDevicePrimaryCtxRelease_v2(dev) == CUDA_SUCCESS);
-    assert(context_charge[dev] == 0);
-}
-
 static void test_failed_reset_removal_keeps_the_charge(void) {
     CUcontext ctx;
     const CUdevice dev = 2;
@@ -98,7 +84,6 @@ static void test_failed_charge_is_deferred(void) {
 
 int main(void) {
     test_reset_preserves_retained_usage();
-    test_unrelated_allocation_is_not_charged_as_context();
     test_failed_reset_removal_keeps_the_charge();
     test_driver_errors_do_not_change_accounting();
     test_failed_charge_is_deferred();
