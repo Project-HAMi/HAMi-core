@@ -8,7 +8,6 @@
 #include "include/log_utils.h"
 #include "include/libcuda_hook.h"
 #include "include/libvgpu.h"
-#include "cuda/context_fork.h"
 #include "include/utils.h"
 #include "include/nvml_override.h"
 #include "allocator/allocator.h"
@@ -19,6 +18,7 @@ extern void utilization_watcher(void);
 extern void initial_virtual_map(void); 
 extern int set_host_pid(int hostpid);
 extern void allocator_init(void);
+extern int context_accounting_register_fork_handlers(void);
 void preInit();
 char *(*real_realpath)(const char *path, char *resolved_path);
 void *vgpulib;

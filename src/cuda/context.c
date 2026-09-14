@@ -1,10 +1,11 @@
 #include "include/libcuda_hook.h"
 #include "include/libvgpu.h"
 #include "cuda/context_accounting.h"
-#include "cuda/context_fork.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
 extern size_t context_size;
+extern int pidfound;
+extern pthread_once_t post_cuinit_flag;
 
 static primary_context_accounting_t
     context_accounting[CUDA_DEVICE_MAX_COUNT];
@@ -20,15 +21,15 @@ static pthread_mutex_t context_device_locks[CUDA_DEVICE_MAX_COUNT] = {
     PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
 };
 
-void context_accounting_fork_prepare() {
+static void context_accounting_fork_prepare(void) {
     pthread_mutex_lock(&context_accounting_lock);
 }
 
-void context_accounting_fork_parent() {
+static void context_accounting_fork_parent(void) {
     pthread_mutex_unlock(&context_accounting_lock);
 }
 
-void context_accounting_fork_child() {
+static void context_accounting_fork_child(void) {
     int dev;
 
     /* context_size is kept.  The parent's probe is a fair estimate for a
@@ -40,6 +41,18 @@ void context_accounting_fork_child() {
             (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
     }
     pthread_mutex_unlock(&context_accounting_lock);
+}
+
+static void childReinitPostInit(void) {
+    context_accounting_fork_child();
+    post_cuinit_flag = (pthread_once_t)PTHREAD_ONCE_INIT;
+    pidfound = 0;
+}
+
+int context_accounting_register_fork_handlers(void) {
+    return pthread_atfork(context_accounting_fork_prepare,
+                          context_accounting_fork_parent,
+                          childReinitPostInit);
 }
 
 

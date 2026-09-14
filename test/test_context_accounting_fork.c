@@ -8,7 +8,8 @@
 #include <unistd.h>
 
 #include "context_hook_fixture.h"
-#include "cuda/context_fork.h"
+
+int context_accounting_register_fork_handlers(void);
 
 static int initialized_count;
 

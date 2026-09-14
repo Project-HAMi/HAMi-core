@@ -26,10 +26,6 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/context.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/context_accounting.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
-        if (TEST_TARGET_NAME STREQUAL "test_context_accounting_fork")
-            target_sources(${TEST_TARGET_NAME} PRIVATE
-                ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/context_fork.c)
-        endif()
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
             _GNU_SOURCE)
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
