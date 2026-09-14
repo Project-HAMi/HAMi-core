@@ -1,5 +1,3 @@
-#include <errno.h>
-
 #include "include/libcuda_hook.h"
 #include "include/libvgpu.h"
 #include "cuda/context_accounting.h"
@@ -7,7 +5,6 @@
 #include "multiprocess/multiprocess_memory_limit.h"
 
 extern size_t context_size;
-extern int pidfound;
 
 static primary_context_accounting_t
     context_accounting[CUDA_DEVICE_MAX_COUNT];
@@ -88,21 +85,10 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
      * can include unrelated memory. Use the established probe charge on each
      * device until an exclusive measurement is available. */
     charge = context_size;
-    errno = 0;
-    int record_result =
-        (pidfound == 1)
-            ? primary_context_record_accounted_retain(
-                  &context_accounting[dev], charge, &bytes_to_add)
-            : primary_context_record_retain(&context_accounting[dev], charge,
-                                            &bytes_to_add);
-    /* The driver retain already succeeded.  An unknown context size must not
-     * fail the caller, so defer the charge to a later retain that knows it. */
-    if (record_result != 0 && errno == ENODATA) {
-        LOG_WARN("Primary context size unknown on device %d; charge is "
-                 "deferred to a later retain", dev);
-        record_result = primary_context_record_retain(
-            &context_accounting[dev], charge, &bytes_to_add);
-    }
+    /* An unknown size records the retain without a charge; a later retain
+     * that knows the size charges it once. */
+    int record_result = primary_context_record_retain(
+        &context_accounting[dev], charge, &bytes_to_add);
     if (record_result != 0) {
         LOG_ERROR("Cannot account primary context retain on device %d",
                   dev);
