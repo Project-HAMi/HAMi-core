@@ -49,6 +49,20 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat")
+        add_executable(${TEST_TARGET_NAME}
+            ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/memory.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/allocator/allocator.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE HOOK_MEMINFO_ENABLE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        # CMake may add -rdynamic; exported functions survive section GC and
+        # pull in unrelated driver/accounting dependencies.
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures")
         # Links the production NVML pass-through wrappers and supplies its own
         # entry table, so it needs no NVIDIA driver and no GPU at runtime.
@@ -76,7 +90,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         target_link_libraries(${TEST_TARGET_NAME} -ldl)
-    elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures")
+    elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures"
+            OR TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     else()
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread
@@ -146,3 +161,8 @@ add_custom_target(python_test ALL
 # add_custom_target(multiprocess_test_scripts ALL
 #    COMMAND cp -r ${CMAKE_CURRENT_SOURCE_DIR}/multiprocess/scripts
 #                  ${CMAKE_CURRENT_BINARY_DIR}/multiprocess)
+
+add_test(NAME cuda_memory_compat COMMAND test_cuda_memory_compat)
+set_tests_properties(cuda_memory_compat PROPERTIES
+    ENVIRONMENT "LIBCUDA_LOG_LEVEL=4"
+    TIMEOUT 10)
