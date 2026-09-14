@@ -2,7 +2,6 @@
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
-#include <signal.h>
 #include <stdio.h>
 #include <sys/wait.h>
 #include <unistd.h>
