@@ -35,6 +35,10 @@ static void test_nested_lifetime(void) {
     assert(primary_context_record_release(&state, &bytes) == 0);
     assert(bytes == CONTEXT_BYTES);
     assert(state.retain_count == 0);
+
+    /* A context retained again after its final release is charged again. */
+    assert(primary_context_record_retain(&state, CONTEXT_BYTES, &bytes) == 0);
+    assert(bytes == CONTEXT_BYTES);
 }
 
 static void test_size_can_be_charged_late(void) {
