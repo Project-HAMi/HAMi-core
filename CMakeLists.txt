@@ -2,6 +2,7 @@ cmake_minimum_required (VERSION 2.8.12)
 
 project(libvgpu)
 
+enable_language(ASM)
 enable_testing()
 
 # Set CUDA_HOME if not defined
