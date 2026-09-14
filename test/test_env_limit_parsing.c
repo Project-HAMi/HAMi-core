@@ -88,6 +88,8 @@ int main(void) {
     check("", 0);
     check("   ", 0);
     check("4Gbi", 0);
+    check("50%", 0);              // percent is for SM limits only, not 50 bytes
+    check_key("CUDA_DEVICE_MEMORY_LIMIT_0", "50%", 0);
     check(NULL, 0);               // unset
 
     // Overflow is refused, not truncated.

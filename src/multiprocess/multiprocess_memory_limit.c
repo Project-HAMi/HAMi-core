@@ -127,15 +127,16 @@ void sig_swap_stub(int signo){
 //
 // Every unit is binary, which is what a bare "G" has always meant here, so
 // existing values keep their current meaning. A fraction needs a unit: "1.5G"
-// is 1.5 GiB, "1.5" on its own is refused. Percent is accepted and ignored so
-// that CUDA_DEVICE_SM_LIMIT=50% keeps meaning 50, as it did before.
+// is 1.5 GiB, "1.5" on its own is refused. Percent is accepted and ignored,
+// only when allow_percent is set, so that CUDA_DEVICE_SM_LIMIT=50% keeps
+// meaning 50 while CUDA_DEVICE_MEMORY_LIMIT=50% is refused, not read as 50 bytes.
 //
 // Returns 1 and stores the byte count on success, 0 if value is not a limit
 // this function is willing to guess at. Refusing is deliberate: the previous
 // implementation passed its suffix pointer to strtoul, which overwrote it, so
 // nothing verified that the text after the number was the suffix that matched.
 // "4Gi" and "4GB" parsed as 4 bytes and "-1" wrapped to SIZE_MAX.
-static int parse_limit_string(const char* value, size_t* out) {
+static int parse_limit_string(const char* value, int allow_percent, size_t* out) {
     const char* p = value;
     while (isspace((unsigned char)*p)) {
         p++;
@@ -177,7 +178,7 @@ static int parse_limit_string(const char* value, size_t* out) {
 
     size_t scalar = 1;
     int has_unit = 0;
-    if (*end == '%') {
+    if (allow_percent && *end == '%') {
         end++;
     } else if (*end != '\0') {
         switch (*end) {
@@ -225,13 +226,11 @@ size_t get_limit_from_env(const char* env_name) {
         // fprintf(stderr, "No %s set in environment\n", env_name);
         return 0;
     }
-    if (env_limit[0] == '\0') {
-        // fprintf(stderr, "Empty %s set in environment\n", env_name);
-        return 0;
-    }
+    // "CUDA_DEVICE_" is 12 characters; 'S' selects CUDA_DEVICE_SM_LIMIT[_N].
+    int is_sm_limit = strlen(env_name) > 12 && env_name[12] == 'S';
 
     size_t parsed = 0;
-    if (!parse_limit_string(env_limit, &parsed)) {
+    if (!parse_limit_string(env_limit, is_sm_limit, &parsed)) {
         // Treated as unset by every caller. Logged loudly because the old
         // behaviour here was to invent a limit instead.
         LOG_ERROR("invalid limit %s=%s, treating it as unset (no limit); expected "
@@ -240,8 +239,7 @@ size_t get_limit_from_env(const char* env_name) {
         return 0;
     }
     if (parsed == 0) {
-        size_t name_len = strlen(env_name);
-        if (name_len > 12 && env_name[12] == 'S') {
+        if (is_sm_limit) {
             LOG_INFO("device core util limit set to 0, which means no limit: %s=%s",
                 env_name, env_limit);
         } else {
