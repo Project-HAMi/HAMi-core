@@ -5,12 +5,18 @@ name: style
 on:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   cpplint:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
     steps:
-    - uses: actions/checkout@master
-    - uses: reviewdog/action-cpplint@master
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+    - uses: reviewdog/action-cpplint@9552c62f4bd516c1e3a6f84eae56bd864cc304c6 # v1.11.0
       with:
         github_token: ${{ secrets.github_token }}
         args: --linelength=120
