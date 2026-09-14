@@ -19,8 +19,13 @@ static size_t context_charge[CUDA_DEVICE_MAX_COUNT];
 static int fail_add;
 static int fail_remove;
 static CUresult driver_error;
+static unsigned int out_of_range_driver_calls;
 
 static CUresult fake_retain(CUcontext *ctx, CUdevice dev) {
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        out_of_range_driver_calls++;
+        return CUDA_SUCCESS;
+    }
     if (driver_error != CUDA_SUCCESS) {
         return driver_error;
     }
@@ -30,6 +35,10 @@ static CUresult fake_retain(CUcontext *ctx, CUdevice dev) {
 }
 
 static CUresult fake_release(CUdevice dev) {
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        out_of_range_driver_calls++;
+        return CUDA_SUCCESS;
+    }
     if (driver_error != CUDA_SUCCESS) {
         return driver_error;
     }
@@ -41,7 +50,10 @@ static CUresult fake_release(CUdevice dev) {
 }
 
 static CUresult fake_reset(CUdevice dev) {
-    (void)dev;
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        out_of_range_driver_calls++;
+        return CUDA_SUCCESS;
+    }
     if (driver_error != CUDA_SUCCESS) {
         return driver_error;
     }

@@ -99,12 +99,27 @@ static void test_failed_charge_is_deferred(void) {
     assert(context_charge[dev] == 0);
 }
 
+static void test_out_of_range_device_skips_accounting(void) {
+    CUcontext ctx;
+    const CUdevice devs[] = {-1, CUDA_DEVICE_MAX_COUNT};
+    size_t i;
+
+    for (i = 0; i < sizeof(devs) / sizeof(devs[0]); i++) {
+        out_of_range_driver_calls = 0;
+        assert(cuDevicePrimaryCtxRetain(&ctx, devs[i]) == CUDA_SUCCESS);
+        assert(cuDevicePrimaryCtxReset_v2(devs[i]) == CUDA_SUCCESS);
+        assert(cuDevicePrimaryCtxRelease_v2(devs[i]) == CUDA_SUCCESS);
+        assert(out_of_range_driver_calls == 3);
+    }
+}
+
 int main(void) {
     test_reset_preserves_retained_usage();
     test_failed_reset_removal_keeps_the_charge();
     test_failed_release_removal_keeps_the_charge();
     test_driver_errors_do_not_change_accounting();
     test_failed_charge_is_deferred();
+    test_out_of_range_device_skips_accounting();
     puts("context accounting hook tests passed");
     return 0;
 }
