@@ -99,20 +99,11 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
     }
     if (bytes_to_add > 0 &&
         add_gpu_device_memory_usage(getpid(), dev, bytes_to_add, 0) != 0) {
-        size_t retried = 0;
-
-        /* The driver retain already succeeded.  A shared region that will not
-         * take the charge must not fail the caller, for the same reason an
-         * unknown size does not: drop the charge, keep the retain, and let a
-         * later retain try again. */
+        /* The shared region has no slot for this process.  Keep the retain
+         * and let a later retain apply the charge. */
         LOG_WARN("Cannot charge primary context memory on device %d; the "
                  "retain is kept and the charge is deferred", dev);
-        if (primary_context_rollback_retain(&context_accounting[dev],
-                                            bytes_to_add) != 0 ||
-            primary_context_record_retain(&context_accounting[dev], 0,
-                                          &retried) != 0) {
-            LOG_ERROR("Cannot reconcile context accounting on device %d", dev);
-        }
+        context_accounting[dev].charged_bytes = 0;
     }
     pthread_mutex_unlock(&context_accounting_lock);
     pthread_mutex_unlock(&context_device_locks[dev]);
