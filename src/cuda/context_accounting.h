@@ -19,10 +19,6 @@ int primary_context_record_retain(primary_context_accounting_t *state,
 int primary_context_record_release(primary_context_accounting_t *state,
                                    size_t *bytes_to_remove);
 
-/* Undo the most recent retain after its external accounting step fails. */
-int primary_context_rollback_retain(primary_context_accounting_t *state,
-                                    size_t bytes_to_add);
-
 /* Restore a charge that could not be removed from shared accounting. */
 void primary_context_restore_charge(primary_context_accounting_t *state,
                                     size_t context_bytes);

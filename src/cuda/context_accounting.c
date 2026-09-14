@@ -45,24 +45,6 @@ int primary_context_record_release(primary_context_accounting_t *state,
     return 0;
 }
 
-int primary_context_rollback_retain(primary_context_accounting_t *state,
-                                    size_t bytes_to_add) {
-    if (state == NULL || state->retain_count == 0) {
-        errno = EINVAL;
-        return -1;
-    }
-    if (bytes_to_add > 0 && state->charged_bytes != bytes_to_add) {
-        errno = EINVAL;
-        return -1;
-    }
-
-    state->retain_count--;
-    if (bytes_to_add > 0) {
-        state->charged_bytes = 0;
-    }
-    return 0;
-}
-
 void primary_context_restore_charge(primary_context_accounting_t *state,
                                     size_t context_bytes) {
     if (state != NULL && state->retain_count == 0 && context_bytes > 0) {

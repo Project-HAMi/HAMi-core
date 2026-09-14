@@ -71,17 +71,6 @@ static void test_unsized_nested_retain_reuses_charge(void) {
     assert(bytes == CONTEXT_BYTES);
 }
 
-static void test_failed_add_rolls_back_retain(void) {
-    primary_context_accounting_t state = {0};
-    size_t bytes = 0;
-
-    assert(primary_context_record_retain(&state, CONTEXT_BYTES, &bytes) == 0);
-    assert(bytes == CONTEXT_BYTES);
-    assert(primary_context_rollback_retain(&state, bytes) == 0);
-    assert(state.retain_count == 0);
-    assert(state.charged_bytes == 0);
-}
-
 static void test_failed_remove_is_retried(void) {
     primary_context_accounting_t state = {0};
     size_t bytes = 0;
@@ -115,43 +104,6 @@ static void test_rejects_invalid_calls(void) {
     errno = 0;
     assert(primary_context_record_retain(&state, 1, &bytes) == -1);
     assert(errno == EOVERFLOW);
-
-    state.retain_count = 0;
-    errno = 0;
-    assert(primary_context_rollback_retain(&state, 0) == -1);
-    assert(errno == EINVAL);
-}
-
-static void test_failed_charge_keeps_the_retain(void) {
-    primary_context_accounting_t state = {0};
-    size_t bytes = 0;
-    size_t retried = 99;
-
-    /* Mirrors the retain path when the shared region refuses the charge. */
-    assert(primary_context_record_retain(&state, CONTEXT_BYTES, &bytes) == 0);
-    assert(bytes == CONTEXT_BYTES);
-    assert(primary_context_rollback_retain(&state, bytes) == 0);
-    assert(primary_context_record_retain(&state, 0, &retried) == 0);
-    assert(retried == 0);
-    assert(state.retain_count == 1);
-    assert(state.charged_bytes == 0);
-
-    /* A later retain can still charge it once. */
-    assert(primary_context_record_retain(&state, CONTEXT_BYTES, &bytes) == 0);
-    assert(bytes == CONTEXT_BYTES);
-    assert(state.charged_bytes == CONTEXT_BYTES);
-}
-
-static void test_rollback_rejects_mismatched_charge(void) {
-    primary_context_accounting_t state = {0};
-    size_t bytes = 0;
-
-    assert(primary_context_record_retain(&state, CONTEXT_BYTES, &bytes) == 0);
-    errno = 0;
-    assert(primary_context_rollback_retain(&state, CONTEXT_BYTES + 1) == -1);
-    assert(errno == EINVAL);
-    assert(state.retain_count == 1);
-    assert(state.charged_bytes == CONTEXT_BYTES);
 }
 
 static void test_restore_is_ignored_while_retained(void) {
@@ -227,12 +179,9 @@ int main(void) {
     test_nested_lifetime();
     test_size_can_be_charged_late();
     test_unsized_nested_retain_reuses_charge();
-    test_failed_add_rolls_back_retain();
     test_failed_remove_is_retried();
     test_rejects_invalid_calls();
-    test_rollback_rejects_mismatched_charge();
     test_restore_is_ignored_while_retained();
-    test_failed_charge_keeps_the_retain();
     test_nonzero_device_accounting_is_isolated();
     test_forked_child_resets_private_accounting();
     puts("context accounting tests passed");
