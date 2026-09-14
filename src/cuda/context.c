@@ -1,5 +1,4 @@
 #include "include/libcuda_hook.h"
-#include "include/libvgpu.h"
 #include "cuda/context_accounting.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
