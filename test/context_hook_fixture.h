@@ -58,6 +58,8 @@ cuda_entry_t cuda_library_entry[OVERRIDE_cuCtxSynchronize + 1] = {
 int add_gpu_device_memory_usage(int32_t pid, int dev, size_t bytes, int type) {
     (void)pid;
     assert(type == 0);
+    assert(dev >= 0 && dev < CUDA_DEVICE_MAX_COUNT);
+    assert(bytes > 0);
     if (fail_add) {
         return -1;
     }
@@ -68,6 +70,8 @@ int add_gpu_device_memory_usage(int32_t pid, int dev, size_t bytes, int type) {
 int rm_gpu_device_memory_usage(int32_t pid, int dev, size_t bytes, int type) {
     (void)pid;
     assert(type == 0);
+    assert(dev >= 0 && dev < CUDA_DEVICE_MAX_COUNT);
+    assert(bytes > 0);
     if (fail_remove) {
         return -1;
     }
