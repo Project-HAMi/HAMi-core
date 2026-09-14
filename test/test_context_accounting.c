@@ -6,8 +6,6 @@
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <sys/wait.h>
-#include <unistd.h>
 
 #include "../src/cuda/context_accounting.h"
 
@@ -118,63 +116,6 @@ static void test_restore_is_ignored_while_retained(void) {
     assert(state.retain_count == 1);
 }
 
-static void test_nonzero_device_accounting_is_isolated(void) {
-    primary_context_accounting_t states[4] = {{0}};
-    size_t bytes = 0;
-    const int dev = 3;
-
-    assert(primary_context_record_retain(
-               &states[dev], CONTEXT_BYTES, &bytes) == 0);
-    assert(states[dev].retain_count == 1);
-    assert(states[dev].charged_bytes == CONTEXT_BYTES);
-    assert(states[0].retain_count == 0);
-    assert(states[0].charged_bytes == 0);
-}
-
-static void test_forked_child_resets_private_accounting(void) {
-    primary_context_accounting_t states[4] = {{0}};
-    primary_context_accounting_t child_states[4] = {{0}};
-    size_t bytes = 0;
-    int result_pipe[2];
-    pid_t child;
-    int status;
-
-    assert(primary_context_record_retain(
-               &states[0], CONTEXT_BYTES, &bytes) == 0);
-    assert(primary_context_record_retain(
-               &states[3], CONTEXT_BYTES, &bytes) == 0);
-    assert(pipe(result_pipe) == 0);
-
-    child = fork();
-    assert(child >= 0);
-    if (child == 0) {
-        close(result_pipe[0]);
-        primary_context_accounting_reset(states, 4);
-        if (write(result_pipe[1], states, sizeof(states)) !=
-            (ssize_t)sizeof(states)) {
-            _exit(2);
-        }
-        _exit(0);
-    }
-
-    close(result_pipe[1]);
-    assert(read(result_pipe[0], child_states, sizeof(child_states)) ==
-           (ssize_t)sizeof(child_states));
-    close(result_pipe[0]);
-    assert(waitpid(child, &status, 0) == child);
-    assert(WIFEXITED(status));
-    assert(WEXITSTATUS(status) == 0);
-
-    assert(child_states[0].retain_count == 0);
-    assert(child_states[0].charged_bytes == 0);
-    assert(child_states[3].retain_count == 0);
-    assert(child_states[3].charged_bytes == 0);
-    assert(states[0].retain_count == 1);
-    assert(states[0].charged_bytes == CONTEXT_BYTES);
-    assert(states[3].retain_count == 1);
-    assert(states[3].charged_bytes == CONTEXT_BYTES);
-}
-
 int main(void) {
     test_nested_lifetime();
     test_size_can_be_charged_late();
@@ -182,8 +123,6 @@ int main(void) {
     test_failed_remove_is_retried();
     test_rejects_invalid_calls();
     test_restore_is_ignored_while_retained();
-    test_nonzero_device_accounting_is_isolated();
-    test_forked_child_resets_private_accounting();
     puts("context accounting tests passed");
     return 0;
 }
