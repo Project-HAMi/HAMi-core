@@ -16,13 +16,6 @@ int primary_context_record_retain(primary_context_accounting_t *state,
                                   size_t context_bytes,
                                   size_t *bytes_to_add);
 
-/*
- * Record a retain only when its context memory is already charged or a
- * nonzero charge can be applied before the caller reports success.
- */
-int primary_context_record_accounted_retain(
-    primary_context_accounting_t *state, size_t context_bytes,
-    size_t *bytes_to_add);
 int primary_context_record_release(primary_context_accounting_t *state,
                                    size_t *bytes_to_remove);
 

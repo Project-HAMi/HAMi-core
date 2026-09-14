@@ -4,19 +4,15 @@
 #include <limits.h>
 #include <stdint.h>
 
-static int record_retain(primary_context_accounting_t *state,
-                         size_t context_bytes, size_t *bytes_to_add,
-                         int require_charge) {
+int primary_context_record_retain(primary_context_accounting_t *state,
+                                  size_t context_bytes,
+                                  size_t *bytes_to_add) {
     if (state == NULL || bytes_to_add == NULL) {
         errno = EINVAL;
         return -1;
     }
     if (state->retain_count == UINT_MAX) {
         errno = EOVERFLOW;
-        return -1;
-    }
-    if (require_charge && state->charged_bytes == 0 && context_bytes == 0) {
-        errno = ENODATA;
         return -1;
     }
 
@@ -27,18 +23,6 @@ static int record_retain(primary_context_accounting_t *state,
     }
     state->retain_count++;
     return 0;
-}
-
-int primary_context_record_retain(primary_context_accounting_t *state,
-                                  size_t context_bytes,
-                                  size_t *bytes_to_add) {
-    return record_retain(state, context_bytes, bytes_to_add, 0);
-}
-
-int primary_context_record_accounted_retain(
-    primary_context_accounting_t *state, size_t context_bytes,
-    size_t *bytes_to_add) {
-    return record_retain(state, context_bytes, bytes_to_add, 1);
 }
 
 int primary_context_record_release(primary_context_accounting_t *state,

@@ -54,46 +54,13 @@ static void test_size_can_be_charged_late(void) {
     assert(bytes == CONTEXT_BYTES);
 }
 
-static void test_required_charge_fails_without_size(void) {
-    primary_context_accounting_t state = {0};
-    size_t bytes = 99;
-
-    errno = 0;
-    assert(primary_context_record_accounted_retain(&state, 0, &bytes) == -1);
-    assert(errno == ENODATA);
-    assert(state.retain_count == 0);
-    assert(state.charged_bytes == 0);
-    assert(bytes == 99);
-}
-
-static void test_unmeasured_context_defers_instead_of_failing(void) {
-    primary_context_accounting_t state = {0};
-    size_t bytes = 99;
-
-    /* Mirrors the retain path when the context size cannot be measured. */
-    errno = 0;
-    assert(primary_context_record_accounted_retain(&state, 0, &bytes) == -1);
-    assert(errno == ENODATA);
-    assert(primary_context_record_retain(&state, 0, &bytes) == 0);
-    assert(bytes == 0);
-    assert(state.retain_count == 1);
-    assert(state.charged_bytes == 0);
-
-    /* A later retain that knows the size still charges exactly once. */
-    assert(primary_context_record_retain(&state, CONTEXT_BYTES, &bytes) == 0);
-    assert(bytes == CONTEXT_BYTES);
-    assert(state.retain_count == 2);
-    assert(state.charged_bytes == CONTEXT_BYTES);
-}
-
-static void test_accounted_nested_retain_reuses_existing_charge(void) {
+static void test_unsized_nested_retain_reuses_charge(void) {
     primary_context_accounting_t state = {0};
     size_t bytes = 0;
 
-    assert(primary_context_record_accounted_retain(
-               &state, CONTEXT_BYTES, &bytes) == 0);
+    assert(primary_context_record_retain(&state, CONTEXT_BYTES, &bytes) == 0);
     assert(bytes == CONTEXT_BYTES);
-    assert(primary_context_record_accounted_retain(&state, 0, &bytes) == 0);
+    assert(primary_context_record_retain(&state, 0, &bytes) == 0);
     assert(bytes == 0);
     assert(state.retain_count == 2);
     assert(state.charged_bytes == CONTEXT_BYTES);
@@ -108,8 +75,7 @@ static void test_failed_add_rolls_back_retain(void) {
     primary_context_accounting_t state = {0};
     size_t bytes = 0;
 
-    assert(primary_context_record_accounted_retain(
-               &state, CONTEXT_BYTES, &bytes) == 0);
+    assert(primary_context_record_retain(&state, CONTEXT_BYTES, &bytes) == 0);
     assert(bytes == CONTEXT_BYTES);
     assert(primary_context_rollback_retain(&state, bytes) == 0);
     assert(state.retain_count == 0);
@@ -205,7 +171,7 @@ static void test_nonzero_device_accounting_is_isolated(void) {
     size_t bytes = 0;
     const int dev = 3;
 
-    assert(primary_context_record_accounted_retain(
+    assert(primary_context_record_retain(
                &states[dev], CONTEXT_BYTES, &bytes) == 0);
     assert(states[dev].retain_count == 1);
     assert(states[dev].charged_bytes == CONTEXT_BYTES);
@@ -221,9 +187,9 @@ static void test_forked_child_resets_private_accounting(void) {
     pid_t child;
     int status;
 
-    assert(primary_context_record_accounted_retain(
+    assert(primary_context_record_retain(
                &states[0], CONTEXT_BYTES, &bytes) == 0);
-    assert(primary_context_record_accounted_retain(
+    assert(primary_context_record_retain(
                &states[3], CONTEXT_BYTES, &bytes) == 0);
     assert(pipe(result_pipe) == 0);
 
@@ -260,9 +226,7 @@ static void test_forked_child_resets_private_accounting(void) {
 int main(void) {
     test_nested_lifetime();
     test_size_can_be_charged_late();
-    test_unmeasured_context_defers_instead_of_failing();
-    test_required_charge_fails_without_size();
-    test_accounted_nested_retain_reuses_existing_charge();
+    test_unsized_nested_retain_reuses_charge();
     test_failed_add_rolls_back_retain();
     test_failed_remove_is_retried();
     test_rejects_invalid_calls();
