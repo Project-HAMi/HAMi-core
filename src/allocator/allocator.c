@@ -33,7 +33,8 @@ size_t round_up(size_t size, size_t unit) {
     return size;
 }
 
-int oom_check(const int dev, size_t addon) {
+/* already_locked: caller already holds lock_shrreg (not reentrant). */
+static int oom_check_impl(const int dev, size_t addon, int already_locked) {
     CUdevice d;
     if (dev==-1)
         cuCtxGetDevice(&d);
@@ -49,16 +50,43 @@ int oom_check(const int dev, size_t addon) {
     size_t new_allocated = _usage + addon;
     LOG_INFO("_usage=%lu limit=%lu new_allocated=%lu",_usage,limit,new_allocated);
     if (new_allocated > limit) {
+        int cleared;
+
         LOG_ERROR("Device %d OOM %lu / %lu", d, new_allocated, limit);
 
-        lock_shrreg();
-        int cleared = clear_proc_slot_nolock(1);
-        unlock_shrreg();
+        if (already_locked) {
+            cleared = clear_proc_slot_nolock(1);
+        } else {
+            lock_shrreg();
+            cleared = clear_proc_slot_nolock(1);
+            unlock_shrreg();
+        }
         if (cleared > 0)
-            return oom_check(dev,addon);
+            return oom_check_impl(dev, addon, already_locked);
         return 1;
     }
     return 0;
+}
+
+int oom_check(const int dev, size_t addon) {
+    return oom_check_impl(dev, addon, 0);
+}
+
+int reserve_device_memory(CUdevice dev, size_t size) {
+    lock_shrreg();
+    if (oom_check_impl(dev, size, 1)) {
+        unlock_shrreg();
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+    add_gpu_device_memory_usage(getpid(), dev, size, 2);
+    unlock_shrreg();
+    return 0;
+}
+
+void release_device_memory(CUdevice dev, size_t size) {
+    lock_shrreg();
+    rm_gpu_device_memory_usage(getpid(), dev, size, 2);
+    unlock_shrreg();
 }
 
 CUresult view_vgpu_allocator() {
@@ -109,14 +137,28 @@ void allocator_init() {
     pthread_mutex_init(&mutex,NULL);
 }
 
+/* Wrap INIT_ALLOCATED_LIST_ENTRY so QUIT_WITH_ERROR returns here, not from
+ * callers that hold mutex / CUDA memory / shared reservations. */
+static int new_allocated_list_entry(allocated_list_entry **out,
+                                    CUdeviceptr address, size_t size,
+                                    CUdevice dev) {
+    allocated_list_entry *e;
+    INIT_ALLOCATED_LIST_ENTRY(e, address, size, dev);
+    *out = e;
+    return 0;
+}
+
 int add_chunk(CUdeviceptr *address, size_t size) {
     CUdevice dev;
     CUresult res;
+    allocated_list_entry *e;
 
     cuCtxGetDevice(&dev);
 
-    /* OOM pre-check without lock */
-    if (oom_check(dev, size))
+    /* Reserve under the shared-region lock so concurrent processes cannot
+     * both pass oom_check before either commits usage. CUDA alloc stays
+     * outside the lock. */
+    if (reserve_device_memory(dev, size) != 0)
         return CUDA_ERROR_OUT_OF_MEMORY;
 
     /* GPU allocation outside lock, the expensive part */
@@ -127,44 +169,36 @@ int add_chunk(CUdeviceptr *address, size_t size) {
     }
     if (res != CUDA_SUCCESS) {
         LOG_ERROR("cuMemoryAllocate failed res=%d", res);
+        release_device_memory(dev, size);
         return res;
     }
 
-    /* Tracking inside lock, pure in-memory ops, microseconds */
+    /* Local list tracking only — usage already reserved */
     pthread_mutex_lock(&mutex);
-
-    if (oom_check(dev, size)) {
-        /* Another process consumed memory between our pre-check and now */
+    if (new_allocated_list_entry(&e, 0, size, dev) != 0) {
         pthread_mutex_unlock(&mutex);
-        CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFree_v2, *address);
-        return CUDA_ERROR_OUT_OF_MEMORY;
+        cuMemoryFree(*address);
+        release_device_memory(dev, size);
+        return -1;
     }
-
-    allocated_list_entry *e;
-    INIT_ALLOCATED_LIST_ENTRY(e, 0, size, dev);
     e->entry->address = *address;
     LIST_ADD(device_overallocated, e);
-    add_gpu_device_memory_usage(getpid(), dev, size, 2);
-
     pthread_mutex_unlock(&mutex);
     return 0;
 }
 
+/* Track a pointer in the local list. Caller must already have reserved
+ * `size` via reserve_device_memory() (or equivalent usage accounting). */
 int add_chunk_only(CUdeviceptr address, size_t size, CUdevice dev) {
+    allocated_list_entry *e;
+
     pthread_mutex_lock(&mutex);
-    size_t addr=0;
-    size_t allocsize;
-    if (oom_check(dev,size)){
+    if (new_allocated_list_entry(&e, 0, size, dev) != 0) {
         pthread_mutex_unlock(&mutex);
         return -1;
     }
-    allocated_list_entry *e;
-    INIT_ALLOCATED_LIST_ENTRY(e, addr, size, dev);
-    LIST_ADD(device_overallocated,e);
-    //uint64_t t_size;
-    e->entry->address=address;
-    allocsize = size;
-    add_gpu_device_memory_usage(getpid(), dev, allocsize, 2);
+    e->entry->address = address;
+    LIST_ADD(device_overallocated, e);
     pthread_mutex_unlock(&mutex);
     return 0;
 }
