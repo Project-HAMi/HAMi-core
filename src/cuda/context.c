@@ -49,20 +49,6 @@ CUresult cuDevicePrimaryCtxGetState( CUdevice dev, unsigned int* flags, int* act
     return res;
 }
 
-/* Only reached when the retain could not be recorded at all, so there is no
- * local accounting to undo: hand the context back and report the failure. */
-static CUresult release_unaccounted_retain(CUdevice dev) {
-    CUresult release_result;
-
-    release_result = CUDA_OVERRIDE_CALL(cuda_library_entry,
-                                        cuDevicePrimaryCtxRelease_v2, dev);
-    if (release_result != CUDA_SUCCESS) {
-        LOG_ERROR("Failed to release an unaccounted primary context on "
-                  "device %d: %d", dev, release_result);
-    }
-    return CUDA_ERROR_OUT_OF_MEMORY;
-}
-
 CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
     size_t charge;
     size_t bytes_to_add = 0;
@@ -87,15 +73,10 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
     charge = context_size;
     /* An unknown size records the retain without a charge; a later retain
      * that knows the size charges it once. */
-    int record_result = primary_context_record_retain(
-        &context_accounting[dev], charge, &bytes_to_add);
-    if (record_result != 0) {
+    if (primary_context_record_retain(&context_accounting[dev], charge,
+                                      &bytes_to_add) != 0) {
         LOG_ERROR("Cannot account primary context retain on device %d",
                   dev);
-        res = release_unaccounted_retain(dev);
-        pthread_mutex_unlock(&context_accounting_lock);
-        pthread_mutex_unlock(&context_device_locks[dev]);
-        return res;
     }
     if (bytes_to_add > 0 &&
         add_gpu_device_memory_usage(getpid(), dev, bytes_to_add, 0) != 0) {
