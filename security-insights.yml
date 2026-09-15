@@ -1,7 +1,7 @@
 header:
-  schema-version: 2.2.0
-  last-updated: '2026-08-26'
-  last-reviewed: '2026-08-26'
+  schema-version: 2.1.0
+  last-updated: '2026-09-15'
+  last-reviewed: '2026-09-15'
   url: https://raw.githubusercontent.com/Project-HAMi/HAMi-core/main/security-insights.yml
   comment: |
     HAMi-core is one of the codebases that make up the HAMi project. It is
@@ -34,16 +34,17 @@ project:
   vulnerability-reporting:
     reports-accepted: true
     bug-bounty-available: false
-    policy: https://github.com/Project-HAMi/HAMi/security/policy
-    in-scope:
-      - A workload reaching another tenant's GPU memory, device or namespace
-    out-of-scope:
-      - A workload exceeding its own GPU quota by unsetting LD_PRELOAD
-      - A workload exceeding its own GPU quota via a statically linked CUDA runtime
-      - A workload exceeding its own GPU quota via ptrace on its own process
+    security-policy: https://github.com/Project-HAMi/HAMi/security/policy
     comment: |
       Reports are accepted through the HAMi advisory form at
       https://github.com/Project-HAMi/HAMi/security/advisories/new.
+
+      In scope: a workload reaching another tenant's GPU memory, device or
+      namespace.
+
+      Out of scope: a workload exceeding its own GPU quota by unsetting
+      LD_PRELOAD, by linking the CUDA runtime statically, or by calling ptrace
+      on its own process.
 
       HAMi-core is a cooperative quota mechanism on a trusted cluster, not a
       hard isolation boundary. The out-of-scope cases are triaged as bugs.
