@@ -65,6 +65,21 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_utilization_nvml_index")
+        # Links the production utilization watcher and supplies its own NVML
+        # entry points and shared-region helpers, so it needs no NVIDIA driver
+        # and no GPU at runtime.  Section garbage collection drops the watcher
+        # thread and rate limiter, which would otherwise pull in libcuda.
+        add_executable(${TEST_TARGET_NAME}
+            ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_utilization_watcher.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT})
     elseif (TEST_SCRIPT MATCHES ".*cu")
@@ -82,7 +97,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         target_link_libraries(${TEST_TARGET_NAME}
             -ldl dlsym_rtld_next_caller)
-    elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures")
+    elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures"
+            OR TEST_TARGET_NAME STREQUAL "test_utilization_nvml_index")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     else()
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread
@@ -127,6 +143,13 @@ set_tests_properties(nvml_v2_signatures PROPERTIES
 add_test(NAME pid_discovery
     COMMAND test_pid_discovery)
 set_tests_properties(pid_discovery PROPERTIES TIMEOUT 10)
+
+# The watcher must ask NVML for the NVML index it is walking, not the CUDA
+# index it maps to; the two only coincide when CUDA_VISIBLE_DEVICES is the
+# identity map (issue #318).
+add_test(NAME utilization_nvml_index
+    COMMAND test_utilization_nvml_index)
+set_tests_properties(utilization_nvml_index PROPERTIES TIMEOUT 10)
 if (TARGET vgpu)
     add_test(NAME dlsym_rtld_next_preloaded
         COMMAND test_dlsym_rtld_next)
