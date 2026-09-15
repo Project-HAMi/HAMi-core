@@ -19,4 +19,7 @@ int primary_context_record_retain(primary_context_accounting_t *state,
 int primary_context_record_release(primary_context_accounting_t *state,
                                    size_t *bytes_to_remove);
 
+/* Registers the fork handlers that reset accounting in the child. */
+int context_accounting_register_fork_handlers(void);
+
 #endif  // SRC_CUDA_CONTEXT_ACCOUNTING_H_
