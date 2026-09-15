@@ -874,7 +874,18 @@ void exit_handler() {
         return;
     }
 
-    int32_t my_pid = region_info.pid;
+    /*
+     * Identity is the calling process, not the cached parent pid.  After
+     * clone()/fork paths that skip pthread_atfork, region_info.pid still
+     * belongs to the parent; using it here would drop the parent's slot
+     * and sem_post a lock the parent still holds.
+     */
+    int32_t my_pid = getpid();
+    if (region_info.pid != 0 && region_info.pid != my_pid) {
+        LOG_DEBUG("Skip inherited exit cleanup; cached pid %d != self %d",
+                  region_info.pid, my_pid);
+        return;
+    }
     LOG_MSG("Cleanup on exit for PID %d", my_pid);
 
     // ========================================================================
@@ -924,12 +935,13 @@ void lock_shrreg() {
         struct timespec sem_ts;
         get_timespec(SEM_WAIT_TIME, &sem_ts);
 
+        SEQ_POINT_MARK(SEQ_BEFORE_ACQUIRE_SEMLOCK);
         int status = sem_timedwait(&region->sem, &sem_ts);
         SEQ_POINT_MARK(SEQ_ACQUIRE_SEMLOCK_OK);
 
         if (status == 0) {
             // TODO: irregular exit here will hang pending locks
-            region->owner_pid = region_info.pid;
+            region->owner_pid = (size_t)getpid();
             __sync_synchronize();
             SEQ_POINT_MARK(SEQ_UPDATE_OWNER_OK);
             trials = 0;
@@ -1159,8 +1171,9 @@ void print_all() {
 }
 
 void child_reinit_flag() {
-    LOG_DEBUG("Detect child pid: %d -> %d", region_info.pid, getpid());   
+    LOG_DEBUG("Detect child pid: %d -> %d", region_info.pid, getpid());
     region_info.init_status = PTHREAD_ONCE_INIT;
+    region_info.pid = getpid();
     postinit_lock_held = 0;
     atomic_flag_clear_explicit(&postinit_local_lock, memory_order_release);
 }

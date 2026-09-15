@@ -194,7 +194,8 @@ int setspec() {
             CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, cu_dev));
         CHECK_CU_RESULT(cuDeviceGetAttribute(&g_max_thread_per_sm[dev],
             CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_MULTIPROCESSOR, cu_dev));
-        g_total_cuda_cores[dev] = g_max_thread_per_sm[dev] * g_sm_num[dev] * FACTOR;
+        g_total_cuda_cores[dev] =
+            (int64_t)g_max_thread_per_sm[dev] * g_sm_num[dev] * FACTOR;
         LOG_INFO("setspec: device %d sm_num=%d max_threads_per_sm=%d total_cores=%ld FACTOR=%d",
                  dev, g_sm_num[dev], g_max_thread_per_sm[dev], g_total_cuda_cores[dev], FACTOR);
     }
@@ -222,7 +223,7 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
         continue;
       userutil[cudadev] = 0;
       nvmlDevice_t device;
-      CHECK_NVML_API(nvmlDeviceGetHandleByIndex(cudadev, &device));
+      CHECK_NVML_API(nvmlDeviceGetHandleByIndex(devi, &device));
 
       // OPTIMIZATION: Do slow NVML queries WITHOUT holding lock
       // This prevents blocking memory allocation operations
