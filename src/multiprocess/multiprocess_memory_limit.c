@@ -1397,6 +1397,7 @@ fail:
 }
 
 void initialized() {
+    load_env_from_file(ENV_OVERRIDE_FILE);
     pthread_mutex_init(&_kernel_mutex, NULL);
     char* _record_kernel_interval_env = getenv("RECORD_KERNEL_INTERVAL");
     if (_record_kernel_interval_env) {

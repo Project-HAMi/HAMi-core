@@ -32,7 +32,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     elseif (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
-            OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
+            OR TEST_TARGET_NAME STREQUAL "test_pid_discovery"
+            OR TEST_TARGET_NAME STREQUAL "test_override_env_preinit")
         # Focused regression tests built against the production sources they
         # exercise; section GC drops unrelated GPU-facing production functions.
         # test_pid_discovery needs utils.c; the rest reach the shared-region
@@ -50,6 +51,10 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         endif()
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
             _GNU_SOURCE)
+        if (TEST_TARGET_NAME STREQUAL "test_override_env_preinit")
+            target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+                ENV_OVERRIDE_FILE=\"/tmp/hami-test-overrideEnv\")
+        endif()
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
@@ -93,7 +98,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
-            OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
+            OR TEST_TARGET_NAME STREQUAL "test_pid_discovery"
+            OR TEST_TARGET_NAME STREQUAL "test_override_env_preinit")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         target_link_libraries(${TEST_TARGET_NAME}
@@ -131,6 +137,10 @@ set_tests_properties(device_id_guard PROPERTIES TIMEOUT 20)
 add_test(NAME fork_child_exit_cleanup
     COMMAND test_fork_child_exit_cleanup)
 set_tests_properties(fork_child_exit_cleanup PROPERTIES TIMEOUT 20)
+
+add_test(NAME override_env_preinit
+    COMMAND test_override_env_preinit)
+set_tests_properties(override_env_preinit PROPERTIES TIMEOUT 10)
 
 add_test(NAME dlsym_rtld_next
     COMMAND test_dlsym_rtld_next)
