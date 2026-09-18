@@ -320,21 +320,21 @@ static void test_deadline_not_renewed(const char *path) {
           "deadline holder release");
 }
 
-static void test_waiter_cancellation(const char *path) {
+static void test_waiter_death(const char *path) {
     int started[2];
     pid_t child;
     char byte;
     int status;
 
     check(hostpid_fallback_lock_acquire_at(path, getuid(), 500) == 0,
-          "cancellation holder acquire");
+          "waiter death holder acquire");
     if (pipe(started) != 0) {
-        check(0, "cancellation start pipe");
+        check(0, "waiter death start pipe");
         hostpid_fallback_lock_release();
         return;
     }
     child = fork();
-    check(child >= 0, "cancellation waiter fork");
+    check(child >= 0, "waiter death waiter fork");
     if (child < 0) {
         close(started[0]);
         close(started[1]);
@@ -357,28 +357,28 @@ static void test_waiter_cancellation(const char *path) {
     if (child > 0) {
         close(started[1]);
         check(read(started[0], &byte, 1) == 1,
-              "cancellation waiter started");
+              "waiter death waiter started");
         close(started[0]);
         if (access("/proc/self/fd", R_OK) == 0) {
             check(wait_until_child_opened(child, path) == 0,
-                  "cancellation waiter opened the lock object");
+                  "waiter death waiter opened the lock object");
         }
         check(kill(child, SIGKILL) == 0,
-              "cancellation waiter killed");
+              "waiter death waiter killed");
         check(waitpid(child, &status, 0) == child &&
                   WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL,
-              "cancellation waiter reaped");
+              "waiter death waiter reaped");
     }
     check(hostpid_fallback_lock_release() == 0,
-          "cancellation holder release");
+          "waiter death holder release");
     child = fork();
-    check(child >= 0, "post cancellation contender fork");
+    check(child >= 0, "post waiter death contender fork");
     if (child == 0) {
         _exit(child_acquire(path, 500));
     }
     if (child > 0) {
         check(wait_for_child(child, 0) == 0,
-              "lock recovers after waiter cancellation");
+              "lock recovers after waiter death");
     }
 }
 
@@ -790,7 +790,7 @@ int main(int argc, char **argv) {
     test_path_trust(path);
     test_live_holder_timeout(path);
     test_deadline_not_renewed(path);
-    test_waiter_cancellation(path);
+    test_waiter_death(path);
     test_owner_death(path);
     test_fork_cleanup(path);
     test_exec_cleanup(path, argv[0]);
