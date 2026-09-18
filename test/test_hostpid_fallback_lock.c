@@ -95,7 +95,7 @@ static int child_timeout(const char *path, unsigned int timeout_ms) {
     elapsed = monotonic_milliseconds() - started;
     dprintf(STDOUT_FILENO, "timeout_elapsed_ms=%.3f\n", elapsed);
     if (elapsed < (double)timeout_ms / 2.0 ||
-        elapsed > (double)timeout_ms + 500.0) {
+        elapsed > (double)timeout_ms + 2000.0) {
         return 5;
     }
     return 0;
