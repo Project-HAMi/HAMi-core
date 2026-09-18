@@ -14,8 +14,7 @@ build-in-docker:
 		sh -c "dnf install -y cmake git && \
            git config --global --add safe.directory /libvgpu && \
            rm -rf /libvgpu/build && \
-           bash ./build.sh && \
-           ctest --test-dir build --output-on-failure -R 'context_accounting|hostpid_fallback_lock'"
+           bash ./build.sh"
 .PHONY: build-in-docker
 
 check-cuda-hook-consistency:

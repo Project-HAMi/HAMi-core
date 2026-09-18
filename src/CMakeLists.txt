@@ -14,9 +14,9 @@ add_subdirectory(cuda)
 add_subdirectory(nvml)
 
 set(LIBVGPU vgpu)
-add_library(${LIBVGPU} SHARED libvgpu.c utils.c log_utils.c hostpid_fallback_lock.c $<TARGET_OBJECTS:nvml_mod> $<TARGET_OBJECTS:cuda_mod> $<TARGET_OBJECTS:allocator_mod> $<TARGET_OBJECTS:multiprocess_mod>)
+add_library(${LIBVGPU} SHARED libvgpu.c utils.c log_utils.c $<TARGET_OBJECTS:nvml_mod> $<TARGET_OBJECTS:cuda_mod> $<TARGET_OBJECTS:allocator_mod> $<TARGET_OBJECTS:multiprocess_mod>)
 target_compile_options(${LIBVGPU} PUBLIC ${LIBRARY_COMPILE_FLAGS})
-target_link_libraries(${LIBVGPU} PUBLIC -lcuda -lnvidia-ml -lpthread)
+target_link_libraries(${LIBVGPU} PUBLIC -lcuda -lnvidia-ml)
 
 if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
 add_custom_target(strip_symbol ALL
