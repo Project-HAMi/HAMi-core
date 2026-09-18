@@ -21,10 +21,10 @@ int hostpid_fallback_lock_acquire_at_until(
 int hostpid_fallback_lock_active_fd(void);
 #endif
 
-/* One process-wide lock. Overlapping acquire/release operations return EBUSY;
- * acquiring an already held lock returns EDEADLK. Once acquire has returned,
- * any thread in the process may release it. Deferred cancellation is handled
- * before an operation returns; asynchronous cancellation is unsupported. */
+/* One lock per process, for one caller at a time: postInit() runs under
+ * pthread_once, so acquire and release never overlap. Acquiring a lock this
+ * process already holds returns EDEADLK. Concurrent callers and thread
+ * cancellation are not supported. */
 int hostpid_fallback_lock_deadline_after_ms(struct timespec *deadline,
                                             unsigned int timeout_ms);
 int hostpid_fallback_lock_acquire_until(const struct timespec *deadline);
