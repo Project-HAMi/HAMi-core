@@ -142,19 +142,6 @@ static int validate_directory_metadata(const struct stat *directory_stat,
     return 0;
 }
 
-#ifdef __linux__
-static int validate_supported_filesystem(int fd);
-
-static int validate_path_component(int fd,
-                                   const struct stat *component_stat,
-                                   uid_t trusted_owner) {
-    if (validate_directory_metadata(component_stat, trusted_owner) != 0) {
-        return -1;
-    }
-    return validate_supported_filesystem(fd);
-}
-#endif
-
 static int open_directory_without_symlinks(const char *path,
                                            uid_t trusted_owner,
                                            int validate_components) {
@@ -174,8 +161,7 @@ static int open_directory_without_symlinks(const char *path,
         struct stat root_stat;
 
         if (fstat(directory_fd, &root_stat) != 0 ||
-            validate_path_component(directory_fd, &root_stat,
-                                    trusted_owner) != 0) {
+            validate_directory_metadata(&root_stat, trusted_owner) != 0) {
             int saved_errno = errno;
 
             close(directory_fd);
@@ -222,8 +208,8 @@ static int open_directory_without_symlinks(const char *path,
             struct stat component_stat;
 
             if (fstat(next_fd, &component_stat) != 0 ||
-                validate_path_component(next_fd, &component_stat,
-                                        trusted_owner) != 0) {
+                validate_directory_metadata(&component_stat,
+                                            trusted_owner) != 0) {
                 int saved_errno = errno;
 
                 close(next_fd);
