@@ -160,6 +160,7 @@ static int wait_until_child_opened(pid_t child, const char *path) {
 static void test_absolute_deadline_api(const char *path) {
     struct timespec deadline;
     struct timespec delay = {.tv_sec = 0, .tv_nsec = 5000000L};
+    int attempt;
 
     errno = 0;
     check(hostpid_fallback_lock_deadline_after_ms(NULL, 50U) == -1 &&
@@ -169,6 +170,12 @@ static void test_absolute_deadline_api(const char *path) {
     check(hostpid_fallback_lock_deadline_after_ms(&deadline, 0U) == -1 &&
               errno == EINVAL,
           "zero deadline duration is rejected");
+    /* 1999 ms carries into tv_sec for almost any starting nanosecond value. */
+    for (attempt = 0; attempt < 20; attempt++) {
+        check(hostpid_fallback_lock_deadline_after_ms(&deadline, 1999U) == 0 &&
+                  deadline.tv_nsec >= 0 && deadline.tv_nsec < 1000000000L,
+              "deadline nanoseconds stay normalized");
+    }
     errno = 0;
     check(hostpid_fallback_lock_acquire_at_until(path, getuid(), NULL) == -1 &&
               errno == EINVAL,
