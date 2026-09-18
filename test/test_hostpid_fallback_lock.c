@@ -764,6 +764,53 @@ static void test_ancestor_change_while_waiting(void) {
 #endif
 }
 
+static void test_holder_death_with_live_child(const char *path) {
+    int ready[2];
+    pid_t holder;
+    char byte;
+
+    check(pipe(ready) == 0, "holder death pipe");
+    holder = fork();
+    check(holder >= 0, "holder death fork");
+    if (holder == 0) {
+        pid_t keeper;
+
+        alarm(10);
+        close(ready[0]);
+        hostpid_fallback_lock_after_fork();
+        if (hostpid_fallback_lock_acquire_at(path, getuid(), 500) != 0) {
+            _exit(2);
+        }
+        keeper = fork();
+        if (keeper < 0) {
+            _exit(3);
+        }
+        if (keeper == 0) {
+            /* Drops the inherited descriptor and outlives the holder, so only
+             * the holder's death can free the lock.  Alarms do not survive
+             * fork, so this child sets its own bound. */
+            alarm(10);
+            hostpid_fallback_lock_after_fork();
+            if (write(ready[1], "1", 1) != 1) {
+                _exit(4);
+            }
+            sleep(9);
+            _exit(0);
+        }
+        sleep(9);
+        _exit(0);
+    }
+    close(ready[1]);
+    check(read(ready[0], &byte, 1) == 1, "holder and its child are ready");
+    close(ready[0]);
+    check(kill(holder, SIGKILL) == 0, "holder killed");
+    check(waitpid(holder, NULL, 0) == holder, "dead holder reaped");
+    check(hostpid_fallback_lock_acquire_at(path, getuid(), 2000) == 0,
+          "lock recovers while a forked child is still alive");
+    check(hostpid_fallback_lock_release() == 0,
+          "holder death recovery release");
+}
+
 int main(int argc, char **argv) {
     char directory[] = "/tmp/hami-hostpid-global-lock.XXXXXX";
     char *path;
@@ -793,6 +840,7 @@ int main(int argc, char **argv) {
     test_waiter_death(path);
     test_owner_death(path);
     test_fork_cleanup(path);
+    test_holder_death_with_live_child(path);
     test_exec_cleanup(path, argv[0]);
     test_permission_change_while_waiting(path);
     test_path_replacement(path);
