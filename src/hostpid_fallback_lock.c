@@ -345,26 +345,8 @@ static int validate_lock_object(int fd, const char *path,
                                 int validate_components,
                                 int require_readonly) {
     struct stat current_stat;
-    struct stat descriptor_stat;
     int current_fd;
 
-    if (validate_directory_metadata(opened_stat, trusted_owner) != 0) {
-        return -1;
-    }
-    if (fstat(fd, &descriptor_stat) != 0) {
-        return -1;
-    }
-    if (descriptor_stat.st_dev != opened_stat->st_dev ||
-        descriptor_stat.st_ino != opened_stat->st_ino) {
-        errno = ESTALE;
-        return -1;
-    }
-    if (validate_directory_metadata(&descriptor_stat, trusted_owner) != 0) {
-        return -1;
-    }
-    if (fcntl(fd, F_GETFD) < 0) {
-        return -1;
-    }
     current_fd = open_directory_without_symlinks(path, trusted_owner,
                                                   validate_components);
     if (current_fd < 0) {
@@ -462,7 +444,6 @@ static int acquire_unlocked(const char *path, uid_t trusted_owner,
     struct stat opened_stat;
     unsigned int retry_us = HOSTPID_FALLBACK_LOCK_INITIAL_RETRY_US;
     int expected = -1;
-    int descriptor_flags;
     int fd;
 
     if (path == NULL || path[0] != '/' || deadline == NULL) {
@@ -475,15 +456,6 @@ static int acquire_unlocked(const char *path, uid_t trusted_owner,
     fd = open_directory_without_symlinks(path, trusted_owner,
                                          validate_components);
     if (fd < 0) {
-        return -1;
-    }
-    descriptor_flags = fcntl(fd, F_GETFD);
-    if (descriptor_flags < 0 ||
-        fcntl(fd, F_SETFD, descriptor_flags | FD_CLOEXEC) != 0) {
-        int saved_errno = errno;
-
-        close(fd);
-        errno = saved_errno;
         return -1;
     }
     if (fstat(fd, &opened_stat) != 0) {
