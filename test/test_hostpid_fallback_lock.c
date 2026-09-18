@@ -811,6 +811,45 @@ static void test_holder_death_with_live_child(const char *path) {
           "holder death recovery release");
 }
 
+static void test_release_with_inherited_descriptor(const char *path) {
+    int ready[2];
+    pid_t keeper;
+    pid_t contender;
+    char byte;
+
+    check(hostpid_fallback_lock_acquire_at(path, getuid(), 500) == 0,
+          "inherited descriptor holder acquire");
+    check(pipe(ready) == 0, "inherited descriptor pipe");
+    keeper = fork();
+    check(keeper >= 0, "inherited descriptor fork");
+    if (keeper == 0) {
+        /* No after_fork call, so this child keeps the inherited descriptor
+         * and only an explicit unlock frees the lock. */
+        alarm(10);
+        close(ready[0]);
+        if (write(ready[1], "1", 1) != 1) {
+            _exit(2);
+        }
+        sleep(9);
+        _exit(0);
+    }
+    close(ready[1]);
+    check(read(ready[0], &byte, 1) == 1, "inherited descriptor child ready");
+    close(ready[0]);
+    check(hostpid_fallback_lock_release() == 0,
+          "release with an inherited descriptor");
+    contender = fork();
+    check(contender >= 0, "inherited descriptor contender fork");
+    if (contender == 0) {
+        _exit(child_acquire(path, 2000));
+    }
+    check(wait_for_child(contender, 0) == 0,
+          "lock is free while the child still holds the descriptor");
+    check(kill(keeper, SIGKILL) == 0, "inherited descriptor child killed");
+    check(waitpid(keeper, NULL, 0) == keeper,
+          "inherited descriptor child reaped");
+}
+
 int main(int argc, char **argv) {
     char directory[] = "/tmp/hami-hostpid-global-lock.XXXXXX";
     char *path;
@@ -841,6 +880,7 @@ int main(int argc, char **argv) {
     test_owner_death(path);
     test_fork_cleanup(path);
     test_holder_death_with_live_child(path);
+    test_release_with_inherited_descriptor(path);
     test_exec_cleanup(path, argv[0]);
     test_permission_change_while_waiting(path);
     test_path_replacement(path);
