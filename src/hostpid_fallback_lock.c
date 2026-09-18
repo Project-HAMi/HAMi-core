@@ -585,16 +585,6 @@ int hostpid_fallback_lock_acquire_until(const struct timespec *deadline) {
     return acquire_at_until(HOSTPID_FALLBACK_LOCK_PATH, 0, deadline, 1, 1);
 }
 
-int hostpid_fallback_lock_acquire(void) {
-    struct timespec deadline;
-
-    if (hostpid_fallback_lock_deadline_after_ms(
-            &deadline, HOSTPID_FALLBACK_LOCK_TIMEOUT_MS) != 0) {
-        return -1;
-    }
-    return hostpid_fallback_lock_acquire_until(&deadline);
-}
-
 static int release_unlocked(void) {
     int fd = atomic_exchange_explicit(&active_lock_fd, -1,
                                       memory_order_acq_rel);
@@ -643,6 +633,8 @@ void hostpid_fallback_lock_after_fork(void) {
     atomic_flag_clear_explicit(&operation_in_progress, memory_order_release);
 }
 
+#ifdef HOSTPID_FALLBACK_LOCK_TESTING
 int hostpid_fallback_lock_active_fd(void) {
     return atomic_load_explicit(&active_lock_fd, memory_order_acquire);
 }
+#endif

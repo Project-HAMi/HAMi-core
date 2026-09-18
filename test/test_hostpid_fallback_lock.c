@@ -29,81 +29,6 @@ static void signal_waiter_ready(void) {
     }
 }
 
-static int parse_unsigned(const char *value, uintmax_t *parsed) {
-    char *end = NULL;
-
-    errno = 0;
-    *parsed = strtoumax(value, &end, 10);
-    return errno == 0 && end != value && *end == '\0' ? 0 : -1;
-}
-
-static int probe_lock(const char *path, const char *owner_value,
-                      const char *timeout_value, const char *hold_value,
-                      int expect_timeout) {
-    struct timespec hold;
-    uintmax_t owner;
-    uintmax_t timeout_ms;
-    uintmax_t hold_ms;
-
-    if (parse_unsigned(owner_value, &owner) != 0 ||
-        parse_unsigned(timeout_value, &timeout_ms) != 0 ||
-        parse_unsigned(hold_value, &hold_ms) != 0 ||
-        owner > (uintmax_t)(uid_t)-1 || timeout_ms > UINT_MAX ||
-        hold_ms > UINT_MAX) {
-        return 2;
-    }
-    if (hostpid_fallback_lock_acquire_at(path, (uid_t)owner,
-                                         (unsigned int)timeout_ms) != 0) {
-        if (expect_timeout && errno == ETIMEDOUT) {
-            puts("timed_out");
-            return 0;
-        }
-        perror("hostpid_fallback_lock_acquire_at");
-        return 3;
-    }
-    if (expect_timeout) {
-        hostpid_fallback_lock_release();
-        fputs("unexpected_acquire\n", stderr);
-        return 4;
-    }
-    puts("acquired");
-    fflush(stdout);
-    hold.tv_sec = (time_t)(hold_ms / UINTMAX_C(1000));
-    hold.tv_nsec = (int64_t)(hold_ms % UINTMAX_C(1000)) * INT64_C(1000000);
-    while (nanosleep(&hold, &hold) != 0 && errno == EINTR) {
-    }
-    if (hostpid_fallback_lock_release() != 0) {
-        perror("hostpid_fallback_lock_release");
-        return 5;
-    }
-    return 0;
-}
-
-static int probe_default_lock(const char *hold_value) {
-    struct timespec hold;
-    uintmax_t hold_ms;
-
-    if (parse_unsigned(hold_value, &hold_ms) != 0 || hold_ms > UINT_MAX) {
-        return 2;
-    }
-    if (hostpid_fallback_lock_acquire() != 0) {
-        fprintf(stderr, "rejected_errno=%d\n", errno);
-        perror("hostpid_fallback_lock_acquire");
-        return 3;
-    }
-    puts("acquired");
-    fflush(stdout);
-    hold.tv_sec = (time_t)(hold_ms / UINTMAX_C(1000));
-    hold.tv_nsec = (int64_t)(hold_ms % UINTMAX_C(1000)) * INT64_C(1000000);
-    while (nanosleep(&hold, &hold) != 0 && errno == EINTR) {
-    }
-    if (hostpid_fallback_lock_release() != 0) {
-        perror("hostpid_fallback_lock_release");
-        return 4;
-    }
-    return 0;
-}
-
 static void check(int condition, const char *message) {
     if (!condition) {
         fprintf(stderr, "FAIL: %s (errno=%d: %s)\n", message, errno,
@@ -841,15 +766,6 @@ int main(int argc, char **argv) {
 
         errno = 0;
         return fcntl(fd, F_GETFD) == -1 && errno == EBADF ? 0 : 2;
-    }
-    if (argc == 6 && strcmp(argv[1], "--probe") == 0) {
-        return probe_lock(argv[2], argv[3], argv[4], argv[5], 0);
-    }
-    if (argc == 6 && strcmp(argv[1], "--expect-timeout") == 0) {
-        return probe_lock(argv[2], argv[3], argv[4], argv[5], 1);
-    }
-    if (argc == 3 && strcmp(argv[1], "--probe-default") == 0) {
-        return probe_default_lock(argv[2]);
     }
 
     path = mkdtemp(directory);
