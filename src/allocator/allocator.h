@@ -156,6 +156,13 @@ CUresult view_vgpu_allocator();
 // Checks if oom
 int oom_check(const int dev,size_t addon);
 
+/* Cross-process check-and-reserve under lock_shrreg.
+ * Returns 0 on success, CUDA_ERROR_OUT_OF_MEMORY if the limit would be exceeded.
+ * On success, size is already accounted in shared usage; call
+ * release_device_memory() if the subsequent CUDA alloc fails. */
+int reserve_device_memory(CUdevice dev, size_t size);
+void release_device_memory(CUdevice dev, size_t size);
+
 // Allocate and free device memory
 int allocate_raw(CUdeviceptr *dptr, size_t size);
 int free_raw(CUdeviceptr dptr);

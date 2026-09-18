@@ -33,12 +33,17 @@ size_t round_up(size_t size, size_t unit) {
     return size;
 }
 
-int oom_check(const int dev, size_t addon) {
+/* already_locked: caller already holds lock_shrreg (not reentrant). */
+static int oom_check_impl(const int dev, size_t addon, int already_locked) {
     CUdevice d;
-    if (dev==-1)
-        cuCtxGetDevice(&d);
-    else
+    if (dev == -1) {
+        if (cuCtxGetDevice(&d) != CUDA_SUCCESS) {
+            LOG_WARN("oom_check: no current context, skipping enforcement");
+            return 0;
+        }
+    } else {
         d=dev;
+    }
     uint64_t limit = get_current_device_memory_limit(d);
     size_t _usage = get_gpu_memory_usage(d);
 
@@ -49,16 +54,43 @@ int oom_check(const int dev, size_t addon) {
     size_t new_allocated = _usage + addon;
     LOG_INFO("_usage=%lu limit=%lu new_allocated=%lu",_usage,limit,new_allocated);
     if (new_allocated > limit) {
+        int cleared;
+
         LOG_ERROR("Device %d OOM %lu / %lu", d, new_allocated, limit);
 
-        lock_shrreg();
-        int cleared = clear_proc_slot_nolock(1);
-        unlock_shrreg();
+        if (already_locked) {
+            cleared = clear_proc_slot_nolock(1);
+        } else {
+            lock_shrreg();
+            cleared = clear_proc_slot_nolock(1);
+            unlock_shrreg();
+        }
         if (cleared > 0)
-            return oom_check(dev,addon);
+            return oom_check_impl(dev, addon, already_locked);
         return 1;
     }
     return 0;
+}
+
+int oom_check(const int dev, size_t addon) {
+    return oom_check_impl(dev, addon, 0);
+}
+
+int reserve_device_memory(CUdevice dev, size_t size) {
+    lock_shrreg();
+    if (oom_check_impl(dev, size, 1)) {
+        unlock_shrreg();
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+    add_gpu_device_memory_usage(getpid(), dev, size, 2);
+    unlock_shrreg();
+    return 0;
+}
+
+void release_device_memory(CUdevice dev, size_t size) {
+    lock_shrreg();
+    rm_gpu_device_memory_usage(getpid(), dev, size, 2);
+    unlock_shrreg();
 }
 
 CUresult view_vgpu_allocator() {
@@ -109,14 +141,38 @@ void allocator_init() {
     pthread_mutex_init(&mutex,NULL);
 }
 
+/* Wrap INIT_ALLOCATED_LIST_ENTRY so QUIT_WITH_ERROR returns here, not from
+ * callers that hold mutex / CUDA memory / shared reservations. */
+static int new_allocated_list_entry(allocated_list_entry **out,
+                                    CUdeviceptr address, size_t size,
+                                    CUdevice dev) {
+    allocated_list_entry *e;
+    INIT_ALLOCATED_LIST_ENTRY(e, address, size, dev);
+    *out = e;
+    return 0;
+}
+
 int add_chunk(CUdeviceptr *address, size_t size) {
     CUdevice dev;
     CUresult res;
+    allocated_list_entry *e;
 
-    cuCtxGetDevice(&dev);
+    if (cuCtxGetDevice(&dev) != CUDA_SUCCESS) {
+        /* No current context on this thread (for example a worker thread that
+         * never bound one). We cannot attribute or bound this allocation to a
+         * device, so forward it to the driver rather than index per-device
+         * state with an undefined id. */
+        LOG_WARN("add_chunk: no current context, forwarding allocation without tracking");
+        if (size <= IPCSIZE) {
+            return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAlloc_v2, address, size);
+        }
+        return cuMemoryAllocate(address, size, NULL);
+    }
 
-    /* OOM pre-check without lock */
-    if (oom_check(dev, size))
+    /* Reserve under the shared-region lock so concurrent processes cannot
+     * both pass oom_check before either commits usage. CUDA alloc stays
+     * outside the lock. */
+    if (reserve_device_memory(dev, size) != 0)
         return CUDA_ERROR_OUT_OF_MEMORY;
 
     /* GPU allocation outside lock, the expensive part */
@@ -127,44 +183,36 @@ int add_chunk(CUdeviceptr *address, size_t size) {
     }
     if (res != CUDA_SUCCESS) {
         LOG_ERROR("cuMemoryAllocate failed res=%d", res);
+        release_device_memory(dev, size);
         return res;
     }
 
-    /* Tracking inside lock, pure in-memory ops, microseconds */
+    /* Local list tracking only — usage already reserved */
     pthread_mutex_lock(&mutex);
-
-    if (oom_check(dev, size)) {
-        /* Another process consumed memory between our pre-check and now */
+    if (new_allocated_list_entry(&e, 0, size, dev) != 0) {
         pthread_mutex_unlock(&mutex);
-        CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFree_v2, *address);
-        return CUDA_ERROR_OUT_OF_MEMORY;
+        cuMemoryFree(*address);
+        release_device_memory(dev, size);
+        return -1;
     }
-
-    allocated_list_entry *e;
-    INIT_ALLOCATED_LIST_ENTRY(e, 0, size, dev);
     e->entry->address = *address;
     LIST_ADD(device_overallocated, e);
-    add_gpu_device_memory_usage(getpid(), dev, size, 2);
-
     pthread_mutex_unlock(&mutex);
     return 0;
 }
 
+/* Track a pointer in the local list. Caller must already have reserved
+ * `size` via reserve_device_memory() (or equivalent usage accounting). */
 int add_chunk_only(CUdeviceptr address, size_t size, CUdevice dev) {
+    allocated_list_entry *e;
+
     pthread_mutex_lock(&mutex);
-    size_t addr=0;
-    size_t allocsize;
-    if (oom_check(dev,size)){
+    if (new_allocated_list_entry(&e, 0, size, dev) != 0) {
         pthread_mutex_unlock(&mutex);
         return -1;
     }
-    allocated_list_entry *e;
-    INIT_ALLOCATED_LIST_ENTRY(e, addr, size, dev);
-    LIST_ADD(device_overallocated,e);
-    //uint64_t t_size;
-    e->entry->address=address;
-    allocsize = size;
-    add_gpu_device_memory_usage(getpid(), dev, allocsize, 2);
+    e->entry->address = address;
+    LIST_ADD(device_overallocated, e);
     pthread_mutex_unlock(&mutex);
     return 0;
 }
@@ -240,16 +288,22 @@ int free_raw(CUdeviceptr dptr) {
 int remove_chunk_async(
     allocated_list *a_list, CUdeviceptr dptr, CUstream hStream) {
     size_t t_size;
+    CUdevice t_dev;
     allocated_list_entry *val;
     for (val = a_list->head; val != NULL; val = val->next) {
         if (val->entry->address == dptr) {
             t_size=val->entry->length;
+            /* Release against the device recorded when the allocation was
+             * charged, captured before LIST_REMOVE frees the entry. The
+             * freeing thread may have no current context, or a different
+             * current device, so asking cuCtxGetDevice here would skip or
+             * misattribute the release and leave the usage charged, which
+             * later surfaces as a spurious OOM. */
+            t_dev = val->entry->dev;
             CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemFreeAsync,dptr,hStream);
             LIST_REMOVE(a_list,val);
             a_list->limit-=t_size;
-            CUdevice dev;
-            cuCtxGetDevice(&dev);
-            rm_gpu_device_memory_usage(getpid(),dev,t_size,2);
+            rm_gpu_device_memory_usage(getpid(), t_dev, t_size, 2);
             return 0;
         }
     }
