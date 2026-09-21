@@ -16,7 +16,7 @@ jobs:
       checks: write
     steps:
     - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-    - uses: reviewdog/action-cpplint@9552c62f4bd516c1e3a6f84eae56bd864cc304c6 # v1.11.0
+    - uses: reviewdog/action-cpplint@5f1bbc6ecc3dc6d9b2cb8ddae490464240ae415d # v1.12.0
       with:
         github_token: ${{ secrets.github_token }}
         flags: --linelength=120 --extensions=h,hpp,c,cpp,cc,cu,hh,ipp
