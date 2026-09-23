@@ -248,7 +248,10 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemsetD32Async);
     DLSYM_HOOK_FUNC(cuMemsetD8_v2);
     DLSYM_HOOK_FUNC(cuMemsetD8Async);
+    /* memory.c compiles this one only below 13.0; match it. */
+#if CUDA_VERSION < 13000
     DLSYM_HOOK_FUNC(cuMemAdvise);
+#endif
     DLSYM_HOOK_FUNC(cuMemAdvise_v2);
     DLSYM_HOOK_FUNC(cuEventCreate);
     DLSYM_HOOK_FUNC(cuEventDestroy_v2);
@@ -295,7 +298,10 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemcpy3DAsync_v2);
     DLSYM_HOOK_FUNC(cuMemcpy3DPeer);
     DLSYM_HOOK_FUNC(cuMemcpy3DPeerAsync);
+    /* Same as cuMemAdvise above. */
+#if CUDA_VERSION < 13000
     DLSYM_HOOK_FUNC(cuMemPrefetchAsync);
+#endif
     DLSYM_HOOK_FUNC(cuMemPrefetchAsync_v2);
     DLSYM_HOOK_FUNC(cuMemRangeGetAttribute);
     DLSYM_HOOK_FUNC(cuMemRangeGetAttributes);
