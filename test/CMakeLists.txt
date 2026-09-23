@@ -69,6 +69,23 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_meminfo_null_out")
+        # Links the production cuMemGetInfo_v2 and supplies its own entry
+        # table, so it needs no driver and no GPU.
+        add_executable(${TEST_TARGET_NAME}
+            ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/memory.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/allocator/allocator.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_memory_limit.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        # memory.c only compiles cuMemGetInfo_v2 under this, and a bare
+        # cmake .. leaves it unset.
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE HOOK_MEMINFO_ENABLE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures")
         # Links the production NVML pass-through wrappers and supplies its own
         # entry table, so it needs no NVIDIA driver and no GPU at runtime.
@@ -117,7 +134,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures"
             OR TEST_TARGET_NAME STREQUAL "test_utilization_nvml_index")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
-    elseif (TEST_TARGET_NAME STREQUAL "test_memory_index_map")
+    elseif (TEST_TARGET_NAME STREQUAL "test_memory_index_map"
+            OR TEST_TARGET_NAME STREQUAL "test_meminfo_null_out")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread -ldl)
     else()
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread
@@ -155,6 +173,10 @@ set_tests_properties(memory_index_map PROPERTIES TIMEOUT 20)
 add_test(NAME limit_env_parsing
     COMMAND test_limit_env_parsing)
 set_tests_properties(limit_env_parsing PROPERTIES TIMEOUT 20)
+# libnvoptix passes free=NULL and the hook used to dereference it (issue #333).
+add_test(NAME meminfo_null_out
+    COMMAND test_meminfo_null_out)
+set_tests_properties(meminfo_null_out PROPERTIES TIMEOUT 20)
 
 add_test(NAME fork_child_exit_cleanup
     COMMAND test_fork_child_exit_cleanup)

@@ -514,33 +514,43 @@ CUresult cuMemAdvise_v2(CUdeviceptr devPtr, size_t count, CUmem_advise advice, C
 #ifdef HOOK_MEMINFO_ENABLE
 CUresult cuMemGetInfo_v2(size_t* free, size_t* total) {
     CUdevice dev;
+    size_t drv_free = 0, drv_total = 0, out_free, out_total;
     LOG_DEBUG("cuMemGetInfo_v2");
     ENSURE_INITIALIZED();
     CHECK_DRV_API(cuCtxGetDevice(&dev));
     size_t usage = get_current_device_memory_usage(cuda_to_nvml_map(dev));
     size_t limit = get_current_device_memory_limit(dev);
+    /* libnvoptix calls this with free=NULL, which the driver accepts, so read
+       into locals and write back only what the caller asked for. */
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemGetInfo_v2,
+                                      &drv_free, &drv_total);
+    if (res != CUDA_SUCCESS) {
+        return res;
+    }
+
     if (limit == 0) {
-        CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
-        LOG_INFO("orig free=%ld total=%ld", *free, *total);
-        *free = *total - usage;
-        LOG_INFO("after free=%ld total=%ld", *free, *total);
-        return CUDA_SUCCESS;
+        out_total = drv_total;
+        out_free = drv_total - usage;
     } else {
-        CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemGetInfo_v2, free, total);
-        LOG_INFO("orig free=%ld total=%ld limit=%ld usage=%ld",
-            *free, *total, limit, usage);
         // Ensure total memory does not exceed the physical or imposed limit.
-        size_t actual_limit = (limit > *total) ? *total : limit;
+        size_t actual_limit = (limit > drv_total) ? drv_total : limit;
         size_t clamped = (usage > limit) ? limit : usage;
         if (usage > limit) {
             LOG_WARN("CUDA meminfo: usage %lu exceeds limit %lu, clamping", usage, limit);
         }
-        *free = (actual_limit > clamped) ? (actual_limit - clamped) : 0;
-        *total = actual_limit;
-        LOG_INFO("after free=%ld total=%ld limit=%ld usage=%ld",
-            *free, *total, limit, usage);
-        return CUDA_SUCCESS;
+        out_total = actual_limit;
+        out_free = (actual_limit > clamped) ? (actual_limit - clamped) : 0;
     }
+    LOG_INFO("cuMemGetInfo_v2 drv_free=%ld drv_total=%ld free=%ld total=%ld limit=%ld usage=%ld",
+        drv_free, drv_total, out_free, out_total, limit, usage);
+
+    if (free != NULL) {
+        *free = out_free;
+    }
+    if (total != NULL) {
+        *total = out_total;
+    }
+    return CUDA_SUCCESS;
 }
 #endif
 
