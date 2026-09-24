@@ -45,7 +45,8 @@ static int oom_check_impl(const int dev, size_t addon, int already_locked) {
         d=dev;
     }
     uint64_t limit = get_current_device_memory_limit(d);
-    size_t _usage = get_gpu_memory_usage(d);
+    /* limit[] is CUDA indexed, used[] is NVML indexed. */
+    size_t _usage = get_gpu_memory_usage(cuda_to_nvml_map(d));
 
     if (limit == 0) {
         return 0;
@@ -103,7 +104,7 @@ CUresult view_vgpu_allocator() {
         total+=al->entry->length;
     }
     LOG_INFO("total=%lu",total);
-    size_t t = get_current_device_memory_usage(0);
+    size_t t = get_current_device_memory_usage(cuda_to_nvml_map(0));
     LOG_INFO("current_device_memory_usage:%lu",t);
     return 0;
 }
