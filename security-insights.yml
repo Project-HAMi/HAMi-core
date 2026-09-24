@@ -1,7 +1,7 @@
 header:
   schema-version: 2.1.0
-  last-updated: '2026-09-15'
-  last-reviewed: '2026-09-15'
+  last-updated: '2026-09-22'
+  last-reviewed: '2026-09-22'
   url: https://raw.githubusercontent.com/Project-HAMi/HAMi-core/main/security-insights.yml
   comment: |
     HAMi-core is one of the codebases that make up the HAMi project. It is
@@ -65,6 +65,8 @@ repository:
       primary: false
   documentation:
     contributing-guide: https://github.com/Project-HAMi/HAMi-core/blob/main/CONTRIBUTING.md
+    governance: https://github.com/Project-HAMi/community/blob/main/governance.md
+    review-policy: https://github.com/Project-HAMi/HAMi-core/blob/main/CONTRIBUTING.md
     security-policy: https://github.com/Project-HAMi/HAMi-core/blob/main/SECURITY.md
   license:
     url: https://github.com/Project-HAMi/HAMi-core/blob/main/LICENSE
@@ -73,12 +75,12 @@ repository:
     automated-pipeline: true
     changelog: https://github.com/Project-HAMi/HAMi/releases/tag/{version}
     distribution-points:
-      - uri: pkg:docker/projecthami/hamicore
+      - uri: https://hub.docker.com/r/projecthami/hamicore
         comment: |
-          The primary artifact. HAMi-core carries no tags of its own; it is
-          consumed as the libvgpu submodule and released on HAMi's version
-          line by the release-image-hamicore job in Project-HAMi/HAMi, for
-          linux/amd64 and linux/arm64.
+          The primary artifact, pkg:docker/projecthami/hamicore. HAMi-core
+          carries no tags of its own; it is consumed as the libvgpu submodule
+          and released on HAMi's version line by the release-image-hamicore
+          job in Project-HAMi/HAMi, for linux/amd64 and linux/arm64.
 
           Each release is signed with keyless cosign. The signature is stored
           as an OCI 1.1 referrer of type
@@ -88,9 +90,10 @@ repository:
           cosign verify projecthami/hamicore:{version}
             --certificate-identity-regexp 'https://github.com/Project-HAMi/HAMi/.*'
             --certificate-oidc-issuer https://token.actions.githubusercontent.com
-      - uri: pkg:docker/projecthami/hami
+      - uri: https://hub.docker.com/r/projecthami/hami
         comment: |
-          The same libvgpu.so is also copied into the main HAMi image, at
+          pkg:docker/projecthami/hami. The same libvgpu.so is also copied
+          into the main HAMi image, at
           /k8s-vgpu/lib/nvidia/libvgpu.so.{version}.
       - uri: https://github.com/Project-HAMi/HAMi-core
         comment: |
