@@ -32,6 +32,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     elseif (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
+            OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
         # Focused regression tests built against the production sources they
         # exercise; section GC drops unrelated GPU-facing production functions.
@@ -93,6 +94,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
+            OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
@@ -127,6 +129,11 @@ set_tests_properties(postinit_owner_death PROPERTIES TIMEOUT 20)
 add_test(NAME device_id_guard
     COMMAND test_device_id_guard)
 set_tests_properties(device_id_guard PROPERTIES TIMEOUT 20)
+
+# A refused limit is no limit, so the parser has to accept the usual spellings.
+add_test(NAME limit_env_parsing
+    COMMAND test_limit_env_parsing)
+set_tests_properties(limit_env_parsing PROPERTIES TIMEOUT 20)
 
 add_test(NAME fork_child_exit_cleanup
     COMMAND test_fork_child_exit_cleanup)
