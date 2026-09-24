@@ -71,8 +71,9 @@ endif()
 if(GIT_FOUND)
     message(STATUS "Git original branch is ${GIT_BRANCH}")
     if(GIT_BRANCH)
-        string(REPLACE "-" "_" GIT_BRANCH "${GIT_BRANCH}")
-        string(REPLACE "/" "_" GIT_BRANCH "${GIT_BRANCH}")
+        # The name becomes part of a C identifier, and git allows characters
+        # that are not. Dependabot branches carry a dotted version.
+        string(REGEX REPLACE "[^A-Za-z0-9_]" "_" GIT_BRANCH "${GIT_BRANCH}")
     else()
         set(GIT_BRANCH "unknown")
     endif()
