@@ -1,7 +1,7 @@
 header:
   schema-version: 2.1.0
-  last-updated: '2026-09-22'
-  last-reviewed: '2026-09-22'
+  last-updated: '2026-09-25'
+  last-reviewed: '2026-09-25'
   url: https://raw.githubusercontent.com/Project-HAMi/HAMi-core/main/security-insights.yml
   comment: |
     HAMi-core is one of the codebases that make up the HAMi project. It is
@@ -115,6 +115,32 @@ repository:
           docker buildx imagetools inspect
           projecthami/hamicore:{version} --format '{{ json .Provenance }}'
   security:
+    tools:
+      - name: GitHub secret scanning
+        type: secret
+        rulesets:
+          - default
+        integration:
+          adhoc: false
+          ci: false
+          release: false
+        results: {}
+        comment: |
+          Secret scanning and push protection are both on for this repository.
+          GitHub runs them itself rather than from a workflow, and reports
+          them under security_and_analysis, which is only served to a token
+          with admin access, so they are declared here as well.
+      - name: CodeQL
+        type: SAST
+        rulesets:
+          - default
+        integration:
+          adhoc: true
+          ci: true
+          release: false
+        results: {}
+        comment: |
+          .github/workflows/codeql.yml, on every push to main and weekly.
     assessments:
       self:
         comment: |
