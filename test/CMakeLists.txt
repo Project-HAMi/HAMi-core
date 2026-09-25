@@ -86,6 +86,19 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_seqlock_writer_exclusion"
+            OR TEST_TARGET_NAME STREQUAL "test_seqlock_multiprocess")
+        # Includes multiprocess_memory_limit.c directly to observe the
+        # sequence counter, so it must not also be linked in.
+        add_executable(${TEST_TARGET_NAME}
+            ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures")
         # Links the production NVML pass-through wrappers and supplies its own
         # entry table, so it needs no NVIDIA driver and no GPU at runtime.
@@ -126,6 +139,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
             OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
+            OR TEST_TARGET_NAME STREQUAL "test_seqlock_writer_exclusion"
+            OR TEST_TARGET_NAME STREQUAL "test_seqlock_multiprocess"
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
@@ -163,6 +178,18 @@ set_tests_properties(postinit_owner_death PROPERTIES TIMEOUT 20)
 add_test(NAME device_id_guard
     COMMAND test_device_id_guard)
 set_tests_properties(device_id_guard PROPERTIES TIMEOUT 20)
+
+add_test(NAME seqlock_writer_exclusion
+    COMMAND test_seqlock_writer_exclusion)
+set_tests_properties(seqlock_writer_exclusion PROPERTIES TIMEOUT 60
+    SKIP_RETURN_CODE 77
+    RESOURCE_LOCK shared_region)
+
+add_test(NAME seqlock_multiprocess
+    COMMAND test_seqlock_multiprocess)
+set_tests_properties(seqlock_multiprocess PROPERTIES TIMEOUT 120
+    SKIP_RETURN_CODE 77
+    RESOURCE_LOCK shared_region)
 
 # oom_check must read back what it charged, on a non-identity map (issue #319).
 add_test(NAME memory_index_map
