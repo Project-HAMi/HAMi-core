@@ -467,7 +467,7 @@ static void test_exec_cleanup(const char *path, const char *program) {
     child = fork();
     check(child >= 0, "exec cleanup fork");
     if (child == 0) {
-        execl(program, program, "--check-closed", descriptor, NULL);
+        execl(program, program, "--check-closed", descriptor, path, NULL);
         _exit(3);
     }
     if (child > 0) {
@@ -854,11 +854,18 @@ int main(int argc, char **argv) {
     char directory[] = "/tmp/hami-hostpid-global-lock.XXXXXX";
     char *path;
 
-    if (argc == 3 && strcmp(argv[1], "--check-closed") == 0) {
-        int fd = atoi(argv[2]);
+    if (argc == 4 && strcmp(argv[1], "--check-closed") == 0) {
+        struct stat descriptor_stat;
+        struct stat lock_stat;
 
-        errno = 0;
-        return fcntl(fd, F_GETFD) == -1 && errno == EBADF ? 0 : 2;
+        if (stat(argv[3], &lock_stat) != 0) {
+            return 3;
+        }
+        if (fstat(atoi(argv[2]), &descriptor_stat) != 0) {
+            return errno == EBADF ? 0 : 2;
+        }
+        return descriptor_stat.st_dev == lock_stat.st_dev &&
+               descriptor_stat.st_ino == lock_stat.st_ino ? 2 : 0;
     }
 
     path = mkdtemp(directory);
