@@ -97,6 +97,12 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_hostpid_fallback_lock")
+        # GPU-free: builds the production lock into the test.
+        add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_fallback_lock.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE HOSTPID_FALLBACK_LOCK_TESTING)
     elseif (TEST_TARGET_NAME STREQUAL "test_utilization_nvml_index")
         # Links the production utilization watcher and supplies its own NVML
         # entry points and shared-region helpers, so it needs no NVIDIA driver
@@ -124,6 +130,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     if (TEST_SCRIPT MATCHES "test_shared_region_concurrency.c"
             OR TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_fallback_lock"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
             OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
@@ -199,6 +206,9 @@ add_test(NAME pid_discovery
     COMMAND test_pid_discovery)
 set_tests_properties(pid_discovery PROPERTIES TIMEOUT 10)
 
+add_test(NAME hostpid_fallback_lock
+    COMMAND test_hostpid_fallback_lock)
+set_tests_properties(hostpid_fallback_lock PROPERTIES TIMEOUT 30)
 # The watcher must ask NVML for the NVML index it is walking, not the CUDA
 # index it maps to; the two only coincide when CUDA_VISIBLE_DEVICES is the
 # identity map (issue #318).
