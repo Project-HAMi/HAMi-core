@@ -4,6 +4,9 @@
 #include <dlfcn.h>
 #include <stdio.h>
 
+void* lookup_default_ompt(void);
+void* lookup_next_ompt(void);
+
 /*
  * Repeated RTLD_NEXT lookups must return the same address. The old
  * (thread, pointer) history map treated the second call as recursion
@@ -26,6 +29,18 @@ int main(void) {
                 first, second);
         return 1;
     }
+
+    void *self = lookup_default_ompt();
+    void *next = lookup_next_ompt();
+    if (self == NULL) {
+        fprintf(stderr, "failed to resolve exported ompt_start_tool\n");
+        return 1;
+    }
+    if (next == self) {
+        fprintf(stderr, "RTLD_NEXT resolved ompt_start_tool back to its caller\n");
+        return 1;
+    }
+
     printf("PASS %p\n", first);
     return 0;
 }

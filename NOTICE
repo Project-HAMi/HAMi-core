@@ -1,0 +1,9 @@
+HAMi-core
+Copyright The HAMi Authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE),
+with the following exception:
+
+src/include/nvml-subset.h is derived from the NVIDIA Management Library (NVML)
+headers, Copyright 1993-2018 NVIDIA Corporation, and remains subject to the
+license terms stated in that file's header rather than the Apache License.

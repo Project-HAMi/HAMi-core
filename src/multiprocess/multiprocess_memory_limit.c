@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <ctype.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <semaphore.h>
@@ -118,49 +119,96 @@ void sig_swap_stub(int signo){
 }
 
 
+/* Grammar: optional space, decimal digits, optional fraction, optional space,
+   optional binary K/M/G unit that may be spelled Ki, KB or KiB, optional
+   space. Every unit is 1024 based, which is what a bare G has always meant
+   here. The SM limit is a percentage instead: bare number, optional %, no
+   unit. Returns 0 for anything else rather than guessing. */
+static int parse_limit_value(const char *value, int is_sm, size_t *out) {
+    const char *p = value;
+    char *end = NULL;
+    uint64_t digits, frac_num = 0, frac_den = 1, scalar = 1, whole, part;
+    int has_frac = 0, has_unit = 0;
+
+    while (isspace((unsigned char)*p)) p++;
+    /* strtoull accepts a leading minus and wraps it, so require a digit. */
+    if (!isdigit((unsigned char)*p)) return 0;
+
+    errno = 0;
+    digits = strtoull(p, &end, 10);
+    if (end == p || errno == ERANGE) return 0;
+
+    if (*end == '.') {
+        end++;
+        if (!isdigit((unsigned char)*end)) return 0;
+        has_frac = 1;
+        /* Past the ninth digit nothing can move the byte count. */
+        for (; isdigit((unsigned char)*end); end++) {
+            if (frac_den < UINT64_C(1000000000)) {
+                frac_num = frac_num * 10 + (uint64_t)(*end - '0');
+                frac_den *= 10;
+            }
+        }
+    }
+
+    while (isspace((unsigned char)*end)) end++;
+    if (is_sm) {
+        /* Scaling a percentage by a unit lands it past 100, which the
+           utilization guards read as no limit at all. */
+        if (*end == '%') end++;
+    } else if (*end != '\0') {
+        switch (*end) {
+            case 'k': case 'K': scalar = UINT64_C(1) << 10; break;
+            case 'm': case 'M': scalar = UINT64_C(1) << 20; break;
+            case 'g': case 'G': scalar = UINT64_C(1) << 30; break;
+            default: return 0;
+        }
+        has_unit = 1;
+        end++;
+        if (*end == 'i' || *end == 'I') end++;
+        if (*end == 'b' || *end == 'B') end++;
+    }
+    while (isspace((unsigned char)*end)) end++;
+    if (*end != '\0') return 0;
+    /* A fraction without a unit has no byte count to round to. */
+    if (has_frac && !has_unit && !is_sm) return 0;
+
+    if (digits > (uint64_t)SIZE_MAX / scalar) return 0;
+    whole = digits * scalar;
+    /* frac_num < frac_den <= 1e9 and scalar <= 2^30, so this cannot overflow. */
+    part = frac_num * scalar / frac_den;
+    if (whole > (uint64_t)SIZE_MAX - part) return 0;
+    *out = (size_t)(whole + part);
+    return 1;
+}
+
 // get device memory from env
 size_t get_limit_from_env(const char* env_name) {
     char* env_limit = getenv(env_name);
-    if (env_limit == NULL) {
-        // fprintf(stderr, "No %s set in environment\n", env_name);
+    if (env_limit == NULL || env_limit[0] == '\0') {
         return 0;
     }
-    size_t len = strlen(env_limit);
-    if (len == 0) {
-        // fprintf(stderr, "Empty %s set in environment\n", env_name);
+    size_t name_len = strlen(env_name);
+    int is_sm = (name_len > 12 && env_name[12] == 'S');
+    int is_memory = (name_len > 12 && env_name[12] == 'M');
+    size_t value = 0;
+
+    if (!parse_limit_value(env_limit, is_sm, &value)) {
+        LOG_ERROR("Unparsable limit, no limit applied: %s=%s", env_name, env_limit);
         return 0;
     }
-    size_t scalar = 1;
-    char* digit_end = env_limit + len;
-    if (env_limit[len - 1] == 'G' || env_limit[len - 1] == 'g') {
-        digit_end -= 1;
-        scalar = 1024 * 1024 * 1024;
-    } else if (env_limit[len - 1] == 'M' || env_limit[len - 1] == 'm') {
-        digit_end -= 1;
-        scalar = 1024 * 1024;
-    } else if (env_limit[len - 1] == 'K' || env_limit[len - 1] == 'k') {
-        digit_end -= 1;
-        scalar = 1024;
-    }
-    size_t res = strtoul(env_limit, &digit_end, 0);
-    size_t scaled_res = res * scalar;
-    if (scaled_res == 0) {
-        size_t name_len = strlen(env_name);
-        if (name_len > 12 && env_name[12] == 'S'){
+    if (value == 0) {
+        if (is_sm) {
             LOG_INFO("device core util limit set to 0, which means no limit: %s=%s",
                 env_name, env_limit);
-        }else if (name_len > 12 && env_name[12] == 'M'){
-            LOG_WARN("invalid device memory limit %s=%s",env_name,env_limit);
-        }else{
-            LOG_WARN("invalid env name:%s",env_name);
+        } else if (is_memory) {
+            LOG_WARN("device memory limit set to 0, which means no limit: %s=%s",
+                env_name, env_limit);
+        } else {
+            LOG_WARN("invalid env name:%s", env_name);
         }
-        return 0;
     }
-    if (scaled_res != 0 && scaled_res / scalar != res) {
-        LOG_ERROR("Limit overflow: %s=%s\n", env_name, env_limit);
-        return 0;
-    }
-    return scaled_res;
+    return value;
 }
 
 int init_device_info() {
@@ -289,6 +337,10 @@ int shrreg_minor_version() {
 size_t get_gpu_memory_monitor(const int dev) {
     LOG_DEBUG("get_gpu_memory_monitor_lockfree dev=%d", dev);
     ensure_initialized();
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_ERROR("Illegal device id: %d", dev);
+        return 0;
+    }
     int i=0;
     size_t total=0;
 
@@ -310,6 +362,10 @@ size_t get_gpu_memory_monitor(const int dev) {
 size_t get_gpu_memory_usage(const int dev) {
     LOG_INFO("get_gpu_memory_usage_lockfree dev=%d", dev);
     ensure_initialized();
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_ERROR("Illegal device id: %d", dev);
+        return 0;
+    }
     int i=0;
     size_t total=0;
 
@@ -482,6 +538,10 @@ int add_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type
 
     int dev = cuda_to_nvml_map(cudadev);
     ensure_initialized();
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_ERROR("Illegal device id: %d (cudadev=%d)", dev, cudadev);
+        return -1;
+    }
 
     // Fast path: use the validated cached slot for our own process
     shrreg_proc_slot_t* self_slot = NULL;
@@ -557,6 +617,10 @@ int rm_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type)
     LOG_INFO("rm_gpu_device_memory_lockfree:%d %d->%d %d:%lu", pid, cudadev, cuda_to_nvml_map(cudadev), type, usage);
     int dev = cuda_to_nvml_map(cudadev);
     ensure_initialized();
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_ERROR("Illegal device id: %d (cudadev=%d)", dev, cudadev);
+        return -1;
+    }
 
     // Fast path: use the validated cached slot for our own process
     shrreg_proc_slot_t* self_slot = NULL;
@@ -919,6 +983,7 @@ void lock_shrreg() {
         struct timespec sem_ts;
         get_timespec(SEM_WAIT_TIME, &sem_ts);
 
+        SEQ_POINT_MARK(SEQ_BEFORE_ACQUIRE_SEMLOCK);
         int status = sem_timedwait(&region->sem, &sem_ts);
         SEQ_POINT_MARK(SEQ_ACQUIRE_SEMLOCK_OK);
 
@@ -1463,6 +1528,7 @@ int get_current_device_sm_limit(int dev) {
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
+        return -1;
     }
     return region_info.shared_region->sm_limit[dev];
 }
@@ -1471,6 +1537,7 @@ int set_current_device_memory_limit(const int dev,size_t newlimit) {
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
+        return -1;
     }
     LOG_INFO("dev %d new limit set to %ld",dev,newlimit);
     region_info.shared_region->limit[dev]=newlimit;
@@ -1481,6 +1548,7 @@ uint64_t get_current_device_memory_limit(const int dev) {
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
+        return 0;
     }
     return region_info.shared_region->limit[dev];       
 }
@@ -1489,6 +1557,7 @@ uint64_t get_current_device_memory_monitor(const int dev) {
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
+        return 0;
     }
     uint64_t result = get_gpu_memory_monitor(dev);
 //    result= nvml_get_device_memory_usage(dev);
@@ -1502,6 +1571,7 @@ uint64_t get_current_device_memory_usage(const int dev) {
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
+        return 0;
     }
     result = get_gpu_memory_usage(dev);
 //    result= nvml_get_device_memory_usage(dev);

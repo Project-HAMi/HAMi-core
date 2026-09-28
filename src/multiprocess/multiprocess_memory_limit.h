@@ -53,8 +53,12 @@
 
 #define SEQ_AFTER_INC 8
 #define SEQ_AFTER_DEC 9
+#define SEQ_BEFORE_ACQUIRE_SEMLOCK 10
 
-#ifndef SEQ_POINT_MARK
+#ifdef SHRREG_SEQUENCE_POINT_CALLBACK
+void SHRREG_SEQUENCE_POINT_CALLBACK(int sequence);
+#define SEQ_POINT_MARK(s) SHRREG_SEQUENCE_POINT_CALLBACK(s)
+#elif !defined(SEQ_POINT_MARK)
     #define SEQ_POINT_MARK(s)
 #endif
 
@@ -140,6 +144,7 @@ int set_host_pid(int hostpid);
 uint64_t get_current_device_memory_monitor(const int dev);
 uint64_t get_current_device_memory_usage(const int dev);
 size_t get_gpu_memory_usage(const int dev);
+size_t get_limit_from_env(const char* env_name);
 
 // Priority-related
 int get_current_priority();
