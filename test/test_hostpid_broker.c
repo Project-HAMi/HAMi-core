@@ -1,9 +1,5 @@
-/*
- * SPDX-License-Identifier: Apache-2.0
- *
- * Copyright (c) 2026 The HAMi Authors.
- */
-
+/* Every check here is an assert, so keep them in release builds too. */
+#undef NDEBUG
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>

@@ -2,7 +2,7 @@
 
 This module implements the version 1 broker protocol from
 [HAMi's device plugin](https://github.com/Project-HAMi/HAMi/pull/2417).
-It is built into `libvgpu`, but initialization does not call it yet.
+Nothing calls it yet, so it is not linked into `libvgpu`; only its test builds it.
 This split does not change host PID discovery, NVML fallback or CUDA accounting.
 
 ## API and trust
@@ -52,24 +52,21 @@ Asynchronous cancellation is unsupported.
 
 ## Tests
 
-The standalone tests need a C compiler, CMake and pthread, with no CUDA toolkit
-or NVIDIA driver. Run them from the repository root:
+`test/test_hostpid_broker.c` needs no CUDA toolkit, NVIDIA driver or GPU. It is
+part of the normal test build, so `make build-in-docker` runs it with the rest of
+CTest. To run it alone after a build:
 
 ```sh
-cmake -S test/hostpid_broker -B build-broker -DCMAKE_BUILD_TYPE=Debug
-cmake --build build-broker
-ctest --test-dir build-broker --output-on-failure -V
+ctest --test-dir build --output-on-failure -R '^hostpid_broker$'
 ```
 
-Tests use temporary Unix sockets and a 100 millisecond socket deadline. They
-cover valid and fragmented replies, malformed protocol fields, invalid PIDs,
-early EOF, silent and trickling servers, invalid inputs, path trust failures,
-peer credentials and cancellation cleanup. Linux tests fill the accept queue
-and check recovery after `EAGAIN`, timeout and cancellation during retries.
-Peer acceptance and UID mismatch tests run on Linux. Other systems report that
-coverage as skipped and check that unsupported peer validation fails closed.
+The test build uses a 100 millisecond socket deadline. The cases cover valid and
+fragmented replies, malformed protocol fields, invalid PIDs, early EOF, silent
+and trickling servers, invalid inputs, path trust failures, peer credentials and
+cancellation cleanup. Linux cases fill the accept queue and check recovery after
+`EAGAIN`, timeout and cancellation during retries. Peer acceptance and UID
+mismatch cases run on Linux. Other systems report that coverage as skipped and
+check that unsupported peer validation fails closed.
 
-The main build also includes this test. CI runs it independently on Linux and
-inside the existing NVIDIA development container. These tests do not exercise
-the fixed production mount, Kubernetes allocation, a GPU workload or init
-integration.
+These tests do not exercise the fixed production mount, Kubernetes allocation,
+a GPU workload or init integration.

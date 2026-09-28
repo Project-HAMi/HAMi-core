@@ -1,9 +1,3 @@
-/*
- * SPDX-License-Identifier: Apache-2.0
- *
- * Copyright (c) 2026 The HAMi Authors.
- */
-
 #ifndef SRC_INCLUDE_HOSTPID_BROKER_H_
 #define SRC_INCLUDE_HOSTPID_BROKER_H_
 
