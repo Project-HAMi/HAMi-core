@@ -87,7 +87,7 @@ static int64_t delta(int up_limit, int user_current, int64_t share, int device_i
   int utilization_diff =
       abs(up_limit - user_current) < 5 ? 5 : abs(up_limit - user_current);
   int64_t increment =
-      (int64_t)g_sm_num[device_id] * (int64_t)g_sm_num[device_id] *
+      (int64_t)g_sm_num[device_id] *
       (int64_t)g_max_thread_per_sm[device_id] * (int64_t)utilization_diff / 2560;
 
   /* Accelerate cuda cores allocation when utilization vary widely */
