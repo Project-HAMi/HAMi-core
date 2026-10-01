@@ -49,14 +49,19 @@ void rate_limiter(int grids, int blocks) {
   if (cached_sm_limit[device_id] >= 100 || cached_sm_limit[device_id] == 0) {
       return;
   }
+
+    for (;;) {
+      int rk = get_recent_kernel();
+      if (rk < 0) {
+          sleep(1);
+          continue;
+      }
+      if (rk == 2 || cas_recent_kernel(rk, 2)) break;
+  }
+
   if (cached_util_switch == 0) {
       return;
   }
-
-  while (get_recent_kernel()<0) {
-    sleep(1);
-  }
-  set_recent_kernel(2);
 
   do {
 CHECK:

@@ -152,6 +152,7 @@ size_t get_limit_from_env(const char* env_name);
 int get_current_priority();
 int set_recent_kernel(int value);
 int get_recent_kernel();
+int cas_recent_kernel(int expected, int desired);
 int get_utilization_switch();
 int set_env_utilization_switch();
 
