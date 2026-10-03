@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <ctype.h>
 #include <time.h>
+#include <errno.h>
 #include <sys/file.h>
 #include "include/utils.h"
 #include "include/log_utils.h"
@@ -10,6 +11,7 @@
 #include <nvml.h>
 #include "include/nvml_override.h"
 #include "include/libcuda_hook.h"
+#include "include/hostpid_broker.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
 extern size_t context_size;
@@ -59,6 +61,76 @@ int getextrapid(unsigned int prev, unsigned int current, nvmlProcessInfo_t1 *pre
             return pids_on_device[i].pid;
     }
     return 0;
+}
+
+static nvmlReturn_t get_used_gpu_memory_by_pid(pid_t hostpid,
+                                              unsigned long long *used) {
+    nvmlProcessInfo_v1_t *processes;
+    nvmlDevice_t device;
+    nvmlReturn_t res;
+    unsigned int count = SHARED_REGION_MAX_PROCESS_NUM;
+    unsigned int i;
+
+    res = nvmlDeviceGetHandleByIndex(cuda_to_nvml_map(0), &device);
+    if (res != NVML_SUCCESS) {
+        return res;
+    }
+    processes = calloc(count, sizeof(*processes));
+    if (processes == NULL) {
+        return NVML_ERROR_MEMORY;
+    }
+    res = nvmlDeviceGetComputeRunningProcesses(device, &count, processes);
+    if (res == NVML_SUCCESS) {
+        res = NVML_ERROR_NOT_FOUND;
+        for (i = 0; i < count; i++) {
+            if (processes[i].pid == (unsigned int)hostpid &&
+                processes[i].usedGpuMemory !=
+                    (unsigned long long)NVML_VALUE_NOT_AVAILABLE) {
+                *used = processes[i].usedGpuMemory;
+                res = NVML_SUCCESS;
+                break;
+            }
+        }
+    }
+    free(processes);
+    return res;
+}
+
+// The broker names this process's host PID, so no NVML diff and no postinit
+// lock are needed. The device 0 retain is only there to size the context.
+nvmlReturn_t set_task_pid_from_broker(void) {
+    pid_t hostpid = 0;
+    unsigned long long used = 0;
+    CUcontext pctx;
+    nvmlReturn_t res;
+
+    if (hostpid_broker_query_trusted(HOSTPID_BROKER_SOCKET_PATH,
+                                    &hostpid) != 0) {
+        LOG_WARN("Host PID broker unavailable: %s", strerror(errno));
+        return NVML_ERROR_UNKNOWN;
+    }
+    LOG_INFO("hostPid=%d from broker", hostpid);
+    if (set_host_pid(hostpid) != 0) {
+        return NVML_ERROR_NOT_FOUND;
+    }
+    // The PID is already set, so a sizing failure only leaves context_size
+    // alone, as a missing NVML entry does in set_task_pid().
+    if (nvmlInit() != NVML_SUCCESS ||
+        cuDevicePrimaryCtxRetain(&pctx, 0) != CUDA_SUCCESS) {
+        LOG_WARN("Primary context size unavailable");
+        return NVML_SUCCESS;
+    }
+    res = get_used_gpu_memory_by_pid(hostpid, &used);
+    if (res == NVML_SUCCESS) {
+        LOG_INFO("Primary Context Size==%llu", used);
+        context_size = used;
+    } else {
+        LOG_WARN("Primary context size unavailable: %d", res);
+    }
+    if (cuDevicePrimaryCtxRelease(0) != CUDA_SUCCESS) {
+        LOG_WARN("Failed to release the device 0 primary context");
+    }
+    return NVML_SUCCESS;
 }
 
 nvmlReturn_t set_task_pid() {

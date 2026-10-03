@@ -33,15 +33,24 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
             OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
-            OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
+            OR TEST_TARGET_NAME STREQUAL "test_pid_discovery"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_lookup"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_init")
         # Focused regression tests built against the production sources they
         # exercise; section GC drops unrelated GPU-facing production functions.
-        # test_pid_discovery needs utils.c; the rest reach the shared-region
-        # accounting in multiprocess_memory_limit.c.
-        if (TEST_TARGET_NAME STREQUAL "test_pid_discovery")
+        # PID lookup lives in utils.c, init routing in libvgpu.c, and the
+        # remaining tests use the shared-region accounting implementation.
+        if (TEST_TARGET_NAME STREQUAL "test_pid_discovery"
+                OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_lookup")
             add_executable(${TEST_TARGET_NAME}
                 ${TEST_SCRIPT}
                 ${CMAKE_CURRENT_SOURCE_DIR}/../src/utils.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        elseif (TEST_TARGET_NAME STREQUAL "test_hostpid_broker_init")
+            add_executable(${TEST_TARGET_NAME}
+                ${TEST_SCRIPT}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/libvgpu.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_broker.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
         else()
             add_executable(${TEST_TARGET_NAME}
@@ -142,6 +151,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
             OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_lookup"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_init"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
@@ -214,6 +225,14 @@ set_tests_properties(nvml_v2_signatures PROPERTIES
 add_test(NAME pid_discovery
     COMMAND test_pid_discovery)
 set_tests_properties(pid_discovery PROPERTIES TIMEOUT 10)
+
+add_test(NAME hostpid_broker_lookup
+    COMMAND test_hostpid_broker_lookup)
+set_tests_properties(hostpid_broker_lookup PROPERTIES TIMEOUT 10)
+
+add_test(NAME hostpid_broker_init
+    COMMAND test_hostpid_broker_init)
+set_tests_properties(hostpid_broker_init PROPERTIES TIMEOUT 10)
 
 add_test(NAME hostpid_broker
     COMMAND test_hostpid_broker)
