@@ -6,6 +6,7 @@
 #include <sys/types.h>
 
 #include "include/libvgpu.h"
+#include "include/libcuda_hook.h"
 #include "include/hostpid_broker.h"
 #include "include/hostpid_fallback_lock.h"
 #include "multiprocess/multiprocess_memory_limit.h"
@@ -41,6 +42,15 @@ static int fake_node_lock_held;
 static int fake_node_unlock_count;
 size_t context_size;
 int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
+
+static CUresult device_count(int *count) {
+    *count = 1;
+    return CUDA_SUCCESS;
+}
+
+cuda_entry_t cuda_library_entry[CUDA_ENTRY_END] = {
+    [OVERRIDE_cuDeviceGetCount] = {.fn_ptr = device_count},
+};
 
 static void check(int condition, const char *message) {
     printf("%-4s %s\n", condition ? "OK" : "FAIL", message);
@@ -333,6 +343,8 @@ static void test_release_failure_preserves_pid_and_size(void) {
 }
 
 int main(void) {
+    check(setenv("CUDA_VISIBLE_DEVICES", "2", 1) == 0,
+          "set a nonidentity device mapping");
     test_success_sets_pid_context_size_and_balances_context();
     test_missing_entry_keeps_pid_and_context_size();
     test_not_available_keeps_pid_and_context_size();

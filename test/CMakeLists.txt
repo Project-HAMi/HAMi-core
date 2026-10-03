@@ -10,9 +10,15 @@ set(TEST_TARGET_NAMES_LIST)
 file(GLOB_RECURSE TEST_SCRIPTS "${TEST_CPP_SOURCE_DIR}/*.c" "${TEST_CPP_SOURCE_DIR}/*.cu")
 set(DLSYM_CALLER_SOURCE
     "${TEST_CPP_SOURCE_DIR}/dlsym_rtld_next_caller.c")
-list(REMOVE_ITEM TEST_SCRIPTS ${DLSYM_CALLER_SOURCE})
+set(BROKER_NVML_FIXTURE_SOURCE
+    "${TEST_CPP_SOURCE_DIR}/broker_nvml_fixture.c")
+list(REMOVE_ITEM TEST_SCRIPTS ${DLSYM_CALLER_SOURCE} ${BROKER_NVML_FIXTURE_SOURCE})
 add_library(dlsym_rtld_next_caller SHARED ${DLSYM_CALLER_SOURCE})
 target_link_libraries(dlsym_rtld_next_caller -ldl)
+add_library(broker_nvml_fixture SHARED ${BROKER_NVML_FIXTURE_SOURCE})
+set_target_properties(broker_nvml_fixture PROPERTIES
+    OUTPUT_NAME "nvidia-ml" SOVERSION 1
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/broker_nvml_fixture")
 foreach(TEST_SCRIPT ${TEST_SCRIPTS}) 
     file(RELATIVE_PATH RELATIVE_TEST_PATH ${TEST_CPP_SOURCE_DIR} ${TEST_SCRIPT})
     get_filename_component(TEST_TARGET_DIR ${RELATIVE_TEST_PATH} DIRECTORY)
@@ -36,7 +42,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_lookup"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_init"
-            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_concurrency")
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_concurrency"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_mapping")
         # Focused regression tests built against the production sources they
         # exercise; section GC drops unrelated GPU-facing production functions.
         # PID lookup lives in utils.c, init routing in libvgpu.c, and the
@@ -47,6 +54,14 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
                 ${TEST_SCRIPT}
                 ${CMAKE_CURRENT_SOURCE_DIR}/../src/utils.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        elseif (TEST_TARGET_NAME STREQUAL "test_hostpid_broker_mapping")
+            add_executable(${TEST_TARGET_NAME}
+                ${TEST_SCRIPT}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/utils.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/nvml/hook.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_utilization_watcher.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+            add_dependencies(${TEST_TARGET_NAME} broker_nvml_fixture)
         elseif (TEST_TARGET_NAME STREQUAL "test_hostpid_broker_concurrency")
             add_executable(${TEST_TARGET_NAME}
                 ${TEST_SCRIPT}
@@ -178,7 +193,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_utilization_nvml_index")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_memory_index_map"
-            OR TEST_TARGET_NAME STREQUAL "test_meminfo_null_out")
+            OR TEST_TARGET_NAME STREQUAL "test_meminfo_null_out"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_mapping")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread -ldl)
     else()
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread
@@ -253,6 +269,12 @@ set_tests_properties(hostpid_broker_init PROPERTIES TIMEOUT 10)
 add_test(NAME hostpid_broker_concurrency
     COMMAND test_hostpid_broker_concurrency)
 set_tests_properties(hostpid_broker_concurrency PROPERTIES TIMEOUT 15)
+
+add_test(NAME hostpid_broker_mapping_cold COMMAND test_hostpid_broker_mapping cold)
+add_test(NAME hostpid_broker_mapping_warm COMMAND test_hostpid_broker_mapping warm)
+set_tests_properties(hostpid_broker_mapping_cold hostpid_broker_mapping_warm
+    PROPERTIES TIMEOUT 10
+    ENVIRONMENT "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:broker_nvml_fixture>")
 
 add_test(NAME hostpid_broker
     COMMAND test_hostpid_broker)

@@ -11,6 +11,7 @@
 #include <nvml.h>
 #include "include/nvml_override.h"
 #include "include/libcuda_hook.h"
+#include "include/libvgpu.h"
 #include "include/hostpid_broker.h"
 #include "include/hostpid_fallback_lock.h"
 #include "multiprocess/multiprocess_memory_limit.h"
@@ -121,6 +122,9 @@ nvmlReturn_t set_task_pid_from_broker(void) {
         LOG_WARN("Primary context size unavailable");
         return NVML_SUCCESS;
     }
+    // The first nvmlInit (including setspec in set_host_pid) resets the map.
+    // Restore CUDA_VISIBLE_DEVICES before selecting the NVML sizing device.
+    map_cuda_visible_devices();
     if (hostpid_fallback_lock_deadline_after_ms(
             &deadline, HOSTPID_FALLBACK_LOCK_TIMEOUT_MS) != 0 ||
         hostpid_fallback_lock_acquire_shared_until(&deadline) != 0) {
