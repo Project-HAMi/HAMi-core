@@ -35,7 +35,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_lookup"
-            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_init")
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_init"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_concurrency")
         # Focused regression tests built against the production sources they
         # exercise; section GC drops unrelated GPU-facing production functions.
         # PID lookup lives in utils.c, init routing in libvgpu.c, and the
@@ -46,6 +47,16 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
                 ${TEST_SCRIPT}
                 ${CMAKE_CURRENT_SOURCE_DIR}/../src/utils.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        elseif (TEST_TARGET_NAME STREQUAL "test_hostpid_broker_concurrency")
+            add_executable(${TEST_TARGET_NAME}
+                ${TEST_SCRIPT}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/libvgpu.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/utils.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_broker.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_fallback_lock.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+            target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+                HOSTPID_FALLBACK_LOCK_TESTING)
         elseif (TEST_TARGET_NAME STREQUAL "test_hostpid_broker_init")
             add_executable(${TEST_TARGET_NAME}
                 ${TEST_SCRIPT}
@@ -64,6 +75,10 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+        if (TEST_TARGET_NAME STREQUAL "test_hostpid_broker_concurrency")
+            set_property(TARGET ${TEST_TARGET_NAME} APPEND_STRING PROPERTY
+                LINK_FLAGS " -Wl,--wrap=hostpid_broker_query_trusted,--wrap=hostpid_fallback_lock_acquire_until,--wrap=hostpid_fallback_lock_acquire_shared_until")
+        endif()
     elseif (TEST_TARGET_NAME STREQUAL "test_memory_index_map")
         # Links the production oom_check and shared region, stubs the driver
         # bits it needs, so it needs no driver and no GPU.
@@ -153,6 +168,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_lookup"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_init"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_concurrency"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
@@ -233,6 +249,10 @@ set_tests_properties(hostpid_broker_lookup PROPERTIES TIMEOUT 10)
 add_test(NAME hostpid_broker_init
     COMMAND test_hostpid_broker_init)
 set_tests_properties(hostpid_broker_init PROPERTIES TIMEOUT 10)
+
+add_test(NAME hostpid_broker_concurrency
+    COMMAND test_hostpid_broker_concurrency)
+set_tests_properties(hostpid_broker_concurrency PROPERTIES TIMEOUT 15)
 
 add_test(NAME hostpid_broker
     COMMAND test_hostpid_broker)

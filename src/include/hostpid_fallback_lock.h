@@ -17,6 +17,8 @@ int hostpid_fallback_lock_acquire_at(const char *path, uid_t trusted_owner,
                                      unsigned int timeout_ms);
 int hostpid_fallback_lock_acquire_at_until(
     const char *path, uid_t trusted_owner, const struct timespec *deadline);
+int hostpid_fallback_lock_acquire_shared_at_until(
+    const char *path, uid_t trusted_owner, const struct timespec *deadline);
 /* Diagnostic snapshot only: callers must not close or unlock this descriptor. */
 int hostpid_fallback_lock_active_fd(void);
 #endif
@@ -28,6 +30,9 @@ int hostpid_fallback_lock_active_fd(void);
 int hostpid_fallback_lock_deadline_after_ms(struct timespec *deadline,
                                             unsigned int timeout_ms);
 int hostpid_fallback_lock_acquire_until(const struct timespec *deadline);
+/* Broker context sizing may overlap other sizing calls, but never an
+ * exclusive NVML PID-discovery window. Release with the same release API. */
+int hostpid_fallback_lock_acquire_shared_until(const struct timespec *deadline);
 int hostpid_fallback_lock_release(void);
 /* Call only in the fork child, before using the lock API there. */
 void hostpid_fallback_lock_after_fork(void);

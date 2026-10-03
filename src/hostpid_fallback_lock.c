@@ -381,7 +381,7 @@ static void discard_active_fd(int fd) {
 static int acquire_unlocked(const char *path, uid_t trusted_owner,
                             const struct timespec *deadline,
                             int validate_components,
-                            int require_readonly) {
+                            int require_readonly, int operation) {
     struct stat opened_stat;
     unsigned int retry_us = HOSTPID_FALLBACK_LOCK_INITIAL_RETRY_US;
     int fd;
@@ -436,7 +436,7 @@ static int acquire_unlocked(const char *path, uid_t trusted_owner,
             errno = saved_errno;
             return -1;
         }
-        if (flock(fd, LOCK_EX | LOCK_NB) == 0) {
+        if (flock(fd, operation | LOCK_NB) == 0) {
             expired = deadline_expired(deadline);
             if (expired == 0) {
                 break;
@@ -483,9 +483,10 @@ static int acquire_unlocked(const char *path, uid_t trusted_owner,
 
 static int acquire_at_until(const char *path, uid_t trusted_owner,
                             const struct timespec *deadline,
-                            int validate_components, int require_readonly) {
+                            int validate_components, int require_readonly,
+                            int operation) {
     return acquire_unlocked(path, trusted_owner, deadline,
-                            validate_components, require_readonly);
+                            validate_components, require_readonly, operation);
 }
 
 #ifdef HOSTPID_FALLBACK_LOCK_TESTING
@@ -499,17 +500,28 @@ int hostpid_fallback_lock_acquire_at(const char *path, uid_t trusted_owner,
     if (hostpid_fallback_lock_deadline_after_ms(&deadline, timeout_ms) != 0) {
         return -1;
     }
-    return acquire_at_until(path, trusted_owner, &deadline, 0, 0);
+    return acquire_at_until(path, trusted_owner, &deadline, 0, 0, LOCK_EX);
 }
 
 int hostpid_fallback_lock_acquire_at_until(
     const char *path, uid_t trusted_owner, const struct timespec *deadline) {
-    return acquire_at_until(path, trusted_owner, deadline, 0, 0);
+    return acquire_at_until(path, trusted_owner, deadline, 0, 0, LOCK_EX);
+}
+
+int hostpid_fallback_lock_acquire_shared_at_until(
+    const char *path, uid_t trusted_owner, const struct timespec *deadline) {
+    return acquire_at_until(path, trusted_owner, deadline, 0, 0, LOCK_SH);
 }
 #endif
 
 int hostpid_fallback_lock_acquire_until(const struct timespec *deadline) {
-    return acquire_at_until(HOSTPID_FALLBACK_LOCK_PATH, 0, deadline, 1, 1);
+    return acquire_at_until(HOSTPID_FALLBACK_LOCK_PATH, 0, deadline, 1, 1,
+                            LOCK_EX);
+}
+
+int hostpid_fallback_lock_acquire_shared_until(const struct timespec *deadline) {
+    return acquire_at_until(HOSTPID_FALLBACK_LOCK_PATH, 0, deadline, 1, 1,
+                            LOCK_SH);
 }
 
 int hostpid_fallback_lock_release(void) {

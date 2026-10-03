@@ -7,6 +7,7 @@
 
 #include "include/libvgpu.h"
 #include "include/hostpid_broker.h"
+#include "include/hostpid_fallback_lock.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
 #define TEST_HOSTPID 424242
@@ -33,6 +34,11 @@ static int fake_retain_count;
 static int fake_release_count;
 static unsigned int fake_handle_index;
 static unsigned int fake_process_call_count;
+static int fake_deadline_result;
+static int fake_node_lock_errno;
+static int fake_node_unlock_result;
+static int fake_node_lock_held;
+static int fake_node_unlock_count;
 size_t context_size;
 int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 
@@ -74,6 +80,35 @@ nvmlReturn_t nvmlInit(void) {
     return fake_nvml_init_result;
 }
 
+int hostpid_fallback_lock_deadline_after_ms(struct timespec *deadline,
+                                           unsigned int timeout_ms) {
+    check(timeout_ms == HOSTPID_FALLBACK_LOCK_TIMEOUT_MS,
+          "sizing uses the configured lock timeout");
+    deadline->tv_sec = 123;
+    deadline->tv_nsec = 456;
+    errno = EIO;
+    return fake_deadline_result;
+}
+
+int hostpid_fallback_lock_acquire_shared_until(const struct timespec *deadline) {
+    check(deadline->tv_sec == 123 && deadline->tv_nsec == 456,
+          "sizing lock uses the computed deadline");
+    if (fake_node_lock_errno != 0) {
+        errno = fake_node_lock_errno;
+        return -1;
+    }
+    fake_node_lock_held = 1;
+    return 0;
+}
+
+int hostpid_fallback_lock_release(void) {
+    check(fake_node_lock_held, "only an acquired sizing lock is released");
+    fake_node_lock_held = 0;
+    fake_node_unlock_count++;
+    errno = EIO;
+    return fake_node_unlock_result;
+}
+
 nvmlReturn_t nvmlDeviceGetHandleByIndex(unsigned int index,
                                        nvmlDevice_t *device) {
     fake_handle_index = index;
@@ -84,6 +119,7 @@ nvmlReturn_t nvmlDeviceGetHandleByIndex(unsigned int index,
 nvmlReturn_t nvmlDeviceGetComputeRunningProcesses(
     nvmlDevice_t device, unsigned int *infoCount, nvmlProcessInfo_v1_t *infos) {
     (void)device;
+    check(fake_node_lock_held, "NVML sizing holds the shared node lock");
     fake_process_call_count++;
     if (fake_process_result != NVML_SUCCESS) {
         return fake_process_result;
@@ -106,6 +142,7 @@ nvmlReturn_t nvmlDeviceGetComputeRunningProcesses(
 }
 
 CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev) {
+    check(fake_node_lock_held, "context retain holds the shared node lock");
     check(dev == 0, "retains CUDA device 0 primary context");
     fake_retain_count++;
     *pctx = (CUcontext)(uintptr_t)0x1234U;
@@ -113,6 +150,7 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev) {
 }
 
 CUresult cuDevicePrimaryCtxRelease(CUdevice dev) {
+    check(fake_node_lock_held, "context release holds the shared node lock");
     check(dev == 0, "releases CUDA device 0 primary context");
     fake_release_count++;
     return fake_release_result;
@@ -124,6 +162,11 @@ int lock_postinit(void) {
 }
 
 static void reset_fakes(void) {
+    check(!fake_node_lock_held, "previous lookup left no sizing lock held");
+    fake_deadline_result = 0;
+    fake_node_lock_errno = 0;
+    fake_node_unlock_result = 0;
+    fake_node_unlock_count = 0;
     fake_query_result = 0;
     fake_query_errno = ENOENT;
     fake_query_pid = TEST_HOSTPID;
@@ -160,6 +203,7 @@ static void test_success_sets_pid_context_size_and_balances_context(void) {
     check(fake_release_count == 1, "broker success releases once");
     check(fake_handle_index == 2, "context lookup uses CUDA-to-NVML map");
     check(fake_process_call_count == 1, "context lookup asks NVML once");
+    check(fake_node_unlock_count == 1, "success releases the sizing lock");
     check(fake_lock_postinit_count == 0,
           "broker lookup does not take the cache postinit lock");
 }
@@ -244,6 +288,29 @@ static void test_sizing_errors_keep_pid_and_release_retained_context(void) {
               "sizing failure releases only a successfully retained context");
         check(fake_process_call_count == (scenario >= 3),
               "sizing stops at failure and never loops on capacity");
+        check(fake_node_unlock_count == (scenario != 0),
+              "sizing failures release an acquired node lock");
+    }
+}
+
+static void test_lock_errors_keep_pid_without_creating_context(void) {
+    static const int errors[] = {EACCES, ENOENT, ETIMEDOUT};
+    for (size_t i = 0; i <= sizeof(errors) / sizeof(errors[0]); i++) {
+        reset_fakes();
+        context_size = 999;
+        if (i == 0) {
+            fake_deadline_result = -1;
+        } else {
+            fake_node_lock_errno = errors[i - 1];
+        }
+        check(set_task_pid_from_broker() == NVML_SUCCESS,
+              "lock failure keeps the known broker PID");
+        check(fake_set_host_pid_value == TEST_HOSTPID,
+              "lock failure preserves registration");
+        check(fake_retain_count == 0 && fake_process_call_count == 0,
+              "lock failure never creates a context or sizes it");
+        check(context_size == 999 && fake_node_unlock_count == 0,
+              "lock failure keeps size and does not unlock");
     }
 }
 
@@ -255,6 +322,14 @@ static void test_release_failure_preserves_pid_and_size(void) {
     check(fake_set_host_pid_value == TEST_HOSTPID, "release failure keeps PID");
     check(context_size == TEST_MEMORY, "release failure keeps measured size");
     check(fake_release_count == 1, "failed release is attempted once");
+    check(fake_node_unlock_count == 1, "CUDA release failure unlocks node");
+
+    reset_fakes();
+    fake_node_unlock_result = -1;
+    check(set_task_pid_from_broker() == NVML_SUCCESS,
+          "node unlock failure does not discard the broker PID");
+    check(context_size == TEST_MEMORY && fake_node_unlock_count == 1,
+          "node unlock failure preserves size and is attempted once");
 }
 
 int main(void) {
@@ -264,6 +339,7 @@ int main(void) {
     test_broker_failure_returns_error_and_makes_no_retain();
     test_set_host_pid_failure_skips_context_lookup();
     test_sizing_errors_keep_pid_and_release_retained_context();
+    test_lock_errors_keep_pid_without_creating_context();
     test_release_failure_preserves_pid_and_size();
 
     if (failures != 0) {

@@ -850,6 +850,50 @@ static void test_release_with_inherited_descriptor(const char *path) {
           "inherited descriptor child reaped");
 }
 
+static int child_shared(const char *path, int expected_errno) {
+    struct timespec deadline;
+    hostpid_fallback_lock_after_fork();
+    if (hostpid_fallback_lock_deadline_after_ms(&deadline, 200U) != 0) {
+        return 2;
+    }
+    int result = hostpid_fallback_lock_acquire_shared_at_until(
+        path, getuid(), &deadline);
+    if (expected_errno != 0) {
+        return result == -1 && errno == expected_errno ? 0 : 3;
+    }
+    return result == 0 && hostpid_fallback_lock_release() == 0 ? 0 : 4;
+}
+
+static void test_shared_sizing_lock(const char *path) {
+    struct timespec deadline;
+    check(hostpid_fallback_lock_deadline_after_ms(&deadline, 500U) == 0,
+          "shared sizing deadline");
+    check(hostpid_fallback_lock_acquire_shared_at_until(
+              path, getuid(), &deadline) == 0, "first sizing reader");
+    pid_t child = fork();
+    check(child >= 0, "second sizing reader fork");
+    if (child == 0) _exit(child_shared(path, 0));
+    check(wait_for_child(child, 0) == 0, "sizing readers can overlap");
+
+    child = fork();
+    check(child >= 0, "exclusive waiter fork");
+    if (child == 0) _exit(child_timeout(path, 100U));
+    check(wait_for_child(child, 0) == 0, "sizing blocks exclusive discovery");
+    check(hostpid_fallback_lock_release() == 0, "sizing reader release");
+
+    check(hostpid_fallback_lock_acquire_at(path, getuid(), 500U) == 0,
+          "exclusive discovery holder");
+    child = fork();
+    check(child >= 0, "sizing waiter fork");
+    if (child == 0) _exit(child_shared(path, ETIMEDOUT));
+    check(wait_for_child(child, 0) == 0, "exclusive discovery blocks sizing");
+    check(hostpid_fallback_lock_release() == 0, "exclusive discovery release");
+    child = fork();
+    check(child >= 0, "sizing after discovery fork");
+    if (child == 0) _exit(child_shared(path, 0));
+    check(wait_for_child(child, 0) == 0, "sizing succeeds after discovery releases");
+}
+
 int main(int argc, char **argv) {
     char directory[] = "/tmp/hami-hostpid-global-lock.XXXXXX";
     char *path;
@@ -880,6 +924,7 @@ int main(int argc, char **argv) {
 
     test_absolute_deadline_api(path);
     test_basic_contract(path);
+    test_shared_sizing_lock(path);
     test_path_trust(path);
     test_live_holder_timeout(path);
     test_deadline_not_renewed(path);

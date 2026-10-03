@@ -12,6 +12,7 @@
 #include "include/nvml_override.h"
 #include "include/libcuda_hook.h"
 #include "include/hostpid_broker.h"
+#include "include/hostpid_fallback_lock.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
 extern size_t context_size;
@@ -96,13 +97,14 @@ static nvmlReturn_t get_used_gpu_memory_by_pid(pid_t hostpid,
     return res;
 }
 
-// The broker names this process's host PID, so no NVML diff and no postinit
-// lock are needed. The device 0 retain is only there to size the context.
+// The broker names this process's host PID without NVML discovery. Context
+// sizing shares the node lock so its retain cannot disturb a fallback probe.
 nvmlReturn_t set_task_pid_from_broker(void) {
     pid_t hostpid = 0;
     unsigned long long used = 0;
     CUcontext pctx;
     nvmlReturn_t res;
+    struct timespec deadline;
 
     if (hostpid_broker_query_trusted(HOSTPID_BROKER_SOCKET_PATH,
                                     &hostpid) != 0) {
@@ -115,10 +117,20 @@ nvmlReturn_t set_task_pid_from_broker(void) {
     }
     // The PID is already set, so a sizing failure only leaves context_size
     // alone, as a missing NVML entry does in set_task_pid().
-    if (nvmlInit() != NVML_SUCCESS ||
-        cuDevicePrimaryCtxRetain(&pctx, 0) != CUDA_SUCCESS) {
+    if (nvmlInit() != NVML_SUCCESS) {
         LOG_WARN("Primary context size unavailable");
         return NVML_SUCCESS;
+    }
+    if (hostpid_fallback_lock_deadline_after_ms(
+            &deadline, HOSTPID_FALLBACK_LOCK_TIMEOUT_MS) != 0 ||
+        hostpid_fallback_lock_acquire_shared_until(&deadline) != 0) {
+        LOG_WARN("Skipped primary context sizing because the node lock "
+                 "failed: %s", strerror(errno));
+        return NVML_SUCCESS;
+    }
+    if (cuDevicePrimaryCtxRetain(&pctx, 0) != CUDA_SUCCESS) {
+        LOG_WARN("Primary context size unavailable");
+        goto unlock;
     }
     res = get_used_gpu_memory_by_pid(hostpid, &used);
     if (res == NVML_SUCCESS) {
@@ -129,6 +141,11 @@ nvmlReturn_t set_task_pid_from_broker(void) {
     }
     if (cuDevicePrimaryCtxRelease(0) != CUDA_SUCCESS) {
         LOG_WARN("Failed to release the device 0 primary context");
+    }
+unlock:
+    if (hostpid_fallback_lock_release() != 0) {
+        LOG_ERROR("Failed to release the context sizing lock: %s",
+                  strerror(errno));
     }
     return NVML_SUCCESS;
 }
