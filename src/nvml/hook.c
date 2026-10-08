@@ -305,7 +305,6 @@ void load_nvml_libraries() {
 
 void nvml_preInit() {
     ensure_initialized();
-    load_env_from_file(ENV_OVERRIDE_FILE);
     load_nvml_libraries();
     for (int i = 0; i < CUDA_DEVICE_MAX_COUNT; i++) {
         cuda_to_nvml_map_array[i] = i;

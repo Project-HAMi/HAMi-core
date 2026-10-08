@@ -33,6 +33,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
             OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
+            OR TEST_TARGET_NAME STREQUAL "test_override_env"
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
         # Focused regression tests built against the production sources they
         # exercise; section GC drops unrelated GPU-facing production functions.
@@ -51,6 +52,11 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         endif()
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
             _GNU_SOURCE)
+        if (TEST_TARGET_NAME STREQUAL "test_override_env")
+            # Read a scratch file, never the production /overrideEnv.
+            target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+                ENV_OVERRIDE_FILE=\"${CMAKE_CURRENT_BINARY_DIR}/override_env.test\")
+        endif()
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
@@ -126,6 +132,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
             OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
+            OR TEST_TARGET_NAME STREQUAL "test_override_env"
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
@@ -173,6 +180,12 @@ set_tests_properties(memory_index_map PROPERTIES TIMEOUT 20)
 add_test(NAME limit_env_parsing
     COMMAND test_limit_env_parsing)
 set_tests_properties(limit_env_parsing PROPERTIES TIMEOUT 20)
+
+# A login session has no limit variables, so the override file has to be read
+# before the shared region is created (issue #356).
+add_test(NAME override_env
+    COMMAND test_override_env)
+set_tests_properties(override_env PROPERTIES TIMEOUT 20)
 # libnvoptix passes free=NULL and the hook used to dereference it (issue #333).
 add_test(NAME meminfo_null_out
     COMMAND test_meminfo_null_out)
