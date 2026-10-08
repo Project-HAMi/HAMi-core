@@ -227,25 +227,35 @@ int init_device_info() {
 
 int load_env_from_file(char *filename) {
     FILE *f=fopen(filename,"r");
-    if (f==NULL)
+    if (f == NULL) {
+        int err = errno;  /* a log call may change errno */
+        if (err == ENOENT) {
+            LOG_INFO("%s not present, using the environment", filename);
+        } else {
+            LOG_WARN("cannot read %s: %s, using the environment", filename, strerror(err));
+        }
         return 0;
+    }
     char tmp[10000];
-    int cursor = 0;
+    int lineno = 0;
     size_t tmplen = 0;
     while (fgets(tmp, sizeof(tmp), f) != NULL) {
-        if (strstr(tmp, "=") == NULL)
-            break;
+        lineno++;
         tmplen = strlen(tmp);
-        if (tmp[tmplen - 1] == '\n')
+        while (tmplen > 0 && (tmp[tmplen - 1] == '\n' || tmp[tmplen - 1] == '\r'))
             tmp[--tmplen] = '\0';
-        for (cursor = 0; cursor < (int)tmplen; cursor++) {
-            if (tmp[cursor] == '=') {
-                tmp[cursor] = '\0';
-                setenv(tmp,tmp+cursor+1,1);
-                LOG_INFO("SET %s to %s",tmp,tmp+cursor+1);
-                break;
-            }
+        if (tmplen == 0)
+            continue;
+        /* Skip a bad line instead of stopping, so the lines after it,
+           such as the cache path, are still loaded. */
+        char *eq = strchr(tmp, '=');
+        if (eq == NULL || eq == tmp) {
+            LOG_ERROR("%s:%d is not KEY=VALUE, line skipped", filename, lineno);
+            continue;
         }
+        *eq = '\0';
+        setenv(tmp, eq + 1, 1);
+        LOG_INFO("SET %s to %s", tmp, eq + 1);
     }
     fclose(f);
     return 0;

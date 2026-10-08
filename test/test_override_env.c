@@ -4,7 +4,7 @@
  * A process started from SSH, su -, sudo or cron has none of the limit
  * variables. The file has to be loaded before the shared region is created,
  * otherwise the region is stamped with limit 0, which means no limit, in a
- * private cache.
+ * private cache. One bad line in the file must not drop the lines after it.
  *
  * Each case runs in its own child because the library initializes once per
  * process.
@@ -120,6 +120,24 @@ static int file_beats_env(void) {
     return rc;
 }
 
+/* A hand-edited file: a blank line, a line with no '=', a CRLF ending.
+   Everything after the bad line must still be loaded. */
+static int bad_line(void) {
+    char cache[64];
+    char content[256];
+
+    fresh_cache(cache, sizeof(cache));
+    snprintf(content, sizeof(content),
+             "CUDA_DEVICE_SM_LIMIT=30\n"
+             "\n"
+             "this line has no equals sign\n"
+             "CUDA_DEVICE_MEMORY_LIMIT_0=1024m\n"
+             "CUDA_DEVICE_MEMORY_SHARED_CACHE=%s\r\n",
+             cache);
+    write_override(content);
+    return expect(1024 * MiB, 30, cache);
+}
+
 /* No file: the environment works exactly as before. */
 static int no_file(void) {
     char cache[64];
@@ -138,6 +156,7 @@ int main(void) {
     } cases[] = {
         {"file only", file_only},
         {"file beats environment", file_beats_env},
+        {"bad line in the middle", bad_line},
         {"no file", no_file},
     };
     int failures = 0;
