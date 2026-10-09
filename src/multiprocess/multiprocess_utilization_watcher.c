@@ -50,7 +50,9 @@ void rate_limiter(int grids, int blocks) {
       return;
   }
 
-    for (;;) {
+  /* Publish activity to vGPUmonitor even when the switch is off, or it can
+   * never turn the switch back on. CAS so a concurrent -1 is not overwritten. */
+  for (;;) {
       int rk = get_recent_kernel();
       if (rk < 0) {
           sleep(1);
