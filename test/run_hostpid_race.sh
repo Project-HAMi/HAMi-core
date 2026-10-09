@@ -69,6 +69,7 @@ judge() {  # judge <phase> <log>...
   done
   echo "$phase: $ok found their own PID, $wrong took another process's, $missing without a host PID"
   WRONG=$((WRONG + wrong))
+  MISSING=$missing
 }
 
 echo "Running $BIN with LD_PRELOAD=$LIB, LIMIT=$LIMIT"
@@ -83,6 +84,7 @@ kill "$NEIGHBOUR_PID" 2>/dev/null || true
 wait "$NEIGHBOUR_PID" 2>/dev/null || true
 NEIGHBOUR_PID=""
 judge "phase 1 (neighbour without libvgpu, $PROBES probes)" "$WORK"/seq.*.log
+SEQ_MISSING=$MISSING  # probes run one at a time here, so each must find a host PID
 
 for r in $(seq 1 "$ROUNDS"); do
   for i in $(seq 1 "$CONCURRENT"); do
@@ -92,8 +94,14 @@ for r in $(seq 1 "$ROUNDS"); do
 done
 judge "phase 2 ($ROUNDS x $CONCURRENT probes at once, separate caches)" "$WORK"/conc.*.log
 
+STATUS=0
 if [[ "$WRONG" -ne 0 ]]; then
   echo "FAIL: $WRONG probes took another process's host PID"
-  exit 1
+  STATUS=1
 fi
-echo "PASS"
+if [[ "$SEQ_MISSING" -ne 0 ]]; then
+  echo "FAIL: $SEQ_MISSING sequential probes found no host PID"
+  STATUS=1
+fi
+[[ "$STATUS" -eq 0 ]] && echo "PASS"
+exit "$STATUS"
