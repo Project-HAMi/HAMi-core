@@ -33,6 +33,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
             OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
+            OR TEST_TARGET_NAME STREQUAL "test_override_env"
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
         # Focused regression tests built against the production sources they
         # exercise; section GC drops unrelated GPU-facing production functions.
@@ -51,8 +52,27 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         endif()
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
             _GNU_SOURCE)
+        if (TEST_TARGET_NAME STREQUAL "test_override_env")
+            # Read a scratch file, never the production /overrideEnv.
+            target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+                ENV_OVERRIDE_FILE=\"${CMAKE_CURRENT_BINARY_DIR}/override_env.test\")
+        endif()
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
             -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat")
+        add_executable(${TEST_TARGET_NAME}
+            ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/memory.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/allocator/allocator.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE HOOK_MEMINFO_ENABLE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        # CMake may add -rdynamic; exported functions survive section GC and
+        # pull in unrelated driver/accounting dependencies.
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_memory_index_map")
@@ -134,6 +154,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
             OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
+            OR TEST_TARGET_NAME STREQUAL "test_override_env"
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
@@ -141,7 +162,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         target_link_libraries(${TEST_TARGET_NAME}
             -ldl dlsym_rtld_next_caller)
     elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures"
-            OR TEST_TARGET_NAME STREQUAL "test_utilization_nvml_index")
+            OR TEST_TARGET_NAME STREQUAL "test_utilization_nvml_index"
+            OR TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_memory_index_map"
             OR TEST_TARGET_NAME STREQUAL "test_meminfo_null_out")
@@ -182,6 +204,12 @@ set_tests_properties(memory_index_map PROPERTIES TIMEOUT 20)
 add_test(NAME limit_env_parsing
     COMMAND test_limit_env_parsing)
 set_tests_properties(limit_env_parsing PROPERTIES TIMEOUT 20)
+
+# A login session has no limit variables, so the override file has to be read
+# before the shared region is created (issue #356).
+add_test(NAME override_env
+    COMMAND test_override_env)
+set_tests_properties(override_env PROPERTIES TIMEOUT 20)
 # libnvoptix passes free=NULL and the hook used to dereference it (issue #333).
 add_test(NAME meminfo_null_out
     COMMAND test_meminfo_null_out)
@@ -243,3 +271,8 @@ add_custom_target(python_test ALL
 # add_custom_target(multiprocess_test_scripts ALL
 #    COMMAND cp -r ${CMAKE_CURRENT_SOURCE_DIR}/multiprocess/scripts
 #                  ${CMAKE_CURRENT_BINARY_DIR}/multiprocess)
+
+add_test(NAME cuda_memory_compat COMMAND test_cuda_memory_compat)
+set_tests_properties(cuda_memory_compat PROPERTIES
+    ENVIRONMENT "LIBCUDA_LOG_LEVEL=4"
+    TIMEOUT 10)

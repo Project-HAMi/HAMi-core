@@ -68,16 +68,15 @@ else()
     set(GIT_BRANCH $ENV{CI_COMMIT_REF_NAME})
 endif()
 
-if(GIT_FOUND)
-    message(STATUS "Git original branch is ${GIT_BRANCH}")
-    if(GIT_BRANCH)
-        string(REPLACE "-" "_" GIT_BRANCH "${GIT_BRANCH}")
-        string(REPLACE "/" "_" GIT_BRANCH "${GIT_BRANCH}")
-    else()
-        set(GIT_BRANCH "unknown")
-    endif()
-    message(STATUS "Git formatted branch is ${GIT_BRANCH}")
+message(STATUS "Git original branch is ${GIT_BRANCH}")
+# The name becomes part of a C identifier, and both git and CI_COMMIT_REF_NAME
+# allow characters that are not. Dependabot branches carry a dotted version.
+if(GIT_BRANCH)
+    string(REGEX REPLACE "[^A-Za-z0-9_]" "_" GIT_BRANCH "${GIT_BRANCH}")
+else()
+    set(GIT_BRANCH "unknown")
 endif()
+message(STATUS "Git formatted branch is ${GIT_BRANCH}")
 
 # Generate the static config header file
 configure_file(src/static_config.h.in ${CMAKE_CURRENT_BINARY_DIR}/config/static_config.h)
