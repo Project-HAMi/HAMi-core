@@ -386,7 +386,9 @@ static int acquire_unlocked(const char *path, uid_t trusted_owner,
     unsigned int retry_us = HOSTPID_FALLBACK_LOCK_INITIAL_RETRY_US;
     int fd;
 
-    if (path == NULL || path[0] != '/' || deadline == NULL) {
+    if (path == NULL || path[0] != '/' || deadline == NULL ||
+        deadline->tv_sec < 0 || deadline->tv_nsec < 0 ||
+        deadline->tv_nsec >= 1000000000L) {
         errno = EINVAL;
         return -1;
     }
@@ -511,6 +513,21 @@ int hostpid_fallback_lock_acquire_at_until(
 int hostpid_fallback_lock_acquire_shared_at_until(
     const char *path, uid_t trusted_owner, const struct timespec *deadline) {
     return acquire_at_until(path, trusted_owner, deadline, 0, 0, LOCK_SH);
+}
+
+/* The production checks (ancestor walk, optionally read-only mount) on a
+ * fixture path. */
+int hostpid_fallback_lock_acquire_at_strict(const char *path,
+                                            uid_t trusted_owner,
+                                            unsigned int timeout_ms,
+                                            int require_readonly) {
+    struct timespec deadline;
+
+    if (hostpid_fallback_lock_deadline_after_ms(&deadline, timeout_ms) != 0) {
+        return -1;
+    }
+    return acquire_at_until(path, trusted_owner, &deadline, 1,
+                            require_readonly, LOCK_EX);
 }
 #endif
 

@@ -19,16 +19,21 @@ int hostpid_fallback_lock_acquire_at_until(
     const char *path, uid_t trusted_owner, const struct timespec *deadline);
 int hostpid_fallback_lock_acquire_shared_at_until(
     const char *path, uid_t trusted_owner, const struct timespec *deadline);
+int hostpid_fallback_lock_acquire_at_strict(const char *path,
+                                            uid_t trusted_owner,
+                                            unsigned int timeout_ms,
+                                            int require_readonly);
 /* Diagnostic snapshot only: callers must not close or unlock this descriptor. */
 int hostpid_fallback_lock_active_fd(void);
 #endif
 
+int hostpid_fallback_lock_deadline_after_ms(struct timespec *deadline,
+                                            unsigned int timeout_ms);
 /* One lock per process, for one caller at a time: postInit() runs under
  * pthread_once, so acquire and release never overlap. Acquiring a lock this
  * process already holds returns EDEADLK. Concurrent callers and thread
- * cancellation are not supported. */
-int hostpid_fallback_lock_deadline_after_ms(struct timespec *deadline,
-                                            unsigned int timeout_ms);
+ * cancellation are not supported. The lock directory must sit on a read-only
+ * mount, owned by root with root-owned ancestors, on a supported filesystem. */
 int hostpid_fallback_lock_acquire_until(const struct timespec *deadline);
 /* Broker context sizing may overlap other sizing calls, but never an
  * exclusive NVML PID-discovery window. Release with the same release API. */

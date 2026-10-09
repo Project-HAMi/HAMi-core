@@ -894,6 +894,70 @@ static void test_shared_sizing_lock(const char *path) {
     check(wait_for_child(child, 0) == 0, "sizing succeeds after discovery releases");
 }
 
+static void test_deadline_validation(const char *path) {
+    struct timespec deadline;
+    int bad_nsec[] = {-1, 1000000000, 2000000000};
+    size_t i;
+
+    for (i = 0; i < sizeof(bad_nsec) / sizeof(bad_nsec[0]); i++) {
+        check(hostpid_fallback_lock_deadline_after_ms(&deadline, 60000U) == 0,
+              "validation deadline is created");
+        deadline.tv_nsec = bad_nsec[i];
+        errno = 0;
+        check(hostpid_fallback_lock_acquire_at_until(path, getuid(),
+                                                     &deadline) == -1 &&
+                  errno == EINVAL,
+              "unnormalized deadline is rejected");
+    }
+    deadline.tv_sec = -1;
+    deadline.tv_nsec = 0;
+    errno = 0;
+    check(hostpid_fallback_lock_acquire_at_until(path, getuid(),
+                                                 &deadline) == -1 &&
+              errno == EINVAL,
+          "negative deadline is rejected");
+    check(hostpid_fallback_lock_active_fd() < 0,
+          "rejected deadline leaves no descriptor");
+}
+
+/* The production checks only run on the real path, so drive them on a
+ * fixture.  Root owns the fixtures and /tmp, as the checks require. */
+static void test_strict_validation(void) {
+    char parent[] = "/tmp/hami-hostpid-strict.XXXXXX";
+    char child[PATH_MAX];
+
+#ifdef __linux__
+    if (geteuid() != 0 || mkdtemp(parent) == NULL) {
+        puts("strict validation tests skipped: root required");
+        return;
+    }
+    check(join_path(child, sizeof(child), parent, "/lock") == 0 &&
+              mkdir(child, 0700) == 0,
+          "strict fixture");
+    check(chmod(parent, 0777) == 0, "strict ancestor made writable");
+    errno = 0;
+    check(hostpid_fallback_lock_acquire_at_strict(child, 0, 50, 0) == -1 &&
+              errno == EACCES,
+          "writable ancestor without sticky bit is rejected");
+    check(chmod(parent, 0755) == 0, "strict ancestor made private");
+    check(hostpid_fallback_lock_acquire_at_strict(child, 0, 500, 0) == 0,
+          "trusted ancestors are accepted");
+    check(hostpid_fallback_lock_release() == 0, "strict release");
+    errno = 0;
+    check(hostpid_fallback_lock_acquire_at_strict(child, 0, 50, 1) == -1 &&
+              errno == EACCES,
+          "writable mount is rejected");
+    check(hostpid_fallback_lock_active_fd() < 0,
+          "rejected strict acquire leaves no descriptor");
+    rmdir(child);
+    rmdir(parent);
+#else
+    (void)parent;
+    (void)child;
+    puts("strict validation tests skipped: Linux required");
+#endif
+}
+
 int main(int argc, char **argv) {
     char directory[] = "/tmp/hami-hostpid-global-lock.XXXXXX";
     char *path;
@@ -925,6 +989,8 @@ int main(int argc, char **argv) {
     test_absolute_deadline_api(path);
     test_basic_contract(path);
     test_shared_sizing_lock(path);
+    test_deadline_validation(path);
+    test_strict_validation();
     test_path_trust(path);
     test_live_holder_timeout(path);
     test_deadline_not_renewed(path);
