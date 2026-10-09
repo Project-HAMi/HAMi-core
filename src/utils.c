@@ -97,20 +97,18 @@ unsigned int own_pid_candidates(const nvmlProcessInfo_t1 *before, unsigned int n
                                 const unsigned int *known, unsigned int n_known,
                                 unsigned int *out, unsigned int max_out) {
     unsigned int i, n = 0, kept = 0;
-    // pass0 keeps only PIDs in known. pass1 ignores known if pass0 found none.
-    for (int pass = (n_known > 0 ? 0 : 1); pass < 2 && n == 0; pass++) {
-        for (i = 0; i < n_during; i++) {
-            unsigned int pid = during[i].pid;
-            if (pid_listed(during, i, pid))
-                continue;
-            if (pid_listed(before, n_before, pid) || pid_listed(after, n_after, pid))
-                continue;
-            if (pass == 0 && !pid_in(known, n_known, pid))
-                continue;
-            if (n < max_out)
-                out[kept++] = pid;
-            n++;
-        }
+    // With known set, only PIDs that matched every earlier probe count; never restart from scratch.
+    for (i = 0; i < n_during; i++) {
+        unsigned int pid = during[i].pid;
+        if (pid_listed(during, i, pid))
+            continue;
+        if (pid_listed(before, n_before, pid) || pid_listed(after, n_after, pid))
+            continue;
+        if (n_known > 0 && !pid_in(known, n_known, pid))
+            continue;
+        if (n < max_out)
+            out[kept++] = pid;
+        n++;
     }
     return n;
 }

@@ -112,14 +112,13 @@ void test_own_pid_narrowing_keeps_every_repeat_match() {
     ASSERT_EQ(known[0], 300);  // `known` is only read
 }
 
-void test_own_pid_restarts_when_known_matches_nothing() {
+void test_own_pid_zero_when_known_matches_nothing() {
     nvmlProcessInfo_t1 before[] = { {100, 500} };
     nvmlProcessInfo_t1 during[] = { {100, 500}, {200, 248} };
     nvmlProcessInfo_t1 after[] = { {100, 500} };
     unsigned int known[1] = {300};
     unsigned int out[4] = {0};
-    ASSERT_EQ(own_pid_candidates(before, 1, during, 2, after, 1, known, 1, out, 4), 1);
-    ASSERT_EQ(out[0], 200);
+    ASSERT_EQ(own_pid_candidates(before, 1, during, 2, after, 1, known, 1, out, 4), 0);
 }
 
 void test_own_pid_nothing_appeared() {
@@ -158,7 +157,7 @@ int main() {
     test_own_pid_neighbour_starts();
     test_own_pid_narrowed_by_earlier_probes();
     test_own_pid_narrowing_keeps_every_repeat_match();
-    test_own_pid_restarts_when_known_matches_nothing();
+    test_own_pid_zero_when_known_matches_nothing();
     test_own_pid_nothing_appeared();
     test_own_pid_neighbour_exits_or_listed_twice();
 

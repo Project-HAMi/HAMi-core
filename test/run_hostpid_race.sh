@@ -21,8 +21,9 @@ if ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi -L >/dev/null 2>&1; t
   echo "SKIP: no NVIDIA GPU available (nvidia-smi)" >&2
   exit 77
 fi
-# Probe's getpid() is compared with the host PID libvgpu found.
-if [[ "$(awk '/^NSpid:/ {print NF - 1}' /proc/self/status)" != "1" ]]; then
+# Probe's getpid() is compared with the host PID libvgpu found, so we must be in the initial PID
+# namespace (fixed inode 4026531836), not just see a one-level NSpid from a private /proc mount.
+if [[ "$(readlink /proc/self/ns/pid 2>/dev/null)" != "pid:[4026531836]" ]]; then
   echo "SKIP: needs the host PID namespace (docker run --pid=host)" >&2
   exit 77
 fi
@@ -47,14 +48,20 @@ mkdir -p /tmp/vgpulock
 probe() {  # probe <log> <cache>
   env LD_PRELOAD="$LIB" CUDA_DEVICE_MEMORY_LIMIT="$LIMIT" \
       CUDA_DEVICE_MEMORY_SHARED_CACHE="$2" LIBCUDA_LOG_LEVEL=3 \
-      "$BIN" probe >"$1" 2>&1 || true
+      "$BIN" probe >"$1" 2>&1 || echo "$?" >"$1.rc"
 }
 
 WRONG=0
 judge() {  # judge <phase> <log>...
-  local phase="$1" ok=0 wrong=0 missing=0 log pid host
+  local phase="$1" ok=0 wrong=0 missing=0 log pid host failed=0
   shift
   for log in "$@"; do
+    if [[ -s "$log.rc" ]]; then
+      failed=$((failed + 1))
+      echo "  $phase: probe exited with status $(cat "$log.rc"):"
+      sed 's/^/    /' "$log"
+      continue
+    fi
     pid="$(sed -n 's/^probe pid=\([0-9]*\).*/\1/p' "$log")"
     host="$(sed -n 's/.*hostPid=\([0-9]*\).*/\1/p' "$log" | tail -n 1)"
     if [[ -z "$pid" || -z "$host" ]]; then
@@ -67,8 +74,8 @@ judge() {  # judge <phase> <log>...
       { grep -E 'probe pid=|Primary Context Size|OOM' "$log" || true; } | sed 's/^/    /'
     fi
   done
-  echo "$phase: $ok found their own PID, $wrong took another process's, $missing without a host PID"
-  WRONG=$((WRONG + wrong))
+  echo "$phase: $ok found their own PID, $wrong took another process's, $missing without a host PID, $failed failed"
+  WRONG=$((WRONG + wrong + failed))
   MISSING=$missing
 }
 
@@ -96,7 +103,7 @@ judge "phase 2 ($ROUNDS x $CONCURRENT probes at once, separate caches)" "$WORK"/
 
 STATUS=0
 if [[ "$WRONG" -ne 0 ]]; then
-  echo "FAIL: $WRONG probes took another process's host PID"
+  echo "FAIL: $WRONG probes failed or took another process's host PID"
   STATUS=1
 fi
 if [[ "$SEQ_MISSING" -ne 0 ]]; then
