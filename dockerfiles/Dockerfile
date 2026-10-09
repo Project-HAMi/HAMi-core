@@ -1,4 +1,4 @@
-FROM nvidia/cuda:13.3.0-cudnn-devel-ubi8@sha256:e5b2b971730b6d0defd6d1bd7697630e0e599c359190cc4351e3032134e7b401
+FROM nvidia/cuda:13.4.2-cudnn-devel-ubi8@sha256:7bf81df28de77ac76b1415edfa506645118fd72546842c58b50e544a28d69ec2
 
 WORKDIR /libvgpu
 COPY . /libvgpu
