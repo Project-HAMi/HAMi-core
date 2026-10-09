@@ -69,12 +69,92 @@ void test_mergepid_with_duplicates() {
     ASSERT_EQ(merged[2].pid, 102);
 }
 
+void test_own_pid_alone() {
+    nvmlProcessInfo_t1 before[] = { {100, 500} };
+    nvmlProcessInfo_t1 during[] = { {100, 500}, {200, 248} };
+    nvmlProcessInfo_t1 after[] = { {100, 500} };
+    unsigned int out[4] = {0};
+    ASSERT_EQ(own_pid_candidates(before, 1, during, 2, after, 1, NULL, 0, out, 4), 1);
+    ASSERT_EQ(out[0], 200);
+}
+
+void test_own_pid_neighbour_starts() {
+    nvmlProcessInfo_t1 before[] = { {100, 500} };
+    nvmlProcessInfo_t1 during[] = { {100, 500}, {300, 2048}, {200, 248} };
+    nvmlProcessInfo_t1 after[] = { {100, 500}, {300, 2048} };
+    unsigned int out[4] = {0};
+    ASSERT_EQ(getextrapid(1, 3, before, during), 300);
+    ASSERT_EQ(own_pid_candidates(before, 1, during, 3, after, 2, NULL, 0, out, 4), 1);
+    ASSERT_EQ(out[0], 200);
+}
+
+void test_own_pid_narrowed_by_earlier_probes() {
+    nvmlProcessInfo_t1 before[] = { {100, 500} };
+    nvmlProcessInfo_t1 during[] = { {100, 500}, {300, 248}, {200, 248} };
+    nvmlProcessInfo_t1 after[] = { {100, 500} };
+    unsigned int out[4] = {0};
+    ASSERT_EQ(own_pid_candidates(before, 1, during, 3, after, 1, NULL, 0, out, 4), 2);
+    nvmlProcessInfo_t1 during2[] = { {100, 500}, {200, 248}, {400, 248} };
+    unsigned int known[2] = {300, 200};
+    ASSERT_EQ(own_pid_candidates(before, 1, during2, 3, after, 1, known, 2, out, 4), 1);
+    ASSERT_EQ(out[0], 200);
+}
+
+void test_own_pid_narrowing_keeps_every_repeat_match() {
+    nvmlProcessInfo_t1 before[] = { {100, 500} };
+    nvmlProcessInfo_t1 during[] = { {100, 500}, {200, 248}, {300, 248} };
+    nvmlProcessInfo_t1 after[] = { {100, 500} };
+    unsigned int known[2] = {300, 200};
+    unsigned int out[4] = {0};
+    ASSERT_EQ(own_pid_candidates(before, 1, during, 3, after, 1, known, 2, out, 4), 2);
+    ASSERT_EQ(out[0], 200);
+    ASSERT_EQ(out[1], 300);
+    ASSERT_EQ(known[0], 300);  // `known` is only read
+}
+
+void test_own_pid_restarts_when_known_matches_nothing() {
+    nvmlProcessInfo_t1 before[] = { {100, 500} };
+    nvmlProcessInfo_t1 during[] = { {100, 500}, {200, 248} };
+    nvmlProcessInfo_t1 after[] = { {100, 500} };
+    unsigned int known[1] = {300};
+    unsigned int out[4] = {0};
+    ASSERT_EQ(own_pid_candidates(before, 1, during, 2, after, 1, known, 1, out, 4), 1);
+    ASSERT_EQ(out[0], 200);
+}
+
+void test_own_pid_nothing_appeared() {
+    nvmlProcessInfo_t1 before[] = { {100, 500}, {200, 248} };
+    nvmlProcessInfo_t1 during[] = { {100, 500}, {200, 248} };
+    nvmlProcessInfo_t1 after[] = { {100, 500}, {200, 248} };
+    unsigned int out[4] = {0};
+    ASSERT_EQ(own_pid_candidates(before, 2, during, 2, after, 2, NULL, 0, out, 4), 0);
+    ASSERT_EQ(own_pid_candidates(before, 2, during, 0, after, 0, NULL, 0, out, 4), 0);
+}
+
+void test_own_pid_neighbour_exits_or_listed_twice() {
+    nvmlProcessInfo_t1 before[] = { {100, 500}, {150, 600} };
+    nvmlProcessInfo_t1 during[] = { {100, 500}, {200, 248}, {200, 248} };
+    nvmlProcessInfo_t1 after[] = { {100, 500} };
+    unsigned int out[4] = {0};
+    ASSERT_EQ(own_pid_candidates(before, 2, during, 3, after, 1, NULL, 0, out, 4), 1);
+    ASSERT_EQ(out[0], 200);
+}
+
 int main() {
     printf("Running getextrapid tests...\n");
     test_getextrapid_underflow();
     test_getextrapid_boundary();
     test_getextrapid_happy_path();
     test_getextrapid_empty();
+
+    printf("Running own_pid_candidates tests...\n");
+    test_own_pid_alone();
+    test_own_pid_neighbour_starts();
+    test_own_pid_narrowed_by_earlier_probes();
+    test_own_pid_narrowing_keeps_every_repeat_match();
+    test_own_pid_restarts_when_known_matches_nothing();
+    test_own_pid_nothing_appeared();
+    test_own_pid_neighbour_exits_or_listed_twice();
 
     printf("Running mergepid tests...\n");
     test_mergepid_no_duplicates();

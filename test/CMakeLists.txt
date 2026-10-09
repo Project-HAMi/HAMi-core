@@ -252,6 +252,17 @@ set_tests_properties(concurrent_oom_race PROPERTIES
     ENVIRONMENT "LIBVGPU=${CMAKE_BINARY_DIR}/libvgpu.so;TEST_BIN=${CMAKE_CURRENT_BINARY_DIR}/test_concurrent_oom_race")
 
 
+# GPU + LD_PRELOAD regression for host PID discovery taking a process that
+# starts on the device at the same time for our own (set_task_pid).
+# Wrapper exits 77 without a GPU or inside a PID namespace (skip, not fail).
+add_test(NAME hostpid_race
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/run_hostpid_race.sh)
+set_tests_properties(hostpid_race PROPERTIES
+    TIMEOUT 300
+    SKIP_RETURN_CODE 77
+    ENVIRONMENT "LIBVGPU=${CMAKE_BINARY_DIR}/libvgpu.so;TEST_BIN=${CMAKE_CURRENT_BINARY_DIR}/test_hostpid_race")
+
+
 add_custom_target(python_test ALL
     COMMAND cp -r ${CMAKE_CURRENT_SOURCE_DIR}/python ${CMAKE_CURRENT_BINARY_DIR})
 
