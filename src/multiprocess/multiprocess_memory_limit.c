@@ -1606,6 +1606,11 @@ int set_recent_kernel(int value){
     return 0;
 }
 
+int cas_recent_kernel(int expected, int desired) {
+    return atomic_compare_exchange_strong(&region_info.shared_region->recent_kernel,
+                                          &expected, desired);
+}
+
 int get_utilization_switch() {
     if (env_utilization_switch==1)
         return 1;
