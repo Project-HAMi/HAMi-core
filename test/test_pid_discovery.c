@@ -140,6 +140,12 @@ void test_own_pid_neighbour_exits_or_listed_twice() {
     ASSERT_EQ(out[0], 200);
 }
 
+void test_retry_seed_differs_for_same_pid_same_second() {
+    struct timespec a = {1000, 111}, b = {1000, 222};
+    ASSERT_EQ(hostpid_retry_seed(&a, 7) != hostpid_retry_seed(&b, 7), 1);
+    ASSERT_EQ(hostpid_retry_seed(&a, 7) != hostpid_retry_seed(&a, 8), 1);
+}
+
 int main() {
     printf("Running getextrapid tests...\n");
     test_getextrapid_underflow();
@@ -155,6 +161,8 @@ int main() {
     test_own_pid_restarts_when_known_matches_nothing();
     test_own_pid_nothing_appeared();
     test_own_pid_neighbour_exits_or_listed_twice();
+
+    test_retry_seed_differs_for_same_pid_same_second();
 
     printf("Running mergepid tests...\n");
     test_mergepid_no_duplicates();

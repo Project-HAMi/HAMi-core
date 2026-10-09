@@ -1,3 +1,4 @@
+#include <time.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <fcntl.h>
@@ -19,6 +20,7 @@ unsigned int own_pid_candidates(const nvmlProcessInfo_t1 *before, unsigned int n
                                 const nvmlProcessInfo_t1 *after, unsigned int n_after,
                                 const unsigned int *known, unsigned int n_known,
                                 unsigned int *out, unsigned int max_out);
+unsigned int hostpid_retry_seed(const struct timespec *ts, unsigned int pid);
 
 //Nvml part utils
 void sort(int vmap[16]);

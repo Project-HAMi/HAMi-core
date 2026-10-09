@@ -3,6 +3,8 @@
 #include <dirent.h>
 #include <ctype.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <time.h>
 #include <sys/file.h>
 #include "include/utils.h"
@@ -113,6 +115,11 @@ unsigned int own_pid_candidates(const nvmlProcessInfo_t1 *before, unsigned int n
     return n;
 }
 
+// Containers often share small PIDs and start in the same second, so mix in the clock's nanoseconds.
+unsigned int hostpid_retry_seed(const struct timespec *ts, unsigned int pid) {
+    return (unsigned int)ts->tv_sec ^ (unsigned int)ts->tv_nsec ^ (pid << 16) ^ pid;
+}
+
 static nvmlReturn_t list_compute_processes(nvmlDevice_t device, nvmlProcessInfo_t1 *out, unsigned int *count) {
     nvmlReturn_t res;
     *count = SHARED_REGION_MAX_PROCESS_NUM;
@@ -132,12 +139,15 @@ nvmlReturn_t set_task_pid() {
     unsigned int known[SHARED_REGION_MAX_PROCESS_NUM];
     unsigned int found[SHARED_REGION_MAX_PROCESS_NUM];
     unsigned int n_before, n_during, n_after, n_known = 0, nvmlCounts, i, hostpid;
-    unsigned int seed = (unsigned int)time(NULL) ^ (unsigned int)getpid();
+    unsigned int seed;
     nvmlDevice_t device;
     nvmlReturn_t res;
     CUcontext pctx;
+    struct timespec now;
     int attempt;
 
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    seed = hostpid_retry_seed(&now, (unsigned int)getpid());
     CHECK_NVML_API(nvmlInit());
     CHECK_NVML_API(nvmlDeviceGetCount(&nvmlCounts));
     for (i = 0; i < nvmlCounts; i++) {

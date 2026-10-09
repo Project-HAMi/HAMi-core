@@ -27,11 +27,11 @@ if [[ "$(awk '/^NSpid:/ {print NF - 1}' /proc/self/status)" != "1" ]]; then
   exit 77
 fi
 if [[ ! -f "$LIB" ]]; then
-  echo "missing $LIB — build first: (cd \"$ROOT\" && ./build.sh)" >&2
+  echo "missing $LIB: build first: (cd \"$ROOT\" && ./build.sh)" >&2
   exit 1
 fi
 if [[ ! -x "$BIN" ]]; then
-  echo "missing $BIN — rebuild so test/CMakeLists.txt picks up the new test" >&2
+  echo "missing $BIN: rebuild so test/CMakeLists.txt picks up the new test" >&2
   exit 1
 fi
 
@@ -64,7 +64,7 @@ judge() {  # judge <phase> <log>...
     else
       wrong=$((wrong + 1))
       echo "  $phase: probe $pid was given host PID $host:"
-      grep -E 'probe pid=|Primary Context Size|OOM' "$log" | sed 's/^/    /'
+      { grep -E 'probe pid=|Primary Context Size|OOM' "$log" || true; } | sed 's/^/    /'
     fi
   done
   echo "$phase: $ok found their own PID, $wrong took another process's, $missing without a host PID"
