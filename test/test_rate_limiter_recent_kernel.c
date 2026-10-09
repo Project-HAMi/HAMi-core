@@ -48,6 +48,22 @@ static void *release(void *arg) {
     return NULL;
 }
 
+static int seen_decayed, seen_negative;
+
+static void *monitor(void *arg) {
+    (void)arg;
+    usleep(100 * 1000);
+    fake_recent_kernel = 0;
+    usleep(100 * 1000);
+    seen_decayed = fake_recent_kernel;
+    fake_recent_kernel = -1;
+    usleep(100 * 1000);
+    seen_negative = fake_recent_kernel;
+    fake_recent_kernel = 0;
+    g_cur_cuda_cores[0] = 1000;
+    return NULL;
+}
+
 static void run(int sm_limit, int util_switch, int recent) {
     cached_sm_limit[0] = sm_limit;
     cached_util_switch = util_switch;
@@ -88,6 +104,15 @@ int main(void) {
     check(t1.tv_sec > t0.tv_sec || t1.tv_nsec - t0.tv_nsec > 150 * 1000000L,
           "negative recent_kernel blocks the caller");
     check(fake_recent_kernel == 2, "recent_kernel set after release");
+
+    cached_util_switch = 1;
+    fake_recent_kernel = 2;
+    g_cur_cuda_cores[0] = -1;
+    pthread_create(&tid, NULL, monitor, NULL);
+    rate_limiter(10, 1);
+    pthread_join(tid, NULL);
+    check(seen_decayed == 2, "token wait refreshes decayed recent_kernel");
+    check(seen_negative == -1, "token wait keeps negative recent_kernel");
 
     printf("%s\n", failures == 0 ? "PASS" : "FAIL");
     return failures == 0 ? 0 : 1;

@@ -69,6 +69,10 @@ void rate_limiter(int grids, int blocks) {
 CHECK:
       before_cuda_cores = g_cur_cuda_cores[device_id];
       if (before_cuda_cores < 0) {
+        /* Keep publishing activity while waiting for tokens, or the monitor
+         * decays recent_kernel to 0 mid-wait. Never overwrite a negative. */
+        int rk = get_recent_kernel();
+        if (rk >= 0 && rk != 2) cas_recent_kernel(rk, 2);
         nanosleep(&g_cycle, NULL);
         goto CHECK;
       }
