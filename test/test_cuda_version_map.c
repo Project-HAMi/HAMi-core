@@ -51,15 +51,17 @@ static int check(const char *what, const char *base, const char *const *present,
     return 0;
 }
 
-static int check_pair(const char *base, const char *const *cuda12,
-                      const char *const *cuda13, const char *on12,
-                      const char *on13) {
+typedef struct {
+    int cudaVersion;
+    const char *expect; /* NULL: the build compiles that spelling out */
+} Case;
+
+static int check_cases(const char *base, const char *const *present,
+                       const char *build, const Case *cases, int n) {
     int failures = 0;
-    failures += check("cuda12 build, cuda12 app", base, cuda12, 12090, on12);
-    failures += check("cuda12 build, cuda13 app", base, cuda12, 13030, on13);
-    failures += check("cuda13 build, cuda13 app", base, cuda13, 13030, on13);
-    /* The 12.x spelling is compiled out of a CUDA 13 build. */
-    failures += check("cuda13 build, cuda12 app", base, cuda13, 12090, NULL);
+    for (int i = 0; i < n; i++)
+        failures += check(build, base, present, cases[i].cudaVersion,
+                          cases[i].expect);
     return failures;
 }
 
@@ -107,26 +109,50 @@ static int check_symbol_status(void) {
 }
 
 int main(void) {
-    /* 12.x compiles in _v2, _v3, _v4; 13.x only _v4. */
+    /* Boundaries from cudaTypedefs.h: cuCtxCreate _v2 / _v3 from 11040 / _v4
+       from 12050, cuMemAdvise and cuMemPrefetchAsync _v2 from 12020. A CUDA
+       12 build compiles in every spelling, a CUDA 13 build only the newest. */
     static const char *const ctx12[] = {"cuCtxCreate_v2", "cuCtxCreate_v3",
                                         "cuCtxCreate_v4"};
     static const char *const ctx13[] = {"cuCtxCreate_v4", NULL, NULL};
-
-    /* 12.x compiles in the base name and _v2; 13.x only _v2. */
     static const char *const advise12[] = {"cuMemAdvise", "cuMemAdvise_v2", NULL};
     static const char *const advise13[] = {"cuMemAdvise_v2", NULL, NULL};
-
     static const char *const prefetch12[] = {"cuMemPrefetchAsync",
                                              "cuMemPrefetchAsync_v2", NULL};
     static const char *const prefetch13[] = {"cuMemPrefetchAsync_v2", NULL, NULL};
 
+    static const Case ctx_on12[] = {
+        {10000, "cuCtxCreate_v2"}, {11039, "cuCtxCreate_v2"},
+        {11040, "cuCtxCreate_v3"}, {12049, "cuCtxCreate_v3"},
+        {12050, "cuCtxCreate_v4"}, {12090, "cuCtxCreate_v4"},
+        {13030, "cuCtxCreate_v4"}};
+    static const Case ctx_on13[] = {
+        {11039, NULL}, {11040, NULL}, {12049, NULL},
+        {12050, "cuCtxCreate_v4"}, {12090, "cuCtxCreate_v4"},
+        {13030, "cuCtxCreate_v4"}};
+    static const Case advise_on12[] = {
+        {10000, "cuMemAdvise"}, {12019, "cuMemAdvise"},
+        {12020, "cuMemAdvise_v2"}, {12090, "cuMemAdvise_v2"},
+        {13030, "cuMemAdvise_v2"}};
+    static const Case advise_on13[] = {
+        {12019, NULL}, {12020, "cuMemAdvise_v2"}, {13030, "cuMemAdvise_v2"}};
+    static const Case prefetch_on12[] = {
+        {10000, "cuMemPrefetchAsync"}, {12019, "cuMemPrefetchAsync"},
+        {12020, "cuMemPrefetchAsync_v2"}, {12090, "cuMemPrefetchAsync_v2"},
+        {13030, "cuMemPrefetchAsync_v2"}};
+    static const Case prefetch_on13[] = {
+        {12019, NULL}, {12020, "cuMemPrefetchAsync_v2"},
+        {13030, "cuMemPrefetchAsync_v2"}};
+
     int failures = 0;
-    failures += check_pair("cuCtxCreate", ctx12, ctx13,
-                           "cuCtxCreate_v2", "cuCtxCreate_v4");
-    failures += check_pair("cuMemAdvise", advise12, advise13,
-                           "cuMemAdvise", "cuMemAdvise_v2");
-    failures += check_pair("cuMemPrefetchAsync", prefetch12, prefetch13,
-                           "cuMemPrefetchAsync", "cuMemPrefetchAsync_v2");
+    failures += check_cases("cuCtxCreate", ctx12, "cuda12 build", ctx_on12, 7);
+    failures += check_cases("cuCtxCreate", ctx13, "cuda13 build", ctx_on13, 6);
+    failures += check_cases("cuMemAdvise", advise12, "cuda12 build", advise_on12, 5);
+    failures += check_cases("cuMemAdvise", advise13, "cuda13 build", advise_on13, 3);
+    failures += check_cases("cuMemPrefetchAsync", prefetch12, "cuda12 build",
+                            prefetch_on12, 5);
+    failures += check_cases("cuMemPrefetchAsync", prefetch13, "cuda13 build",
+                            prefetch_on13, 3);
     failures += check_symbol_status();
 
     if (failures) {

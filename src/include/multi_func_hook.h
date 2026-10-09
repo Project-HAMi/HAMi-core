@@ -27,20 +27,20 @@ static CudaFuncMapEntry g_func_map[] = {
     {"cuGraphKernelNodeSetParams", 10000, 11999, "cuGraphKernelNodeSetParams"},
     {"cuGraphKernelNodeSetParams", 12000, 99999, "cuGraphKernelNodeSetParams_v2"},
 
-    // cuda.h remaps cuCtxCreate to cuCtxCreate_v2 up to CUDA 12.x and to
-    // cuCtxCreate_v4 from CUDA 13.0.  find_symbols_in_table() only probes the
-    // _v3, _v2 and bare spellings, so it can never reach the _v4 hook, and on
-    // 12.x it answers with _v3, whose five-parameter signature does not match
-    // the three-parameter cuCtxCreate the caller has.  Pin both explicitly.
-    {"cuCtxCreate", 10000, 12999, "cuCtxCreate_v2"},
-    {"cuCtxCreate", 13000, 99999, "cuCtxCreate_v4"},
+    // Boundaries follow cudaTypedefs.h: cuCtxCreate is _v2 below 11.4, _v3
+    // from 11.4 and _v4 from 12.5; cuMemAdvise and cuMemPrefetchAsync switch
+    // to _v2 at 12.2.  find_symbols_in_table() only probes _v3, _v2 and the
+    // bare spelling, so it cannot reach _v4 and answers with the wrong
+    // signature elsewhere.  Pin each range explicitly.
+    {"cuCtxCreate", 10000, 11039, "cuCtxCreate_v2"},
+    {"cuCtxCreate", 11040, 12049, "cuCtxCreate_v3"},
+    {"cuCtxCreate", 12050, 99999, "cuCtxCreate_v4"},
 
-    // Self up to 12.x, _v2 from 13.0, but the _v2 probe runs first.
-    {"cuMemAdvise", 10000, 12999, "cuMemAdvise"},
-    {"cuMemAdvise", 13000, 99999, "cuMemAdvise_v2"},
+    {"cuMemAdvise", 10000, 12019, "cuMemAdvise"},
+    {"cuMemAdvise", 12020, 99999, "cuMemAdvise_v2"},
 
-    {"cuMemPrefetchAsync", 10000, 12999, "cuMemPrefetchAsync"},
-    {"cuMemPrefetchAsync", 13000, 99999, "cuMemPrefetchAsync_v2"}
+    {"cuMemPrefetchAsync", 10000, 12019, "cuMemPrefetchAsync"},
+    {"cuMemPrefetchAsync", 12020, 99999, "cuMemPrefetchAsync_v2"}
 };
 
 
