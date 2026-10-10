@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <ctype.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <time.h>
@@ -151,7 +152,7 @@ _Static_assert(HOSTPID_PROBE_MAX == SHARED_REGION_MAX_PROCESS_NUM, "probe buffer
 // A candidate is accepted only after it matched two probes in a row, so a neighbour that appears
 // and exits inside one window cannot be taken even when our own PID is missing from the list.
 int find_own_hostpid(hostpid_probe_fn probe, void *ctx, int max_attempts,
-                     unsigned int *hostpid, unsigned long long *used) {
+                     unsigned int *hostpid, uint64_t *used) {
     hostpid_probe_t p;
     unsigned int known[SHARED_REGION_MAX_PROCESS_NUM];
     unsigned int found[SHARED_REGION_MAX_PROCESS_NUM];
@@ -210,7 +211,7 @@ int find_own_hostpid(hostpid_probe_fn probe, void *ctx, int max_attempts,
 
 nvmlReturn_t set_task_pid() {
     unsigned int nvmlCounts, i, hostpid;
-    unsigned long long used;
+    uint64_t used;
     nvmlDevice_t device;
     nvmlReturn_t res;
 
@@ -232,7 +233,7 @@ nvmlReturn_t set_task_pid() {
         return res;
     LOG_INFO("hostPid=%u", hostpid);
     if (set_host_pid(hostpid) == 0 && used != NVML_VALUE_NOT_AVAILABLE) {
-        LOG_INFO("Primary Context Size==%llu", used);
+        LOG_INFO("Primary Context Size==%" PRIu64, used);
         context_size = used;
     }
     return NVML_SUCCESS;

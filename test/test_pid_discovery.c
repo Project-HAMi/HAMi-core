@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -148,7 +149,7 @@ void test_retry_seed_differs_for_same_pid_same_second() {
 // find_own_hostpid() with scripted probes. Each script entry is one probe's snapshot:
 // {during pids (0 ends the list), our pid listed in during}. before/after stay empty, so every
 // during pid is a candidate.
-#define NOT_AVAILABLE ((unsigned long long)-1)
+#define NOT_AVAILABLE UINT64_MAX
 
 typedef struct {
     unsigned int during[3][4];
@@ -164,7 +165,7 @@ static int scripted_probe(void *ctx, hostpid_probe_t *p) {
     p->n_before = p->n_after = p->n_during = 0;
     for (i = 0; s->during[k][i] != 0; i++) {
         p->during[i].pid = s->during[k][i];
-        p->during[i].usedGpuMemory = s->during[k][i] == 999 ? (unsigned long long)-1 : 1000 + s->during[k][i];
+        p->during[i].usedGpuMemory = s->during[k][i] == 999 ? UINT64_MAX : 1000 + s->during[k][i];
         p->n_during++;
     }
     return 0;
@@ -173,7 +174,7 @@ static int scripted_probe(void *ctx, hostpid_probe_t *p) {
 void test_find_needs_two_matching_probes() {
     probe_script_t s = {{{200, 0}, {200, 0}, {200, 0}}, 0, 0};
     unsigned int pid = 0;
-    unsigned long long used = 0;
+    uint64_t used = 0;
     ASSERT_EQ(find_own_hostpid(scripted_probe, &s, 8, &pid, &used), 0);
     ASSERT_EQ(pid, 200);
     ASSERT_EQ(used == 1200, 1);
@@ -184,7 +185,7 @@ void test_find_rejects_single_sighting() {
     // A neighbour seen once (our own pid missing from the list) must not be taken.
     probe_script_t s = {{{300, 0}, {0}, {0}}, 0, 0};
     unsigned int pid = 0;
-    unsigned long long used = 0;
+    uint64_t used = 0;
     ASSERT_EQ(find_own_hostpid(scripted_probe, &s, 4, &pid, &used) != 0, 1);
     ASSERT_EQ(s.calls, 4);
     ASSERT_EQ(pid, 0);
@@ -193,7 +194,7 @@ void test_find_rejects_single_sighting() {
 void test_find_narrows_to_one() {
     probe_script_t s = {{{200, 300, 0}, {200, 0}, {200, 0}}, 0, 0};
     unsigned int pid = 0;
-    unsigned long long used = 0;
+    uint64_t used = 0;
     ASSERT_EQ(find_own_hostpid(scripted_probe, &s, 8, &pid, &used), 0);
     ASSERT_EQ(pid, 200);
     ASSERT_EQ(s.calls, 2);
@@ -202,7 +203,7 @@ void test_find_narrows_to_one() {
 void test_find_gives_up_when_ambiguous() {
     probe_script_t s = {{{200, 300, 0}, {200, 300, 0}, {200, 300, 0}}, 0, 0};
     unsigned int pid = 0;
-    unsigned long long used = 0;
+    uint64_t used = 0;
     ASSERT_EQ(find_own_hostpid(scripted_probe, &s, 5, &pid, &used) != 0, 1);
     ASSERT_EQ(s.calls, 5);
 }
@@ -210,7 +211,7 @@ void test_find_gives_up_when_ambiguous() {
 void test_find_propagates_probe_error() {
     probe_script_t s = {{{200, 0}, {200, 0}, {200, 0}}, 0, 2};
     unsigned int pid = 0;
-    unsigned long long used = 0;
+    uint64_t used = 0;
     ASSERT_EQ(find_own_hostpid(scripted_probe, &s, 8, &pid, &used), 9);
     ASSERT_EQ(s.calls, 2);
 }
@@ -218,7 +219,7 @@ void test_find_propagates_probe_error() {
 void test_find_passes_unavailable_usage_through() {
     probe_script_t s = {{{999, 0}, {999, 0}, {999, 0}}, 0, 0};
     unsigned int pid = 0;
-    unsigned long long used = 0;
+    uint64_t used = 0;
     ASSERT_EQ(find_own_hostpid(scripted_probe, &s, 8, &pid, &used), 0);
     ASSERT_EQ(pid, 999);
     ASSERT_EQ(used == NOT_AVAILABLE, 1);

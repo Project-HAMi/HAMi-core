@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <time.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -29,7 +30,7 @@ typedef struct {
 } hostpid_probe_t;
 typedef int (*hostpid_probe_fn)(void *ctx, hostpid_probe_t *p);
 int find_own_hostpid(hostpid_probe_fn probe, void *ctx, int max_attempts,
-                     unsigned int *hostpid, unsigned long long *used);
+                     unsigned int *hostpid, uint64_t *used);
 
 //Nvml part utils
 void sort(int vmap[16]);
