@@ -1,7 +1,10 @@
 //#include "memory_limit.h"
+#include <errno.h>
 #include <fcntl.h>
 #include <dlfcn.h>
 #include <pthread.h>
+#include <stdlib.h>
+#include <string.h>
 #include "include/nvml_prefix.h"
 #include <nvml.h>
 #include "include/nvml_prefix.h"
@@ -10,6 +13,8 @@
 #include "include/libvgpu.h"
 #include "include/utils.h"
 #include "include/nvml_override.h"
+#include "include/hostpid_broker.h"
+#include "include/hostpid_fallback_lock.h"
 #include "allocator/allocator.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
@@ -886,16 +891,55 @@ void postInit(){
     allocator_init();
     map_cuda_visible_devices();
 
-    // Use the process-death-safe shared file lock to serialize host PID detection
-    int lock_acquired = lock_postinit();
-    nvmlReturn_t res = NVML_SUCCESS;
+    int broker_enabled = hostpid_broker_enabled(
+        getenv("LIBVGPU_HOSTPID_BROKER"));
+    nvmlReturn_t res;
 
-    if (lock_acquired) {
-        res = set_task_pid();
-        unlock_postinit();
+    if (broker_enabled) {
+        res = set_task_pid_from_broker();
+        // Retry only a failed query. NVML cannot repair a missing shared slot.
+        if (res == NVML_ERROR_UNKNOWN) {
+            struct timespec deadline;
+
+            // Always take the node-wide fallback lock before the cache lock.
+            if (hostpid_fallback_lock_deadline_after_ms(
+                    &deadline, HOSTPID_FALLBACK_LOCK_TIMEOUT_MS) != 0) {
+                LOG_WARN("Skipped host PID detection because the fallback "
+                         "deadline failed: %s", strerror(errno));
+                res = NVML_ERROR_UNKNOWN;
+            } else if (hostpid_fallback_lock_acquire_until(&deadline) == 0) {
+                int lock_acquired = lock_postinit();
+
+                if (lock_acquired) {
+                    res = set_task_pid();
+                    unlock_postinit();
+                } else {
+                    LOG_WARN("Skipped host PID detection because the postinit "
+                             "lock failed");
+                    res = NVML_ERROR_UNKNOWN;
+                }
+                if (hostpid_fallback_lock_release() != 0) {
+                    LOG_ERROR("Failed to release host PID fallback lock: %s",
+                              strerror(errno));
+                }
+            } else {
+                LOG_WARN("Skipped host PID detection because the fallback "
+                         "lock failed: %s", strerror(errno));
+                res = NVML_ERROR_UNKNOWN;
+            }
+        }
     } else {
-        LOG_WARN("Skipped host PID detection because the postinit lock failed");
-        res = NVML_ERROR_UNKNOWN;
+        // Use the process-death-safe shared file lock to serialize host PID detection
+        int lock_acquired = lock_postinit();
+        res = NVML_SUCCESS;
+
+        if (lock_acquired) {
+            res = set_task_pid();
+            unlock_postinit();
+        } else {
+            LOG_WARN("Skipped host PID detection because the postinit lock failed");
+            res = NVML_ERROR_UNKNOWN;
+        }
     }
 
     LOG_MSG("Initialized");
@@ -912,6 +956,7 @@ void postInit(){
 }
 
 void childReinitPostInit() {
+    hostpid_fallback_lock_after_fork();
     LOG_DEBUG("Reset postInit state after fork");
     post_cuinit_flag = PTHREAD_ONCE_INIT;
     pidfound = 0;

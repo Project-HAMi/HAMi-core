@@ -10,9 +10,15 @@ set(TEST_TARGET_NAMES_LIST)
 file(GLOB_RECURSE TEST_SCRIPTS "${TEST_CPP_SOURCE_DIR}/*.c" "${TEST_CPP_SOURCE_DIR}/*.cu")
 set(DLSYM_CALLER_SOURCE
     "${TEST_CPP_SOURCE_DIR}/dlsym_rtld_next_caller.c")
-list(REMOVE_ITEM TEST_SCRIPTS ${DLSYM_CALLER_SOURCE})
+set(BROKER_NVML_FIXTURE_SOURCE
+    "${TEST_CPP_SOURCE_DIR}/broker_nvml_fixture.c")
+list(REMOVE_ITEM TEST_SCRIPTS ${DLSYM_CALLER_SOURCE} ${BROKER_NVML_FIXTURE_SOURCE})
 add_library(dlsym_rtld_next_caller SHARED ${DLSYM_CALLER_SOURCE})
 target_link_libraries(dlsym_rtld_next_caller -ldl)
+add_library(broker_nvml_fixture SHARED ${BROKER_NVML_FIXTURE_SOURCE})
+set_target_properties(broker_nvml_fixture PROPERTIES
+    OUTPUT_NAME "nvidia-ml" SOVERSION 1
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/broker_nvml_fixture")
 foreach(TEST_SCRIPT ${TEST_SCRIPTS}) 
     file(RELATIVE_PATH RELATIVE_TEST_PATH ${TEST_CPP_SOURCE_DIR} ${TEST_SCRIPT})
     get_filename_component(TEST_TARGET_DIR ${RELATIVE_TEST_PATH} DIRECTORY)
@@ -34,15 +40,44 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
             OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
             OR TEST_TARGET_NAME STREQUAL "test_override_env"
-            OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
+            OR TEST_TARGET_NAME STREQUAL "test_pid_discovery"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_lookup"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_init"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_concurrency"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_mapping")
         # Focused regression tests built against the production sources they
         # exercise; section GC drops unrelated GPU-facing production functions.
-        # test_pid_discovery needs utils.c; the rest reach the shared-region
-        # accounting in multiprocess_memory_limit.c.
-        if (TEST_TARGET_NAME STREQUAL "test_pid_discovery")
+        # PID lookup lives in utils.c, init routing in libvgpu.c, and the
+        # remaining tests use the shared-region accounting implementation.
+        if (TEST_TARGET_NAME STREQUAL "test_pid_discovery"
+                OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_lookup")
             add_executable(${TEST_TARGET_NAME}
                 ${TEST_SCRIPT}
                 ${CMAKE_CURRENT_SOURCE_DIR}/../src/utils.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        elseif (TEST_TARGET_NAME STREQUAL "test_hostpid_broker_mapping")
+            add_executable(${TEST_TARGET_NAME}
+                ${TEST_SCRIPT}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/utils.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/nvml/hook.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_utilization_watcher.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+            add_dependencies(${TEST_TARGET_NAME} broker_nvml_fixture)
+        elseif (TEST_TARGET_NAME STREQUAL "test_hostpid_broker_concurrency")
+            add_executable(${TEST_TARGET_NAME}
+                ${TEST_SCRIPT}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/libvgpu.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/utils.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_broker.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_fallback_lock.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+            target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+                HOSTPID_FALLBACK_LOCK_TESTING)
+        elseif (TEST_TARGET_NAME STREQUAL "test_hostpid_broker_init")
+            add_executable(${TEST_TARGET_NAME}
+                ${TEST_SCRIPT}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/libvgpu.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_broker.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
         else()
             add_executable(${TEST_TARGET_NAME}
@@ -61,6 +96,10 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+        if (TEST_TARGET_NAME STREQUAL "test_hostpid_broker_concurrency")
+            set_property(TARGET ${TEST_TARGET_NAME} APPEND_STRING PROPERTY
+                LINK_FLAGS " -Wl,--wrap=hostpid_broker_query_trusted,--wrap=hostpid_fallback_lock_acquire_until,--wrap=hostpid_fallback_lock_acquire_shared_until")
+        endif()
     elseif (TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat")
         add_executable(${TEST_TARGET_NAME}
             ${TEST_SCRIPT}
@@ -117,6 +156,12 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_hostpid_fallback_lock")
+        # GPU-free: builds the production lock into the test.
+        add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_fallback_lock.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE HOSTPID_FALLBACK_LOCK_TESTING)
     elseif (TEST_TARGET_NAME STREQUAL "test_utilization_nvml_index")
         # Links the production utilization watcher and supplies its own NVML
         # entry points and shared-region helpers, so it needs no NVIDIA driver
@@ -132,6 +177,14 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_hostpid_broker")
+        # Links the production broker client and runs its own Unix socket
+        # servers, so it needs no driver, no GPU and no device plugin.
+        add_executable(${TEST_TARGET_NAME}
+            ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_broker.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE HOSTPID_TIMEOUT_MS=100 HOSTPID_BROKER_TESTING)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT})
     elseif (TEST_SCRIPT MATCHES ".*cu")
@@ -144,10 +197,15 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     if (TEST_SCRIPT MATCHES "test_shared_region_concurrency.c"
             OR TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_fallback_lock"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
             OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
             OR TEST_TARGET_NAME STREQUAL "test_override_env"
-            OR TEST_TARGET_NAME STREQUAL "test_pid_discovery")
+            OR TEST_TARGET_NAME STREQUAL "test_pid_discovery"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_lookup"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_init"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_concurrency"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         target_link_libraries(${TEST_TARGET_NAME}
@@ -157,7 +215,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_memory_index_map"
-            OR TEST_TARGET_NAME STREQUAL "test_meminfo_null_out")
+            OR TEST_TARGET_NAME STREQUAL "test_meminfo_null_out"
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_mapping")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread -ldl)
     else()
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread
@@ -226,6 +285,32 @@ set_tests_properties(nvml_v2_signatures PROPERTIES
 add_test(NAME pid_discovery
     COMMAND test_pid_discovery)
 set_tests_properties(pid_discovery PROPERTIES TIMEOUT 10)
+
+add_test(NAME hostpid_broker_lookup
+    COMMAND test_hostpid_broker_lookup)
+set_tests_properties(hostpid_broker_lookup PROPERTIES TIMEOUT 10)
+
+add_test(NAME hostpid_broker_init
+    COMMAND test_hostpid_broker_init)
+set_tests_properties(hostpid_broker_init PROPERTIES TIMEOUT 10)
+
+add_test(NAME hostpid_broker_concurrency
+    COMMAND test_hostpid_broker_concurrency)
+set_tests_properties(hostpid_broker_concurrency PROPERTIES TIMEOUT 15)
+
+add_test(NAME hostpid_broker_mapping_cold COMMAND test_hostpid_broker_mapping cold)
+add_test(NAME hostpid_broker_mapping_warm COMMAND test_hostpid_broker_mapping warm)
+set_tests_properties(hostpid_broker_mapping_cold hostpid_broker_mapping_warm
+    PROPERTIES TIMEOUT 10
+    ENVIRONMENT "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:broker_nvml_fixture>")
+
+add_test(NAME hostpid_broker
+    COMMAND test_hostpid_broker)
+set_tests_properties(hostpid_broker PROPERTIES TIMEOUT 20)
+
+add_test(NAME hostpid_fallback_lock
+    COMMAND test_hostpid_fallback_lock)
+set_tests_properties(hostpid_fallback_lock PROPERTIES TIMEOUT 30)
 
 # The watcher must ask NVML for the NVML index it is walking, not the CUDA
 # index it maps to; the two only coincide when CUDA_VISIBLE_DEVICES is the
