@@ -130,22 +130,90 @@ static nvmlReturn_t list_compute_processes(nvmlDevice_t device, nvmlProcessInfo_
     return res;
 }
 
-nvmlReturn_t set_task_pid() {
-    nvmlProcessInfo_t1 before[SHARED_REGION_MAX_PROCESS_NUM];
-    nvmlProcessInfo_t1 during[SHARED_REGION_MAX_PROCESS_NUM];
-    nvmlProcessInfo_t1 after[SHARED_REGION_MAX_PROCESS_NUM];
-    unsigned int known[SHARED_REGION_MAX_PROCESS_NUM];
-    unsigned int found[SHARED_REGION_MAX_PROCESS_NUM];
-    unsigned int n_before, n_during, n_after, n_known = 0, nvmlCounts, i, hostpid;
-    unsigned int seed;
-    nvmlDevice_t device;
+static int nvml_probe(void *ctx, hostpid_probe_t *p) {
+    nvmlDevice_t device = *(nvmlDevice_t *)ctx;
     nvmlReturn_t res;
     CUcontext pctx;
+
+    res = list_compute_processes(device, p->before, &p->n_before);
+    if (res != NVML_SUCCESS)
+        return res;
+    CHECK_CU_RESULT(cuDevicePrimaryCtxRetain(&pctx, 0));
+    res = list_compute_processes(device, p->during, &p->n_during);
+    CHECK_CU_RESULT(cuDevicePrimaryCtxRelease(0));
+    if (res != NVML_SUCCESS)
+        return res;
+    return list_compute_processes(device, p->after, &p->n_after);
+}
+
+_Static_assert(HOSTPID_PROBE_MAX == SHARED_REGION_MAX_PROCESS_NUM, "probe buffers must match the shared region");
+
+// A candidate is accepted only after it matched two probes in a row, so a neighbour that appears
+// and exits inside one window cannot be taken even when our own PID is missing from the list.
+int find_own_hostpid(hostpid_probe_fn probe, void *ctx, int max_attempts,
+                     unsigned int *hostpid, unsigned long long *used) {
+    hostpid_probe_t p;
+    unsigned int known[SHARED_REGION_MAX_PROCESS_NUM];
+    unsigned int found[SHARED_REGION_MAX_PROCESS_NUM];
+    unsigned int n_known = 0, i, seed;
     struct timespec now;
     int attempt;
 
     clock_gettime(CLOCK_MONOTONIC, &now);
     seed = hostpid_retry_seed(&now, (unsigned int)getpid());
+    for (attempt = 1; attempt <= max_attempts; attempt++) {
+        struct timespec t0, t1;
+        int res;
+        unsigned int n;
+        int confirmed;
+
+        clock_gettime(CLOCK_MONOTONIC, &t0);
+        res = probe(ctx, &p);
+        if (res != NVML_SUCCESS)
+            return res;
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+
+        n = own_pid_candidates(p.before, p.n_before, p.during, p.n_during, p.after, p.n_after,
+                               known, n_known, found, SHARED_REGION_MAX_PROCESS_NUM);
+        LOG_INFO("host pid probe %d: %u processes before, %u during, %u after, %u candidates",
+                 attempt, p.n_before, p.n_during, p.n_after, n);
+        confirmed = n_known > 0;
+        if (n > 0) {
+            n_known = n < SHARED_REGION_MAX_PROCESS_NUM ? n : SHARED_REGION_MAX_PROCESS_NUM;
+            memcpy(known, found, n_known * sizeof(known[0]));
+        } else {
+            LOG_WARN("host pid probe %d: no candidate; our PID may still be listed after the release", attempt);
+        }
+        if (n == 1 && confirmed) {
+            *hostpid = known[0];
+            *used = NVML_VALUE_NOT_AVAILABLE;
+            for (i = 0; i < p.n_during; i++) {
+                if (p.during[i].pid == *hostpid) {
+                    *used = p.during[i].usedGpuMemory;
+                    break;
+                }
+            }
+            return NVML_SUCCESS;
+        }
+        if (n == 1)
+            continue;
+        LOG_WARN("host pid detection attempt %d/%d: %u candidates, retrying", attempt, max_attempts, n);
+        if (attempt < max_attempts) {
+            int64_t probe_us = (int64_t)(t1.tv_sec - t0.tv_sec) * 1000000 + (t1.tv_nsec - t0.tv_nsec) / 1000;
+            // Random delay up to twice the probe time, to break lockstep between processes
+            usleep(1000 + rand_r(&seed) % (unsigned int)(2 * probe_us + 1000));
+        }
+    }
+    LOG_ERROR("host pid is error!");
+    return NVML_ERROR_DRIVER_NOT_LOADED;
+}
+
+nvmlReturn_t set_task_pid() {
+    unsigned int nvmlCounts, i, hostpid;
+    unsigned long long used;
+    nvmlDevice_t device;
+    nvmlReturn_t res;
+
     CHECK_NVML_API(nvmlInit());
     CHECK_NVML_API(nvmlDeviceGetCount(&nvmlCounts));
     for (i = 0; i < nvmlCounts; i++) {
@@ -159,54 +227,15 @@ nvmlReturn_t set_task_pid() {
     }
     CHECK_NVML_API(nvmlDeviceGetHandleByIndex(i, &device));
 
-    for (attempt = 1; attempt <= HOSTPID_DETECT_MAX_ATTEMPTS; attempt++) {
-        struct timespec t0, t1;
-        clock_gettime(CLOCK_MONOTONIC, &t0);
-        res = list_compute_processes(device, before, &n_before);
-        if (res != NVML_SUCCESS)
-            return res;
-        CHECK_CU_RESULT(cuDevicePrimaryCtxRetain(&pctx, 0));
-        res = list_compute_processes(device, during, &n_during);
-        CHECK_CU_RESULT(cuDevicePrimaryCtxRelease(0));
-        if (res != NVML_SUCCESS)
-            return res;
-        res = list_compute_processes(device, after, &n_after);
-        if (res != NVML_SUCCESS)
-            return res;
-        clock_gettime(CLOCK_MONOTONIC, &t1);
-
-        unsigned int n = own_pid_candidates(before, n_before, during, n_during, after, n_after,
-                                            known, n_known, found, SHARED_REGION_MAX_PROCESS_NUM);
-        LOG_INFO("host pid probe %d: %u processes before, %u during, %u after, %u candidates",
-                 attempt, n_before, n_during, n_after, n);
-        if (n > 0) {
-            n_known = n < SHARED_REGION_MAX_PROCESS_NUM ? n : SHARED_REGION_MAX_PROCESS_NUM;
-            memcpy(known, found, n_known * sizeof(known[0]));
-        }
-        if (n == 1) {
-            hostpid = known[0];
-            LOG_INFO("hostPid=%u", hostpid);
-            if (set_host_pid(hostpid) == 0) {
-                for (i = 0; i < n_during; i++) {
-                    if (during[i].pid == hostpid) {
-                        LOG_INFO("Primary Context Size==%llu", during[i].usedGpuMemory);
-                        context_size = during[i].usedGpuMemory;
-                        break;
-                    }
-                }
-            }
-            return NVML_SUCCESS;
-        }
-        LOG_WARN("host pid detection attempt %d/%d: %u candidates, retrying", attempt,
-                 HOSTPID_DETECT_MAX_ATTEMPTS, n);
-        if (attempt < HOSTPID_DETECT_MAX_ATTEMPTS) {
-            int64_t probe_us = (int64_t)(t1.tv_sec - t0.tv_sec) * 1000000 + (t1.tv_nsec - t0.tv_nsec) / 1000;
-            // Random delay up to twice the probe time, to break lockstep between processes
-            usleep(1000 + rand_r(&seed) % (unsigned int)(2 * probe_us + 1000));
-        }
+    res = find_own_hostpid(nvml_probe, &device, HOSTPID_DETECT_MAX_ATTEMPTS, &hostpid, &used);
+    if (res != NVML_SUCCESS)
+        return res;
+    LOG_INFO("hostPid=%u", hostpid);
+    if (set_host_pid(hostpid) == 0 && used != NVML_VALUE_NOT_AVAILABLE) {
+        LOG_INFO("Primary Context Size==%llu", used);
+        context_size = used;
     }
-    LOG_ERROR("host pid is error!");
-    return NVML_ERROR_DRIVER_NOT_LOADED;
+    return NVML_SUCCESS;
 }
 
 int parse_cuda_visible_env() {
