@@ -86,9 +86,9 @@ static void change_token(int64_t delta, int device_id) {
 static int64_t delta(int up_limit, int user_current, int64_t share, int device_id) {
   int utilization_diff =
       abs(up_limit - user_current) < 5 ? 5 : abs(up_limit - user_current);
-  int64_t increment =
-      (int64_t)g_sm_num[device_id] * (int64_t)g_sm_num[device_id] *
-      (int64_t)g_max_thread_per_sm[device_id] * (int64_t)utilization_diff / 2560;
+  /* A fixed fraction of the bucket, so the step does not grow with the SM
+   * count. Equal to the former sm_num^2 form on an 80 SM device. */
+  int64_t increment = g_total_cuda_cores[device_id] * (int64_t)utilization_diff / 1024;
 
   /* Accelerate cuda cores allocation when utilization vary widely */
   if (utilization_diff > up_limit / 2) {
