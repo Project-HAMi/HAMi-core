@@ -29,6 +29,7 @@ static void setup(int sm_num) {
     g_sm_num[0] = sm_num;
     g_max_thread_per_sm[0] = MAX_THREADS_PER_SM;
     g_total_cuda_cores[0] = (int64_t)MAX_THREADS_PER_SM * sm_num * FACTOR_UNDER_TEST;
+    g_base_cuda_cores[0] = g_total_cuda_cores[0];
 }
 
 /* Step per tick, as parts per million of the bucket. */
@@ -66,6 +67,12 @@ int main(void) {
     setup(188);
     check(delta(50, 100, g_total_cuda_cores[0], 0) == g_total_cuda_cores[0] - delta(50, 0, 0, 0),
           "above the limit the share shrinks by the same step");
+
+    /* Doubling the bucket (oversized kernels) must not grow the step. */
+    setup(80);
+    int64_t before = delta(50, 30, 0, 0);
+    g_total_cuda_cores[0] *= 2;
+    check(delta(50, 30, 0, 0) == before, "step unchanged after the bucket is doubled");
 
     printf("%s\n", failures == 0 ? "PASS" : "FAIL");
     return failures == 0 ? 0 : 1;
