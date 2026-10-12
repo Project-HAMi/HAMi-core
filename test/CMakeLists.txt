@@ -263,3 +263,9 @@ add_test(NAME cuda_memory_compat COMMAND test_cuda_memory_compat)
 set_tests_properties(cuda_memory_compat PROPERTIES
     ENVIRONMENT "LIBCUDA_LOG_LEVEL=4"
     TIMEOUT 10)
+
+# End-to-end CLI coverage for the read-only shared-region diagnostic path.
+add_test(NAME shrreg_tool_diagnostics
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/test_shrreg_tool.py
+        $<TARGET_FILE:shrreg-tool> $<TARGET_FILE:test_shrreg_fixture>)
+set_tests_properties(shrreg_tool_diagnostics PROPERTIES TIMEOUT 20)

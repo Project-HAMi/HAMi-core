@@ -14,7 +14,7 @@ build-in-docker:
 		-v $(current_dir):/libvgpu \
 		-w /libvgpu \
 		$(CUDA_IMAGE) \
-		sh -c "dnf install -y cmake git && \
+		sh -c "dnf install -y cmake git python3 && \
            git config --global --add safe.directory /libvgpu && \
            rm -rf /libvgpu/build && \
            bash ./build.sh && \

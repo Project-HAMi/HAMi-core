@@ -80,6 +80,32 @@ If you have updated `CUDA_DEVICE_MEMORY_LIMIT` or `CUDA_DEVICE_SM_LIMIT`, please
 rm /tmp/cudevshr.cache
 ```
 
+### Inspecting the shared-region cache
+
+`shrreg-tool` can inspect an existing cache without initializing it or registering
+the tool as a process. The cache path defaults to `/tmp/cudevshr.cache`; set
+`CUDA_DEVICE_MEMORY_SHARED_CACHE` to inspect a different file.
+
+```bash
+SHRREG_TOOL=build/src/multiprocess/shrreg-tool
+
+# Human-readable health check (returns nonzero if validation findings exist)
+"$SHRREG_TOOL" --check
+
+# JSON report for scripts and bug reports
+"$SHRREG_TOOL" --json
+
+# JSON report and nonzero exit status when findings exist
+"$SHRREG_TOOL" --check --json
+```
+
+The report includes the shared-region version, initialization state, device
+limits, process-slot counts, and recorded owner PID. A recorded PID is reported
+without claiming whether the process is alive, since PID namespaces can make
+that determination unreliable. These diagnostic options only read the cache;
+the existing `--print`, `--create_new`, `--suspend`, and `--resume` commands
+retain their existing behavior.
+
 ## Docker Images
 
 ```bash
