@@ -183,6 +183,7 @@ int find_own_hostpid(hostpid_probe_fn probe, void *ctx, int max_attempts,
             n_known = n < SHARED_REGION_MAX_PROCESS_NUM ? n : SHARED_REGION_MAX_PROCESS_NUM;
             memcpy(known, found, n_known * sizeof(known[0]));
         } else {
+            n_known = 0;
             LOG_WARN("host pid probe %d: no candidate; our PID may still be listed after the release", attempt);
         }
         if (n == 1 && confirmed) {
@@ -196,9 +197,8 @@ int find_own_hostpid(hostpid_probe_fn probe, void *ctx, int max_attempts,
             }
             return NVML_SUCCESS;
         }
-        if (n == 1)
-            continue;
-        LOG_WARN("host pid detection attempt %d/%d: %u candidates, retrying", attempt, max_attempts, n);
+        if (n != 1)
+            LOG_WARN("host pid detection attempt %d/%d: %u candidates, retrying", attempt, max_attempts, n);
         if (attempt < max_attempts) {
             int64_t probe_us = (int64_t)(t1.tv_sec - t0.tv_sec) * 1000000 + (t1.tv_nsec - t0.tv_nsec) / 1000;
             // Random delay up to twice the probe time, to break lockstep between processes

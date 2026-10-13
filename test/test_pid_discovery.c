@@ -191,6 +191,16 @@ void test_find_rejects_single_sighting() {
     ASSERT_EQ(pid, 0);
 }
 
+void test_find_requires_consecutive_probes() {
+    // PID A, then nothing, then PID A again is not two matches in a row.
+    probe_script_t s = {{{200, 0}, {0}, {200, 0}}, 0, 0};
+    unsigned int pid = 0;
+    uint64_t used = 0;
+    ASSERT_EQ(find_own_hostpid(scripted_probe, &s, 3, &pid, &used) != 0, 1);
+    ASSERT_EQ(s.calls, 3);
+    ASSERT_EQ(pid, 0);
+}
+
 void test_find_narrows_to_one() {
     probe_script_t s = {{{200, 300, 0}, {200, 0}, {200, 0}}, 0, 0};
     unsigned int pid = 0;
@@ -246,6 +256,7 @@ int main() {
     printf("Running find_own_hostpid tests...\n");
     test_find_needs_two_matching_probes();
     test_find_rejects_single_sighting();
+    test_find_requires_consecutive_probes();
     test_find_narrows_to_one();
     test_find_gives_up_when_ambiguous();
     test_find_propagates_probe_error();
