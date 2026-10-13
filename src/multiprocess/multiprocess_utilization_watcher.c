@@ -49,19 +49,30 @@ void rate_limiter(int grids, int blocks) {
   if (cached_sm_limit[device_id] >= 100 || cached_sm_limit[device_id] == 0) {
       return;
   }
+
+  /* Publish activity to vGPUmonitor even when the switch is off, or it can
+   * never turn the switch back on. CAS so a concurrent -1 is not overwritten. */
+  for (;;) {
+      int rk = get_recent_kernel();
+      if (rk < 0) {
+          sleep(1);
+          continue;
+      }
+      if (rk == 2 || cas_recent_kernel(rk, 2)) break;
+  }
+
   if (cached_util_switch == 0) {
       return;
   }
-
-  while (get_recent_kernel()<0) {
-    sleep(1);
-  }
-  set_recent_kernel(2);
 
   do {
 CHECK:
       before_cuda_cores = g_cur_cuda_cores[device_id];
       if (before_cuda_cores < 0) {
+        /* Keep publishing activity while waiting for tokens, or the monitor
+         * decays recent_kernel to 0 mid-wait. Never overwrite a negative. */
+        int rk = get_recent_kernel();
+        if (rk >= 0 && rk != 2) cas_recent_kernel(rk, 2);
         nanosleep(&g_cycle, NULL);
         goto CHECK;
       }
