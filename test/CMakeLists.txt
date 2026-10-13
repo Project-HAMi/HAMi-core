@@ -185,6 +185,19 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_broker.c)
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
             _GNU_SOURCE HOSTPID_TIMEOUT_MS=100 HOSTPID_BROKER_TESTING)
+    elseif (TEST_TARGET_NAME STREQUAL "test_cuda_version_map")
+        # Links the production resolver and stubs __dlsym_hook_section, so it
+        # needs no driver and no GPU.
+        add_executable(${TEST_TARGET_NAME}
+            ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/hook.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT})
     elseif (TEST_SCRIPT MATCHES ".*cu")
@@ -218,6 +231,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_meminfo_null_out"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_mapping")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread -ldl)
+    elseif (TEST_TARGET_NAME STREQUAL "test_cuda_version_map")
+        target_link_libraries(${TEST_TARGET_NAME} -lpthread -ldl)
     else()
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread
             -lnvidia-ml -lcuda -lcudart -L${CUDA_HOME}/lib64)
@@ -318,6 +333,11 @@ set_tests_properties(hostpid_fallback_lock PROPERTIES TIMEOUT 30)
 add_test(NAME utilization_nvml_index
     COMMAND test_utilization_nvml_index)
 set_tests_properties(utilization_nvml_index PROPERTIES TIMEOUT 10)
+
+# The _v3/_v2 probe order answers some base names with a mismatched wrapper.
+add_test(NAME cuda_version_map
+    COMMAND test_cuda_version_map)
+set_tests_properties(cuda_version_map PROPERTIES TIMEOUT 10)
 if (TARGET vgpu)
     add_test(NAME dlsym_rtld_next_preloaded
         COMMAND test_dlsym_rtld_next)

@@ -386,8 +386,13 @@ CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, c
         return res;
     }else{
         LOG_DEBUG("found symbol %s",symbol);
-        return CUDA_SUCCESS;
-    } 
+        /* The caller reads *symbolStatus after a successful return, so hand it
+         * to the driver with a throwaway pfn rather than leaving it untouched.
+         * Same shape as cuGetProcAddress_v2 below. */
+        void *optr;
+        return CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress_v2, symbol,
+                                  &optr, cudaVersion, flags, symbolStatus);
+    }
 }
 
 CUresult cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags, CUdriverProcAddressQueryResult *symbolStatus){
