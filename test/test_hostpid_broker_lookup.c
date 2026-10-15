@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include "include/libvgpu.h"
 #include "include/libcuda_hook.h"
@@ -26,6 +27,7 @@ static CUresult fake_retain_result;
 static CUresult fake_release_result;
 static int fake_not_available;
 static int fake_missing_pid;
+static int fake_container_pid;
 static unsigned int fake_required_count;
 static int fake_lock_postinit_count;
 static int fake_set_host_pid_count;
@@ -143,7 +145,8 @@ nvmlReturn_t nvmlDeviceGetComputeRunningProcesses(
         infos[i].usedGpuMemory = 10ULL + i;
     }
     infos[fake_required_count - 1U].pid =
-        fake_missing_pid ? 999999U : TEST_HOSTPID;
+        fake_missing_pid ? 999999U
+        : fake_container_pid ? (unsigned int)getpid() : TEST_HOSTPID;
     infos[fake_required_count - 1U].usedGpuMemory =
         fake_not_available ? (unsigned long long)NVML_VALUE_NOT_AVAILABLE
                            : TEST_MEMORY;
@@ -187,6 +190,7 @@ static void reset_fakes(void) {
     fake_release_result = CUDA_SUCCESS;
     fake_not_available = 0;
     fake_missing_pid = 0;
+    fake_container_pid = 0;
     fake_required_count = 18;
     fake_lock_postinit_count = 0;
     fake_set_host_pid_count = 0;
@@ -216,6 +220,16 @@ static void test_success_sets_pid_context_size_and_balances_context(void) {
     check(fake_node_unlock_count == 1, "success releases the sizing lock");
     check(fake_lock_postinit_count == 0,
           "broker lookup does not take the cache postinit lock");
+}
+
+static void test_container_pid_entry_sizes_context(void) {
+    reset_fakes();
+    fake_container_pid = 1;
+
+    check(set_task_pid_from_broker() == NVML_SUCCESS,
+          "container PID entry returns NVML_SUCCESS");
+    check(context_size == TEST_MEMORY,
+          "driver reporting the container PID still sizes the context");
 }
 
 static void test_missing_entry_keeps_pid_and_context_size(void) {
@@ -346,6 +360,7 @@ int main(void) {
     check(setenv("CUDA_VISIBLE_DEVICES", "2", 1) == 0,
           "set a nonidentity device mapping");
     test_success_sets_pid_context_size_and_balances_context();
+    test_container_pid_entry_sizes_context();
     test_missing_entry_keeps_pid_and_context_size();
     test_not_available_keeps_pid_and_context_size();
     test_broker_failure_returns_error_and_makes_no_retain();

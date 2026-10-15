@@ -5,6 +5,7 @@
 #include <time.h>
 #include <errno.h>
 #include <sys/file.h>
+#include <unistd.h>
 #include "include/utils.h"
 #include "include/log_utils.h"
 #include "include/nvml_prefix.h"
@@ -83,15 +84,27 @@ static nvmlReturn_t get_used_gpu_memory_by_pid(pid_t hostpid,
     }
     res = nvmlDeviceGetComputeRunningProcesses(device, &count, processes);
     if (res == NVML_SUCCESS) {
-        res = NVML_ERROR_NOT_FOUND;
+        // Newer drivers report the caller's own-namespace PID instead of the
+        // host PID, so prefer the host PID and fall back to getpid().
+        const nvmlProcessInfo_v1_t *self = NULL, *match = NULL;
+
         for (i = 0; i < count; i++) {
-            if (processes[i].pid == (unsigned int)hostpid &&
-                processes[i].usedGpuMemory !=
-                    (unsigned long long)NVML_VALUE_NOT_AVAILABLE) {
-                *used = processes[i].usedGpuMemory;
-                res = NVML_SUCCESS;
+            if (processes[i].pid == (unsigned int)hostpid) {
+                match = &processes[i];
                 break;
             }
+            if (self == NULL && processes[i].pid == (unsigned int)getpid()) {
+                self = &processes[i];
+            }
+        }
+        if (match == NULL) {
+            match = self;
+        }
+        res = NVML_ERROR_NOT_FOUND;
+        if (match != NULL &&
+            match->usedGpuMemory != (unsigned long long)NVML_VALUE_NOT_AVAILABLE) {
+            *used = match->usedGpuMemory;
+            res = NVML_SUCCESS;
         }
     }
     free(processes);
