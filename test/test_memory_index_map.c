@@ -99,6 +99,16 @@ int main(void) {
         check_dev(i);
     }
 
+    /* Newer drivers report container PIDs, which only match the slot's pid. */
+    if (find_proc_by_hostpid((int)getpid()) == NULL) {
+        fprintf(stderr, "find_proc_by_hostpid misses the container pid\n");
+        failures++;
+    }
+    if (find_proc_by_hostpid(999999) != NULL) {
+        fprintf(stderr, "find_proc_by_hostpid matched an unknown pid\n");
+        failures++;
+    }
+
     unlink(cache_path);
     if (failures != 0) {
         fprintf(stderr, "%d device index assertion(s) failed\n", failures);
