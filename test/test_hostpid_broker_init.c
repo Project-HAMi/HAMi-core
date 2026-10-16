@@ -127,6 +127,9 @@ void hostpid_fallback_lock_after_fork(void) {
     node_locked = 0;
 }
 
+void reset_lazy_context_sizing(void) {
+}
+
 static void reset(const char *gate) {
     if (gate == NULL) {
         check(unsetenv("LIBVGPU_HOSTPID_BROKER") == 0, "unset broker gate");

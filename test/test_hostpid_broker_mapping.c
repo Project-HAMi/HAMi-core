@@ -71,13 +71,15 @@ int hostpid_fallback_lock_release(void) {
 }
 
 CUresult cuDevicePrimaryCtxRetain(CUcontext *context, CUdevice device) {
-    check(sizing_locked && device == 0, "retain CUDA device zero under lock");
+    (void)device;
+    check(0, "broker lookup creates no context");
     *context = (CUcontext)1;
     return CUDA_SUCCESS;
 }
 
 CUresult cuDevicePrimaryCtxRelease(CUdevice device) {
-    check(sizing_locked && device == 0, "release CUDA device zero under lock");
+    (void)device;
+    check(0, "broker lookup releases no context");
     return CUDA_SUCCESS;
 }
 
@@ -108,10 +110,13 @@ int main(int argc, char **argv) {
     check(cuda_to_nvml_map(0) == 2, "initial map selects physical device two");
     check(set_task_pid_from_broker() == NVML_SUCCESS, "broker lookup succeeds");
     check(saved_pid == getpid(), "broker PID remains registered");
-    check(cuda_to_nvml_map(0) == 2 && queried_index == 2,
-          "sizing preserves the CUDA to NVML mapping after initialization");
+    check(cuda_to_nvml_map(0) == 2,
+          "the CUDA to NVML mapping survives NVML initialization");
+    // The application's first retain of CUDA device 0 sizes the context.
+    size_primary_context_lazily(0);
+    check(queried_index == 2, "sizing queries the retained device's physical GPU");
     check(context_size == 1234, "sizing finds the process on its physical GPU");
-    check(!sizing_locked, "sizing leaves no node lock held");
+    check(!sizing_locked, "sizing takes no node lock");
     printf("%s NVML: mapping=%u queried=%u context_size=%zu\n",
            argv[1], cuda_to_nvml_map(0), queried_index, context_size);
     if (failures != 0) return 1;

@@ -963,6 +963,7 @@ void postInit(){
 
 void childReinitPostInit() {
     hostpid_fallback_lock_after_fork();
+    reset_lazy_context_sizing();
     LOG_DEBUG("Reset postInit state after fork");
     post_cuinit_flag = PTHREAD_ONCE_INIT;
     pidfound = 0;

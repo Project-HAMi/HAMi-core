@@ -68,6 +68,8 @@ typedef void* (*fp_dlsym)(void*, const char*);
 nvmlReturn_t set_task_pid();
 // UNKNOWN means the broker query failed; NOT_FOUND means no shared PID slot.
 nvmlReturn_t set_task_pid_from_broker(void);
+void size_primary_context_lazily(int cudadev);
+void reset_lazy_context_sizing(void);
 int map_cuda_visible_devices();
 void ensure_post_init();
 

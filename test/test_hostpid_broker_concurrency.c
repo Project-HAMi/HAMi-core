@@ -142,12 +142,6 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *context, CUdevice device) {
         wait_sem(&state->fallback_continue);
     }
     state->active[broker_actor] = 1;
-    if (broker_actor) {
-        // Without the sizing guard this notification comes from inside the
-        // context, ensuring the fallback sees both PIDs and fails the assertion.
-        signal_broker_attempt();
-        wait_sem(&state->fallback_done);
-    }
     return CUDA_SUCCESS;
 }
 
@@ -161,11 +155,25 @@ static void run_child(int is_broker) {
     broker_actor = is_broker;
     state->pid[broker_actor] = getpid();
     if (broker_actor) {
+        // A broker init that waited for the node lock would signal here and
+        // then block behind the fallback, which the alarm turns into a failure.
         hostpid_fallback_lock_set_before_flock_hook(signal_broker_attempt);
     }
     ensure_post_init();
     require(hostpid_fallback_lock_active_fd() == -1, "init releases node lock");
-    if (!broker_actor) {
+    if (broker_actor) {
+        // Broker init finishes inside the fallback's NVML window without
+        // creating a context, so the fallback diff only sees the fallback.
+        require(!state->active[1], "broker init creates no context");
+        require(context_size == 0, "broker init leaves the context unsized");
+        signal_broker_attempt();
+        wait_sem(&state->fallback_done);
+        // The application's first retain sizes the context from its own usage.
+        CUcontext context;
+        require(cuDevicePrimaryCtxRetain(&context, 0) == CUDA_SUCCESS,
+                "application retains its primary context");
+        size_primary_context_lazily(0);
+    } else {
         require(sem_post(&state->fallback_done) == 0, "signal fallback completion");
     }
     require(pidfound == 1 && state->saved[broker_actor] == getpid(),
