@@ -136,6 +136,13 @@ Use environment variable LIBCUDA_LOG_LEVEL to set the visibility of logs
 |  3                | infos,errors,warnings,messages |
 |  4                | debugs,errors,warnings,messages |
 
+At debug level, HAMi-core logs a shared-region snapshot after host PID discovery.
+It lists the total process count and up to 16 process slots, including the current
+process when present. For detected devices, it logs nonzero SM utilization,
+monitored memory, and recorded memory. A snapshot is skipped if the shared-region
+lock is busy, and values can change while it is collected. These initialization
+logs do not provide an on-demand view of the shared region.
+
 ## Test Raw APIs
 
 ```bash

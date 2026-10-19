@@ -56,6 +56,7 @@ cuda_entry_t cuda_library_entry[CUDA_ENTRY_END] = {
 };
 
 void allocator_init(void) {}
+void print_all(void) {}
 void init_utilization_watcher(void) {}
 int set_env_utilization_switch(void) { return 0; }
 int set_host_pid(int pid) { state->saved[broker_actor] = pid; return 0; }

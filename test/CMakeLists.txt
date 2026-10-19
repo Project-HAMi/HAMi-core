@@ -38,6 +38,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     elseif (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
+            OR TEST_TARGET_NAME STREQUAL "test_shrreg_debug"
             OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
             OR TEST_TARGET_NAME STREQUAL "test_override_env"
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery"
@@ -87,7 +88,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         endif()
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
             _GNU_SOURCE)
-        if (TEST_TARGET_NAME STREQUAL "test_override_env")
+        if (TEST_TARGET_NAME STREQUAL "test_override_env"
+                OR TEST_TARGET_NAME STREQUAL "test_shrreg_debug")
             # Read a scratch file, never the production /overrideEnv.
             target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
                 ENV_OVERRIDE_FILE=\"${CMAKE_CURRENT_BINARY_DIR}/override_env.test\")
@@ -212,6 +214,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_fallback_lock"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
+            OR TEST_TARGET_NAME STREQUAL "test_shrreg_debug"
             OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
             OR TEST_TARGET_NAME STREQUAL "test_override_env"
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery"
@@ -259,6 +262,9 @@ set_tests_properties(postinit_owner_death PROPERTIES TIMEOUT 20)
 add_test(NAME device_id_guard
     COMMAND test_device_id_guard)
 set_tests_properties(device_id_guard PROPERTIES TIMEOUT 20)
+
+add_test(NAME shrreg_debug COMMAND test_shrreg_debug)
+set_tests_properties(shrreg_debug PROPERTIES TIMEOUT 20)
 
 # oom_check must read back what it charged, on a non-identity map (issue #319).
 add_test(NAME memory_index_map
