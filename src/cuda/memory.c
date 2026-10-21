@@ -54,60 +54,227 @@ int check_oom() {
     return oom_check(dev,0);
 }
 
-uint64_t compute_3d_array_alloc_bytes(const CUDA_ARRAY3D_DESCRIPTOR* desc) {
-    if (desc==NULL) {
-        LOG_WARN("compute_3d_array_alloc_bytes desc is null");
-    }else{
-        LOG_DEBUG("compute_3d_array_alloc_bytes height=%ld width=%ld",desc->Height,desc->Width);
-    }
-    uint64_t bytes = desc->Width * desc->NumChannels;
-    if (desc->Height != 0) {
-        bytes *= desc->Height;
-    }
-    if (desc->Depth != 0) {
-        bytes *= desc->Depth;
-    }
-    bytes *= cuarray_format_bytes[desc->Format];
+typedef struct array_allocation_struct {
+    CUarray handle;
+    CUdevice device;
+    size_t bytes;
+    struct array_allocation_struct *next;
+} array_allocation_t;
 
-    // TODO: take account of alignment and etc
-    // bytes ++ ???
+static array_allocation_t *array_allocations;
+static pthread_mutex_t array_allocations_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static CUresult checked_array_multiply(size_t *value, size_t multiplier) {
+    if (multiplier != 0 && *value > SIZE_MAX / multiplier) {
+        return CUDA_ERROR_INVALID_VALUE;
+    }
+    *value *= multiplier;
+    return CUDA_SUCCESS;
+}
+
+static CUresult get_array_format_bytes(CUarray_format format, size_t *bytes) {
+    unsigned int format_index = (unsigned int)format;
+
+    if (format_index >= sizeof(cuarray_format_bytes) / sizeof(cuarray_format_bytes[0]) ||
+        cuarray_format_bytes[format_index] == 0) {
+        return CUDA_ERROR_INVALID_VALUE;
+    }
+    *bytes = cuarray_format_bytes[format_index];
+    return CUDA_SUCCESS;
+}
+
+static CUresult compute_array_alloc_bytes_checked(const CUDA_ARRAY_DESCRIPTOR *desc,
+                                                  size_t *bytes) {
+    size_t result;
+    CUresult res;
+
+    if (desc == NULL || bytes == NULL || desc->Width == 0 ||
+        (desc->NumChannels != 1 && desc->NumChannels != 2 && desc->NumChannels != 4)) {
+        return CUDA_ERROR_INVALID_VALUE;
+    }
+    res = get_array_format_bytes(desc->Format, &result);
+    if (res != CUDA_SUCCESS) {
+        return res;
+    }
+    if ((res = checked_array_multiply(&result, desc->NumChannels)) != CUDA_SUCCESS ||
+        (res = checked_array_multiply(&result, desc->Width)) != CUDA_SUCCESS ||
+        (desc->Height != 0 &&
+         (res = checked_array_multiply(&result, desc->Height)) != CUDA_SUCCESS)) {
+        return res;
+    }
+    *bytes = result;
+    return CUDA_SUCCESS;
+}
+
+static CUresult compute_3d_array_alloc_bytes_checked(const CUDA_ARRAY3D_DESCRIPTOR *desc,
+                                                     size_t *bytes) {
+    size_t result;
+    CUresult res;
+
+    if (desc == NULL || bytes == NULL || desc->Width == 0 ||
+        (desc->NumChannels != 1 && desc->NumChannels != 2 && desc->NumChannels != 4)) {
+        return CUDA_ERROR_INVALID_VALUE;
+    }
+    res = get_array_format_bytes(desc->Format, &result);
+    if (res != CUDA_SUCCESS) {
+        return res;
+    }
+    if ((res = checked_array_multiply(&result, desc->NumChannels)) != CUDA_SUCCESS ||
+        (res = checked_array_multiply(&result, desc->Width)) != CUDA_SUCCESS ||
+        (desc->Height != 0 &&
+         (res = checked_array_multiply(&result, desc->Height)) != CUDA_SUCCESS) ||
+        (desc->Depth != 0 &&
+         (res = checked_array_multiply(&result, desc->Depth)) != CUDA_SUCCESS)) {
+        return res;
+    }
+    *bytes = result;
+    return CUDA_SUCCESS;
+}
+
+uint64_t compute_array_alloc_bytes(const CUDA_ARRAY_DESCRIPTOR *desc) {
+    size_t bytes;
+
+    if (compute_array_alloc_bytes_checked(desc, &bytes) != CUDA_SUCCESS) {
+        return 0;
+    }
     return bytes;
 }
 
+uint64_t compute_3d_array_alloc_bytes(const CUDA_ARRAY3D_DESCRIPTOR *desc) {
+    size_t bytes;
 
-uint64_t compute_array_alloc_bytes(const CUDA_ARRAY_DESCRIPTOR* desc) {
-    if (desc==NULL) {
-        LOG_WARN("compute_array_alloc_bytes desc is null");
-    }else{
-        LOG_DEBUG("compute_array_alloc_bytes height=%ld width=%ld",desc->Height,desc->Width);
+    if (compute_3d_array_alloc_bytes_checked(desc, &bytes) != CUDA_SUCCESS) {
+        return 0;
     }
-
-    uint64_t bytes = desc->Width * desc->NumChannels;
-    if (desc->Height != 0) {
-        bytes *= desc->Height;
-    }
-    bytes *= cuarray_format_bytes[desc->Format];
-
-    // TODO: take account of alignment and etc
-    // bytes ++ ???
     return bytes;
 }
 
-CUresult cuArray3DCreate_v2(CUarray* arr, const CUDA_ARRAY3D_DESCRIPTOR* desc) {
+static CUresult reserve_array_allocation(CUdevice *device, size_t bytes,
+                                         array_allocation_t **allocation) {
+    array_allocation_t *new_allocation;
+    CUresult res;
+
+    res = cuCtxGetDevice(device);
+    if (res != CUDA_SUCCESS) {
+        return res;
+    }
+    new_allocation = calloc(1, sizeof(*new_allocation));
+    if (new_allocation == NULL) {
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+    res = reserve_device_memory(*device, bytes);
+    if (res != CUDA_SUCCESS) {
+        free(new_allocation);
+        return res;
+    }
+    new_allocation->device = *device;
+    new_allocation->bytes = bytes;
+    *allocation = new_allocation;
+    return CUDA_SUCCESS;
+}
+
+static void add_array_allocation(array_allocation_t *allocation, CUarray handle) {
+    pthread_mutex_lock(&array_allocations_mutex);
+    allocation->handle = handle;
+    allocation->next = array_allocations;
+    array_allocations = allocation;
+    pthread_mutex_unlock(&array_allocations_mutex);
+}
+
+static int remove_array_allocation(CUarray handle, CUdevice *device, size_t *bytes) {
+    array_allocation_t **current = &array_allocations;
+
+    while (*current != NULL) {
+        if ((*current)->handle == handle) {
+            array_allocation_t *allocation = *current;
+
+            *current = allocation->next;
+            *device = allocation->device;
+            *bytes = allocation->bytes;
+            free(allocation);
+            return 1;
+        }
+        current = &(*current)->next;
+    }
+    return 0;
+}
+
+CUresult cuArray3DCreate_v2(CUarray *arr, const CUDA_ARRAY3D_DESCRIPTOR *desc) {
+    array_allocation_t *allocation;
+    size_t bytes;
+    CUdevice device;
+    CUresult res;
+
     LOG_DEBUG("cuArray3DCreate_v2");
-    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuArray3DCreate_v2, arr, desc);
+    if (arr == NULL) {
+        return CUDA_ERROR_INVALID_VALUE;
+    }
+    res = compute_3d_array_alloc_bytes_checked(desc, &bytes);
+    if (res != CUDA_SUCCESS) {
+        return res;
+    }
+    ENSURE_RUNNING();
+    res = reserve_array_allocation(&device, bytes, &allocation);
+    if (res != CUDA_SUCCESS) {
+        return res;
+    }
+    res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuArray3DCreate_v2, arr, desc);
+    if (res == CUDA_SUCCESS) {
+        add_array_allocation(allocation, *arr);
+        return CUDA_SUCCESS;
+    }
+    release_device_memory(device, bytes);
+    free(allocation);
+    return res;
 }
 
 
-CUresult cuArrayCreate_v2(CUarray* arr, const CUDA_ARRAY_DESCRIPTOR* desc) {
+CUresult cuArrayCreate_v2(CUarray *arr, const CUDA_ARRAY_DESCRIPTOR *desc) {
+    array_allocation_t *allocation;
+    size_t bytes;
+    CUdevice device;
+    CUresult res;
+
     LOG_DEBUG("cuArrayCreate_v2");
-    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuArrayCreate_v2, arr, desc);
+    if (arr == NULL) {
+        return CUDA_ERROR_INVALID_VALUE;
+    }
+    res = compute_array_alloc_bytes_checked(desc, &bytes);
+    if (res != CUDA_SUCCESS) {
+        return res;
+    }
+    ENSURE_RUNNING();
+    res = reserve_array_allocation(&device, bytes, &allocation);
+    if (res != CUDA_SUCCESS) {
+        return res;
+    }
+    res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuArrayCreate_v2, arr, desc);
+    if (res == CUDA_SUCCESS) {
+        add_array_allocation(allocation, *arr);
+        return CUDA_SUCCESS;
+    }
+    release_device_memory(device, bytes);
+    free(allocation);
+    return res;
 }
 
 
 CUresult cuArrayDestroy(CUarray arr) {
+    size_t bytes;
+    CUdevice device;
+    CUresult res;
+    int found;
+
     LOG_DEBUG("cuArrayDestroy");
-    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuArrayDestroy, arr);
+    /* Keep a just-created, reused handle out of the registry until removal. */
+    pthread_mutex_lock(&array_allocations_mutex);
+    res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuArrayDestroy, arr);
+    found = res == CUDA_SUCCESS && remove_array_allocation(arr, &device, &bytes);
+    pthread_mutex_unlock(&array_allocations_mutex);
+    if (found) {
+        release_device_memory(device, bytes);
+    }
+    return res;
 }
 
 CUresult cuMemoryAllocate(CUdeviceptr* dptr, size_t bytesize, void* data) {
