@@ -198,6 +198,18 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_rate_limiter_recent_kernel")
+        # Includes the watcher source to reach its static limit state and
+        # stubs the driver and shared region, so it needs no GPU.
+        add_executable(${TEST_TARGET_NAME}
+            ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT})
     elseif (TEST_SCRIPT MATCHES ".*cu")
@@ -225,6 +237,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ldl dlsym_rtld_next_caller)
     elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures"
             OR TEST_TARGET_NAME STREQUAL "test_utilization_nvml_index"
+            OR TEST_TARGET_NAME STREQUAL "test_rate_limiter_recent_kernel"
             OR TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_memory_index_map"
@@ -338,6 +351,11 @@ set_tests_properties(utilization_nvml_index PROPERTIES TIMEOUT 10)
 add_test(NAME cuda_version_map
     COMMAND test_cuda_version_map)
 set_tests_properties(cuda_version_map PROPERTIES TIMEOUT 10)
+# rate_limiter must publish recent_kernel even with the utilization switch
+# off, or vGPUmonitor can never switch it back on (issue #350).
+add_test(NAME rate_limiter_recent_kernel
+    COMMAND test_rate_limiter_recent_kernel)
+set_tests_properties(rate_limiter_recent_kernel PROPERTIES TIMEOUT 20)
 if (TARGET vgpu)
     add_test(NAME dlsym_rtld_next_preloaded
         COMMAND test_dlsym_rtld_next)
