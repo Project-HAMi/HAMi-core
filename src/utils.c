@@ -7,13 +7,18 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <time.h>
+#include <errno.h>
 #include <sys/file.h>
+#include <unistd.h>
 #include "include/utils.h"
 #include "include/log_utils.h"
 #include "include/nvml_prefix.h"
 #include <nvml.h>
 #include "include/nvml_override.h"
 #include "include/libcuda_hook.h"
+#include "include/libvgpu.h"
+#include "include/hostpid_broker.h"
+#include "include/hostpid_fallback_lock.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
 extern size_t context_size;
@@ -63,6 +68,107 @@ int getextrapid(unsigned int prev, unsigned int current, nvmlProcessInfo_t1 *pre
             return pids_on_device[i].pid;
     }
     return 0;
+}
+
+static nvmlReturn_t get_used_gpu_memory_by_pid(pid_t hostpid,
+                                              unsigned long long *used) {
+    nvmlProcessInfo_v1_t *processes;
+    nvmlDevice_t device;
+    nvmlReturn_t res;
+    unsigned int count = SHARED_REGION_MAX_PROCESS_NUM;
+    unsigned int i;
+
+    res = nvmlDeviceGetHandleByIndex(cuda_to_nvml_map(0), &device);
+    if (res != NVML_SUCCESS) {
+        return res;
+    }
+    processes = calloc(count, sizeof(*processes));
+    if (processes == NULL) {
+        return NVML_ERROR_MEMORY;
+    }
+    res = nvmlDeviceGetComputeRunningProcesses(device, &count, processes);
+    if (res == NVML_SUCCESS) {
+        // Newer drivers report the caller's own-namespace PID instead of the
+        // host PID, so prefer the host PID and fall back to getpid().
+        const nvmlProcessInfo_v1_t *self = NULL, *match = NULL;
+
+        for (i = 0; i < count; i++) {
+            if (processes[i].pid == (unsigned int)hostpid) {
+                match = &processes[i];
+                break;
+            }
+            if (self == NULL && processes[i].pid == (unsigned int)getpid()) {
+                self = &processes[i];
+            }
+        }
+        if (match == NULL) {
+            match = self;
+        }
+        res = NVML_ERROR_NOT_FOUND;
+        if (match != NULL &&
+            match->usedGpuMemory != (unsigned long long)NVML_VALUE_NOT_AVAILABLE) {
+            *used = match->usedGpuMemory;
+            res = NVML_SUCCESS;
+        }
+    }
+    free(processes);
+    return res;
+}
+
+// The broker names this process's host PID without NVML discovery. Context
+// sizing shares the node lock so its retain cannot disturb a fallback probe.
+nvmlReturn_t set_task_pid_from_broker(void) {
+    pid_t hostpid = 0;
+    unsigned long long used = 0;
+    CUcontext pctx;
+    nvmlReturn_t res;
+    struct timespec deadline;
+
+    if (hostpid_broker_query_trusted(HOSTPID_BROKER_SOCKET_PATH,
+                                    &hostpid) != 0) {
+        LOG_WARN("Host PID broker unavailable: %s", strerror(errno));
+        return NVML_ERROR_UNKNOWN;
+    }
+    LOG_INFO("hostPid=%d from broker", hostpid);
+    if (set_host_pid(hostpid) != 0) {
+        return NVML_ERROR_NOT_FOUND;
+    }
+    // The PID is already set, so a sizing failure only leaves context_size
+    // alone, as a missing NVML entry does in set_task_pid().
+    if (nvmlInit() != NVML_SUCCESS) {
+        LOG_WARN("Primary context size unavailable");
+        return NVML_SUCCESS;
+    }
+    // The first nvmlInit (including setspec in set_host_pid) resets the map.
+    // Restore CUDA_VISIBLE_DEVICES before selecting the NVML sizing device.
+    map_cuda_visible_devices();
+    if (hostpid_fallback_lock_deadline_after_ms(
+            &deadline, HOSTPID_FALLBACK_LOCK_TIMEOUT_MS) != 0 ||
+        hostpid_fallback_lock_acquire_shared_until(&deadline) != 0) {
+        LOG_WARN("Skipped primary context sizing because the node lock "
+                 "failed: %s", strerror(errno));
+        return NVML_SUCCESS;
+    }
+    if (cuDevicePrimaryCtxRetain(&pctx, 0) != CUDA_SUCCESS) {
+        LOG_WARN("Primary context size unavailable");
+        goto unlock;
+    }
+    res = get_used_gpu_memory_by_pid(hostpid, &used);
+    if (res == NVML_SUCCESS) {
+        LOG_INFO("Primary Context Size==%llu", used);
+        context_size = used;
+    } else {
+        LOG_WARN("Primary context size unavailable: %d", res);
+    }
+    if (cuDevicePrimaryCtxRelease(0) != CUDA_SUCCESS) {
+        LOG_WARN("Failed to release the device 0 primary context");
+    }
+unlock:
+    if (hostpid_fallback_lock_release() != 0) {
+        LOG_ERROR("Failed to release the context sizing lock: %s",
+                  strerror(errno));
+    }
+    return NVML_SUCCESS;
 }
 
 /*
@@ -210,23 +316,14 @@ int find_own_hostpid(hostpid_probe_fn probe, void *ctx, int max_attempts,
 }
 
 nvmlReturn_t set_task_pid() {
-    unsigned int nvmlCounts, i, hostpid;
+    unsigned int hostpid;
     uint64_t used;
     nvmlDevice_t device;
     nvmlReturn_t res;
 
     CHECK_NVML_API(nvmlInit());
-    CHECK_NVML_API(nvmlDeviceGetCount(&nvmlCounts));
-    for (i = 0; i < nvmlCounts; i++) {
-        int cudaDev = (int)nvml_to_cuda_map(i);
-        if (cudaDev >= 0)
-            break;
-    }
-    if (i == nvmlCounts) {
-        LOG_ERROR("host pid is error! (no visible device)");
-        return NVML_ERROR_DRIVER_NOT_LOADED;
-    }
-    CHECK_NVML_API(nvmlDeviceGetHandleByIndex(i, &device));
+    // nvml_probe retains the primary context of CUDA device 0, so probe that device's NVML entry.
+    CHECK_NVML_API(nvmlDeviceGetHandleByIndex(cuda_to_nvml_map(0), &device));
 
     res = find_own_hostpid(nvml_probe, &device, HOSTPID_DETECT_MAX_ATTEMPTS, &hostpid, &used);
     if (res != NVML_SUCCESS)

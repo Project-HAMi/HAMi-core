@@ -1606,6 +1606,11 @@ int set_recent_kernel(int value){
     return 0;
 }
 
+int cas_recent_kernel(int expected, int desired) {
+    return atomic_compare_exchange_strong(&region_info.shared_region->recent_kernel,
+                                          &expected, desired);
+}
+
 int get_utilization_switch() {
     if (env_utilization_switch==1)
         return 1;
@@ -1651,10 +1656,16 @@ int wait_status_all(int status){
     return released;
 }
 
+// NVML reports host PIDs on older drivers and container PIDs on newer ones,
+// so fall back to the slot's own-namespace pid when no hostpid matches.
 shrreg_proc_slot_t *find_proc_by_hostpid(int hostpid) {
     int i;
     for (i=0;i<region_info.shared_region->proc_num;i++) {
         if (region_info.shared_region->procs[i].hostpid == hostpid) 
+            return &region_info.shared_region->procs[i];
+    }
+    for (i=0;i<region_info.shared_region->proc_num;i++) {
+        if (region_info.shared_region->procs[i].pid == hostpid)
             return &region_info.shared_region->procs[i];
     }
     return NULL;
