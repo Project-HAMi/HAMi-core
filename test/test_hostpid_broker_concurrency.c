@@ -136,7 +136,10 @@ nvmlReturn_t nvmlDeviceGetComputeRunningProcesses(
 CUresult cuDevicePrimaryCtxRetain(CUcontext *context, CUdevice device) {
     (void)device;
     *context = (CUcontext)1;
-    if (!broker_actor) {
+    static int fallback_gated;
+    // Host PID detection probes more than once; only the first probe is gated.
+    if (!broker_actor && !fallback_gated) {
+        fallback_gated = 1;
         // The first NVML snapshot is complete and both discovery locks are held.
         require(sem_post(&state->fallback_window) == 0, "signal fallback window");
         wait_sem(&state->fallback_continue);
