@@ -46,6 +46,8 @@ void allocator_init(void) {
     record("allocator");
 }
 
+void print_all(void) {}
+
 int map_cuda_visible_devices(void) {
     record("map");
     return 0;

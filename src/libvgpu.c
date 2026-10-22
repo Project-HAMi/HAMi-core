@@ -948,6 +948,8 @@ void postInit(){
         }
     }
 
+    print_all();
+
     LOG_MSG("Initialized");
     if (res != NVML_SUCCESS) {
         LOG_WARN("SET_TASK_PID FAILED - using container PID for accounting");
