@@ -56,6 +56,7 @@ cuda_entry_t cuda_library_entry[CUDA_ENTRY_END] = {
 };
 
 void allocator_init(void) {}
+void print_all(void) {}
 void init_utilization_watcher(void) {}
 int set_env_utilization_switch(void) { return 0; }
 int set_host_pid(int pid) { state->saved[broker_actor] = pid; return 0; }
@@ -136,7 +137,10 @@ nvmlReturn_t nvmlDeviceGetComputeRunningProcesses(
 CUresult cuDevicePrimaryCtxRetain(CUcontext *context, CUdevice device) {
     (void)device;
     *context = (CUcontext)1;
-    if (!broker_actor) {
+    static int fallback_gated;
+    // Host PID detection probes more than once; only the first probe is gated.
+    if (!broker_actor && !fallback_gated) {
+        fallback_gated = 1;
         // The first NVML snapshot is complete and both discovery locks are held.
         require(sem_post(&state->fallback_window) == 0, "signal fallback window");
         wait_sem(&state->fallback_continue);

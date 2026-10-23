@@ -9,6 +9,7 @@
 #include <ctype.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <semaphore.h>
 #include <unistd.h>
 #include <time.h>
@@ -984,6 +985,23 @@ void exit_handler() {
 }
 
 
+static void set_shrreg_lock_owner(shared_region_t *region) {
+    region->owner_pid = (size_t)getpid();
+    __sync_synchronize();
+    SEQ_POINT_MARK(SEQ_UPDATE_OWNER_OK);
+}
+
+static int try_lock_shrreg(void) {
+    shared_region_t *region = region_info.shared_region;
+    SEQ_POINT_MARK(SEQ_BEFORE_ACQUIRE_SEMLOCK);
+    if (sem_trywait(&region->sem) != 0) {
+        return -1;
+    }
+    SEQ_POINT_MARK(SEQ_ACQUIRE_SEMLOCK_OK);
+    set_shrreg_lock_owner(region);
+    return 0;
+}
+
 void lock_shrreg() {
     shared_region_t* region = region_info.shared_region;
     int trials = 0;
@@ -999,9 +1017,7 @@ void lock_shrreg() {
 
         if (status == 0) {
             // TODO: irregular exit here will hang pending locks
-            region->owner_pid = (size_t)getpid();
-            __sync_synchronize();
-            SEQ_POINT_MARK(SEQ_UPDATE_OWNER_OK);
+            set_shrreg_lock_owner(region);
             trials = 0;
             break;
         } else if (errno == ETIMEDOUT) {
@@ -1214,16 +1230,67 @@ void init_proc_slot_withlock() {
 }
 
 void print_all() {
-    int i;
-    LOG_INFO("Total process: %d",region_info.shared_region->proc_num);
-    for (i=0;i<region_info.shared_region->proc_num;i++) {
-        for (int dev=0;dev<CUDA_DEVICE_MAX_COUNT;dev++){
-            LOG_INFO("Process %d hostPid: %d, sm: %lu, memory: %lu, record: %lu",
-                region_info.shared_region->procs[i].pid,
-                region_info.shared_region->procs[i].hostpid, 
-                region_info.shared_region->procs[i].device_util[dev].sm_util, 
-                region_info.shared_region->procs[i].monitorused[dev], 
-                region_info.shared_region->procs[i].used[dev].total);
+    enum { SNAPSHOT_MAX_PROCESSES = 16 };
+    typedef struct {
+        int32_t pid, hostpid;
+        struct {
+            uint64_t sm, memory, record;
+        } devices[CUDA_DEVICE_MAX_COUNT];
+    } process_snapshot_t;
+
+    if (g_log_level < 4 || region_info.shared_region == NULL) {
+        return;
+    }
+    process_snapshot_t snapshot[SNAPSHOT_MAX_PROCESSES] = {0};
+
+    shared_region_t *region = region_info.shared_region;
+    // Diagnostics must not delay initialization when another process holds the lock.
+    if (try_lock_shrreg() != 0) {
+        LOG_DEBUG("Shared-region snapshot skipped: lock unavailable (errno=%d)", errno);
+        return;
+    }
+    int count = atomic_load_explicit(&region->proc_num, memory_order_acquire);
+    if (count < 0 || count > SHARED_REGION_MAX_PROCESS_NUM) {
+        unlock_shrreg();
+        LOG_WARN("Invalid shared-region process count: %d", count);
+        return;
+    }
+    uint64_t device_count = region->device_num;
+    if (device_count > CUDA_DEVICE_MAX_COUNT) device_count = CUDA_DEVICE_MAX_COUNT;
+    int copied = count < SNAPSHOT_MAX_PROCESSES ? count : SNAPSHOT_MAX_PROCESSES;
+    int last_index = count - 1;
+    if (count > copied) {
+        for (int i = copied - 1; i < count; i++) {
+            if (atomic_load_explicit(&region->procs[i].pid, memory_order_relaxed) == getpid()) {
+                last_index = i;
+                break;
+            }
+        }
+    }
+    for (int i = 0; i < copied; i++) {
+        int index = count > copied && i == copied - 1 ? last_index : i;
+        shrreg_proc_slot_t *slot = &region->procs[index];
+        snapshot[i].pid = atomic_load_explicit(&slot->pid, memory_order_relaxed);
+        snapshot[i].hostpid = atomic_load_explicit(&slot->hostpid, memory_order_relaxed);
+        for (uint64_t dev = 0; dev < device_count; dev++) {
+            snapshot[i].devices[dev].sm = atomic_load_explicit(&slot->device_util[dev].sm_util, memory_order_relaxed);
+            snapshot[i].devices[dev].memory = atomic_load_explicit(&slot->monitorused[dev], memory_order_relaxed);
+            snapshot[i].devices[dev].record = atomic_load_explicit(&slot->used[dev].total, memory_order_relaxed);
+        }
+    }
+    unlock_shrreg();
+
+    LOG_DEBUG("Shared-region snapshot: total processes: %d, shown: %d", count, copied);
+    for (int i = 0; i < copied; i++) {
+        LOG_DEBUG("Shared-region process %d hostPid: %d", snapshot[i].pid, snapshot[i].hostpid);
+        for (uint64_t dev = 0; dev < device_count; dev++) {
+            if (snapshot[i].devices[dev].sm == 0 && snapshot[i].devices[dev].memory == 0 &&
+                snapshot[i].devices[dev].record == 0) continue;
+            LOG_DEBUG("Shared-region process %d hostPid: %d device: %" PRIu64 ", sm: %" PRIu64
+                      ", memory: %" PRIu64 ", record: %" PRIu64,
+                      snapshot[i].pid, snapshot[i].hostpid, dev,
+                      snapshot[i].devices[dev].sm, snapshot[i].devices[dev].memory,
+                      snapshot[i].devices[dev].record);
         }
     }
 }
@@ -1604,6 +1671,11 @@ int get_recent_kernel(){
 int set_recent_kernel(int value){
     region_info.shared_region->recent_kernel=value;
     return 0;
+}
+
+int cas_recent_kernel(int expected, int desired) {
+    return atomic_compare_exchange_strong(&region_info.shared_region->recent_kernel,
+                                          &expected, desired);
 }
 
 int get_utilization_switch() {

@@ -38,6 +38,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     elseif (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
+            OR TEST_TARGET_NAME STREQUAL "test_shrreg_debug"
             OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
             OR TEST_TARGET_NAME STREQUAL "test_override_env"
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery"
@@ -87,7 +88,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         endif()
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
             _GNU_SOURCE)
-        if (TEST_TARGET_NAME STREQUAL "test_override_env")
+        if (TEST_TARGET_NAME STREQUAL "test_override_env"
+                OR TEST_TARGET_NAME STREQUAL "test_shrreg_debug")
             # Read a scratch file, never the production /overrideEnv.
             target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
                 ENV_OVERRIDE_FILE=\"${CMAKE_CURRENT_BINARY_DIR}/override_env.test\")
@@ -145,6 +147,18 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_sm_limiter_step")
+        # Includes the watcher source to reach its static step function and
+        # stubs the shared region, so it needs no GPU.
+        add_executable(${TEST_TARGET_NAME}
+            ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures")
         # Links the production NVML pass-through wrappers and supplies its own
         # entry table, so it needs no NVIDIA driver and no GPU at runtime.
@@ -198,6 +212,18 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_rate_limiter_recent_kernel")
+        # Includes the watcher source to reach its static limit state and
+        # stubs the driver and shared region, so it needs no GPU.
+        add_executable(${TEST_TARGET_NAME}
+            ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT})
     elseif (TEST_SCRIPT MATCHES ".*cu")
@@ -212,6 +238,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_fallback_lock"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
+            OR TEST_TARGET_NAME STREQUAL "test_shrreg_debug"
             OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
             OR TEST_TARGET_NAME STREQUAL "test_override_env"
             OR TEST_TARGET_NAME STREQUAL "test_pid_discovery"
@@ -225,7 +252,10 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ldl dlsym_rtld_next_caller)
     elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures"
             OR TEST_TARGET_NAME STREQUAL "test_utilization_nvml_index"
+            OR TEST_TARGET_NAME STREQUAL "test_rate_limiter_recent_kernel"
             OR TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat")
+        target_link_libraries(${TEST_TARGET_NAME} -lpthread)
+    elseif (TEST_TARGET_NAME STREQUAL "test_sm_limiter_step")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_memory_index_map"
             OR TEST_TARGET_NAME STREQUAL "test_meminfo_null_out"
@@ -259,6 +289,9 @@ set_tests_properties(postinit_owner_death PROPERTIES TIMEOUT 20)
 add_test(NAME device_id_guard
     COMMAND test_device_id_guard)
 set_tests_properties(device_id_guard PROPERTIES TIMEOUT 20)
+
+add_test(NAME shrreg_debug COMMAND test_shrreg_debug)
+set_tests_properties(shrreg_debug PROPERTIES TIMEOUT 20)
 
 # oom_check must read back what it charged, on a non-identity map (issue #319).
 add_test(NAME memory_index_map
@@ -338,6 +371,11 @@ set_tests_properties(utilization_nvml_index PROPERTIES TIMEOUT 10)
 add_test(NAME cuda_version_map
     COMMAND test_cuda_version_map)
 set_tests_properties(cuda_version_map PROPERTIES TIMEOUT 10)
+# rate_limiter must publish recent_kernel even with the utilization switch
+# off, or vGPUmonitor can never switch it back on (issue #350).
+add_test(NAME rate_limiter_recent_kernel
+    COMMAND test_rate_limiter_recent_kernel)
+set_tests_properties(rate_limiter_recent_kernel PROPERTIES TIMEOUT 20)
 if (TARGET vgpu)
     add_test(NAME dlsym_rtld_next_preloaded
         COMMAND test_dlsym_rtld_next)
@@ -357,6 +395,17 @@ set_tests_properties(concurrent_oom_race PROPERTIES
     ENVIRONMENT "LIBVGPU=${CMAKE_BINARY_DIR}/libvgpu.so;TEST_BIN=${CMAKE_CURRENT_BINARY_DIR}/test_concurrent_oom_race")
 
 
+# GPU + LD_PRELOAD regression for host PID discovery taking a process that
+# starts on the device at the same time for our own (set_task_pid).
+# Wrapper exits 77 without a GPU or inside a PID namespace (skip, not fail).
+add_test(NAME hostpid_race
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/run_hostpid_race.sh)
+set_tests_properties(hostpid_race PROPERTIES
+    TIMEOUT 300
+    SKIP_RETURN_CODE 77
+    ENVIRONMENT "LIBVGPU=${CMAKE_BINARY_DIR}/libvgpu.so;TEST_BIN=${CMAKE_CURRENT_BINARY_DIR}/test_hostpid_race")
+
+
 add_custom_target(python_test ALL
     COMMAND cp -r ${CMAKE_CURRENT_SOURCE_DIR}/python ${CMAKE_CURRENT_BINARY_DIR})
 
@@ -368,3 +417,9 @@ add_test(NAME cuda_memory_compat COMMAND test_cuda_memory_compat)
 set_tests_properties(cuda_memory_compat PROPERTIES
     ENVIRONMENT "LIBCUDA_LOG_LEVEL=4"
     TIMEOUT 10)
+
+# The SM limiter refill step must be the same fraction of the bucket on every
+# device (issue #348).
+add_test(NAME sm_limiter_step
+    COMMAND test_sm_limiter_step)
+set_tests_properties(sm_limiter_step PROPERTIES TIMEOUT 10)

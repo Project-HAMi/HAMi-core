@@ -29,6 +29,8 @@ static int g_sm_num[CUDA_DEVICE_MAX_COUNT];
 static int g_max_thread_per_sm[CUDA_DEVICE_MAX_COUNT];
 static volatile int64_t g_cur_cuda_cores[CUDA_DEVICE_MAX_COUNT] = {0};
 static volatile int64_t g_total_cuda_cores[CUDA_DEVICE_MAX_COUNT] = {0};
+/* Bucket size at init; g_total_cuda_cores may be doubled later. */
+static int64_t g_base_cuda_cores[CUDA_DEVICE_MAX_COUNT] = {0};
 extern int pidfound;
 int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 
@@ -49,19 +51,30 @@ void rate_limiter(int grids, int blocks) {
   if (cached_sm_limit[device_id] >= 100 || cached_sm_limit[device_id] == 0) {
       return;
   }
+
+  /* Publish activity to vGPUmonitor even when the switch is off, or it can
+   * never turn the switch back on. CAS so a concurrent -1 is not overwritten. */
+  for (;;) {
+      int rk = get_recent_kernel();
+      if (rk < 0) {
+          sleep(1);
+          continue;
+      }
+      if (rk == 2 || cas_recent_kernel(rk, 2)) break;
+  }
+
   if (cached_util_switch == 0) {
       return;
   }
-
-  while (get_recent_kernel()<0) {
-    sleep(1);
-  }
-  set_recent_kernel(2);
 
   do {
 CHECK:
       before_cuda_cores = g_cur_cuda_cores[device_id];
       if (before_cuda_cores < 0) {
+        /* Keep publishing activity while waiting for tokens, or the monitor
+         * decays recent_kernel to 0 mid-wait. Never overwrite a negative. */
+        int rk = get_recent_kernel();
+        if (rk >= 0 && rk != 2) cas_recent_kernel(rk, 2);
         nanosleep(&g_cycle, NULL);
         goto CHECK;
       }
@@ -86,9 +99,10 @@ static void change_token(int64_t delta, int device_id) {
 static int64_t delta(int up_limit, int user_current, int64_t share, int device_id) {
   int utilization_diff =
       abs(up_limit - user_current) < 5 ? 5 : abs(up_limit - user_current);
-  int64_t increment =
-      (int64_t)g_sm_num[device_id] * (int64_t)g_sm_num[device_id] *
-      (int64_t)g_max_thread_per_sm[device_id] * (int64_t)utilization_diff / 2560;
+  /* A fixed fraction of the initial bucket, so the step does not grow with the
+   * SM count or when the bucket is doubled. Equal to the former sm_num^2 form
+   * on an 80 SM device. */
+  int64_t increment = g_base_cuda_cores[device_id] * (int64_t)utilization_diff / 1024;
 
   /* Accelerate cuda cores allocation when utilization vary widely */
   if (utilization_diff > up_limit / 2) {
@@ -196,6 +210,7 @@ int setspec() {
             CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_MULTIPROCESSOR, cu_dev));
         g_total_cuda_cores[dev] =
             (int64_t)g_max_thread_per_sm[dev] * g_sm_num[dev] * FACTOR;
+        g_base_cuda_cores[dev] = g_total_cuda_cores[dev];
         LOG_INFO("setspec: device %d sm_num=%d max_threads_per_sm=%d total_cores=%ld FACTOR=%d",
                  dev, g_sm_num[dev], g_max_thread_per_sm[dev], g_total_cuda_cores[dev], FACTOR);
     }
