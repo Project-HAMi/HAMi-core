@@ -8,7 +8,7 @@
 
 extern int pidfound;
 
-extern void rate_limiter(int grids, int blocks);
+extern void rate_limiter(int64_t grids, int64_t blocks);
 
 int check_oom() {
 //    return 0;
@@ -479,8 +479,8 @@ CUresult cuLaunchKernel ( CUfunction f, unsigned int  gridDimX, unsigned int  gr
     ensure_post_init();
     pre_launch_kernel();
     if (pidfound==1){ 
-        rate_limiter(gridDimX * gridDimY * gridDimZ,
-                   blockDimX * blockDimY * blockDimZ);
+        rate_limiter((int64_t)gridDimX * gridDimY * gridDimZ,
+                   (int64_t)blockDimX * blockDimY * blockDimZ);
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuLaunchKernel,f,gridDimX,gridDimY,gridDimZ,blockDimX,blockDimY,blockDimZ,sharedMemBytes,hStream,kernelParams,extra);
     return res;
@@ -491,8 +491,8 @@ CUresult cuLaunchKernelEx(const CUlaunchConfig *config, CUfunction f, void **ker
     ensure_post_init();
     pre_launch_kernel();
     if (pidfound==1){
-        rate_limiter(config->gridDimX * config->gridDimY * config->gridDimZ,
-                   config->blockDimX * config->blockDimY * config->blockDimZ);
+        rate_limiter((int64_t)config->gridDimX * config->gridDimY * config->gridDimZ,
+                   (int64_t)config->blockDimX * config->blockDimY * config->blockDimZ);
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuLaunchKernelEx,config,f,kernelParams,extra);
     return res;
@@ -503,8 +503,8 @@ CUresult cuLaunchCooperativeKernel ( CUfunction f, unsigned int  gridDimX, unsig
     ensure_post_init();
     pre_launch_kernel();
     if (pidfound==1){
-        rate_limiter(gridDimX * gridDimY * gridDimZ,
-                   blockDimX * blockDimY * blockDimZ);
+        rate_limiter((int64_t)gridDimX * gridDimY * gridDimZ,
+                   (int64_t)blockDimX * blockDimY * blockDimZ);
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuLaunchCooperativeKernel,f,gridDimX,gridDimY,gridDimZ,blockDimX,blockDimY,blockDimZ,sharedMemBytes,hStream,kernelParams);
     return res;

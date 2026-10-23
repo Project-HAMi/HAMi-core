@@ -36,7 +36,7 @@ int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 static int cached_sm_limit[CUDA_DEVICE_MAX_COUNT] = {0};
 static int cached_util_switch = 0;
 
-void rate_limiter(int grids, int blocks) {
+void rate_limiter(int64_t grids, int64_t blocks) {
   CUdevice current_device;
   CUresult res = cuCtxGetDevice(&current_device);
   int device_id = (res == CUDA_SUCCESS) ? (int)current_device : 0;
@@ -45,7 +45,7 @@ void rate_limiter(int grids, int blocks) {
   int64_t after_cuda_cores = 0;
   /* Charge by thread count: grid count alone barely charges kernels with few,
    * long-running blocks (large GEMMs), so the bucket never runs dry. */
-  int64_t kernel_size = (int64_t)grids * blocks;
+  int64_t kernel_size = grids * blocks;
 
   /* Fast exit using cached values — no shared memory access needed */
   if (cached_sm_limit[device_id] >= 100 || cached_sm_limit[device_id] == 0) {
