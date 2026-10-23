@@ -29,8 +29,6 @@ static int g_sm_num[CUDA_DEVICE_MAX_COUNT];
 static int g_max_thread_per_sm[CUDA_DEVICE_MAX_COUNT];
 static volatile int64_t g_cur_cuda_cores[CUDA_DEVICE_MAX_COUNT] = {0};
 static volatile int64_t g_total_cuda_cores[CUDA_DEVICE_MAX_COUNT] = {0};
-/* Bucket size at init; g_total_cuda_cores may be doubled later. */
-static int64_t g_base_cuda_cores[CUDA_DEVICE_MAX_COUNT] = {0};
 extern int pidfound;
 int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 
@@ -38,14 +36,16 @@ int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 static int cached_sm_limit[CUDA_DEVICE_MAX_COUNT] = {0};
 static int cached_util_switch = 0;
 
-void rate_limiter(int grids, int blocks) {
+void rate_limiter(int64_t grids, int64_t blocks) {
   CUdevice current_device;
   CUresult res = cuCtxGetDevice(&current_device);
   int device_id = (res == CUDA_SUCCESS) ? (int)current_device : 0;
 
   int64_t before_cuda_cores = 0;
   int64_t after_cuda_cores = 0;
-  int64_t kernel_size = grids;
+  /* Charge by thread count: grid count alone barely charges kernels with few,
+   * long-running blocks (large GEMMs), so the bucket never runs dry. */
+  int64_t kernel_size = grids * blocks;
 
   /* Fast exit using cached values — no shared memory access needed */
   if (cached_sm_limit[device_id] >= 100 || cached_sm_limit[device_id] == 0) {
@@ -99,10 +99,10 @@ static void change_token(int64_t delta, int device_id) {
 static int64_t delta(int up_limit, int user_current, int64_t share, int device_id) {
   int utilization_diff =
       abs(up_limit - user_current) < 5 ? 5 : abs(up_limit - user_current);
-  /* A fixed fraction of the initial bucket, so the step does not grow with the
-   * SM count or when the bucket is doubled. Equal to the former sm_num^2 form
-   * on an 80 SM device. */
-  int64_t increment = g_base_cuda_cores[device_id] * (int64_t)utilization_diff / 1024;
+  /* Scale the step with the current bucket: once it has been doubled for big
+   * kernels, a step sized for the initial bucket cannot pull share back down
+   * and the limiter stops throttling. */
+  int64_t increment = g_total_cuda_cores[device_id] * (int64_t)utilization_diff / 1024;
 
   /* Accelerate cuda cores allocation when utilization vary widely */
   if (utilization_diff > up_limit / 2) {
@@ -210,7 +210,6 @@ int setspec() {
             CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_MULTIPROCESSOR, cu_dev));
         g_total_cuda_cores[dev] =
             (int64_t)g_max_thread_per_sm[dev] * g_sm_num[dev] * FACTOR;
-        g_base_cuda_cores[dev] = g_total_cuda_cores[dev];
         LOG_INFO("setspec: device %d sm_num=%d max_threads_per_sm=%d total_cores=%ld FACTOR=%d",
                  dev, g_sm_num[dev], g_max_thread_per_sm[dev], g_total_cuda_cores[dev], FACTOR);
     }
