@@ -3,6 +3,7 @@
 
 extern size_t context_size;
 extern int ctx_activate[16];
+void size_primary_context_lazily(int cudadev);
 
 
 CUresult cuDevicePrimaryCtxGetState( CUdevice dev, unsigned int* flags, int* active ){
@@ -15,6 +16,9 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
     LOG_INFO("dev=%d context_size=%ld",dev,context_size);
     //for Initialization only
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRetain,pctx,dev);
+    if (res == CUDA_SUCCESS && context_size == 0) {
+        size_primary_context_lazily(dev);
+    }
     if (ctx_activate[dev] == 0) {
         add_gpu_device_memory_usage(getpid(),dev,context_size,0); 
     }

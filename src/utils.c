@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <errno.h>
+#include <pthread.h>
 #include <sys/file.h>
 #include <unistd.h>
 #include "include/utils.h"
@@ -70,7 +71,7 @@ int getextrapid(unsigned int prev, unsigned int current, nvmlProcessInfo_t1 *pre
     return 0;
 }
 
-static nvmlReturn_t get_used_gpu_memory_by_pid(pid_t hostpid,
+static nvmlReturn_t get_used_gpu_memory_by_pid(pid_t hostpid, int cudadev,
                                               unsigned long long *used) {
     nvmlProcessInfo_v1_t *processes;
     nvmlDevice_t device;
@@ -78,7 +79,7 @@ static nvmlReturn_t get_used_gpu_memory_by_pid(pid_t hostpid,
     unsigned int count = SHARED_REGION_MAX_PROCESS_NUM;
     unsigned int i;
 
-    res = nvmlDeviceGetHandleByIndex(cuda_to_nvml_map(0), &device);
+    res = nvmlDeviceGetHandleByIndex(cuda_to_nvml_map(cudadev), &device);
     if (res != NVML_SUCCESS) {
         return res;
     }
@@ -115,14 +116,14 @@ static nvmlReturn_t get_used_gpu_memory_by_pid(pid_t hostpid,
     return res;
 }
 
-// The broker names this process's host PID without NVML discovery. Context
-// sizing shares the node lock so its retain cannot disturb a fallback probe.
+static pthread_mutex_t lazy_sizing_lock = PTHREAD_MUTEX_INITIALIZER;
+static pid_t lazy_sizing_hostpid;
+
+// The broker names this process's host PID without NVML discovery. The
+// context is sized later, from the first primary context the application
+// retains, so init creates no context of its own.
 nvmlReturn_t set_task_pid_from_broker(void) {
     pid_t hostpid = 0;
-    unsigned long long used = 0;
-    CUcontext pctx;
-    nvmlReturn_t res;
-    struct timespec deadline;
 
     if (hostpid_broker_query_trusted(HOSTPID_BROKER_SOCKET_PATH,
                                     &hostpid) != 0) {
@@ -133,42 +134,41 @@ nvmlReturn_t set_task_pid_from_broker(void) {
     if (set_host_pid(hostpid) != 0) {
         return NVML_ERROR_NOT_FOUND;
     }
-    // The PID is already set, so a sizing failure only leaves context_size
-    // alone, as a missing NVML entry does in set_task_pid().
     if (nvmlInit() != NVML_SUCCESS) {
         LOG_WARN("Primary context size unavailable");
         return NVML_SUCCESS;
     }
     // The first nvmlInit (including setspec in set_host_pid) resets the map.
-    // Restore CUDA_VISIBLE_DEVICES before selecting the NVML sizing device.
     map_cuda_visible_devices();
-    if (hostpid_fallback_lock_deadline_after_ms(
-            &deadline, HOSTPID_FALLBACK_LOCK_TIMEOUT_MS) != 0 ||
-        hostpid_fallback_lock_acquire_shared_until(&deadline) != 0) {
-        LOG_WARN("Skipped primary context sizing because the node lock "
-                 "failed: %s", strerror(errno));
-        return NVML_SUCCESS;
-    }
-    if (cuDevicePrimaryCtxRetain(&pctx, 0) != CUDA_SUCCESS) {
-        LOG_WARN("Primary context size unavailable");
-        goto unlock;
-    }
-    res = get_used_gpu_memory_by_pid(hostpid, &used);
-    if (res == NVML_SUCCESS) {
-        LOG_INFO("Primary Context Size==%llu", used);
-        context_size = used;
-    } else {
-        LOG_WARN("Primary context size unavailable: %d", res);
-    }
-    if (cuDevicePrimaryCtxRelease(0) != CUDA_SUCCESS) {
-        LOG_WARN("Failed to release the device 0 primary context");
-    }
-unlock:
-    if (hostpid_fallback_lock_release() != 0) {
-        LOG_ERROR("Failed to release the context sizing lock: %s",
-                  strerror(errno));
-    }
+    pthread_mutex_lock(&lazy_sizing_lock);
+    lazy_sizing_hostpid = hostpid;
+    pthread_mutex_unlock(&lazy_sizing_lock);
     return NVML_SUCCESS;
+}
+
+// Called after a successful primary context retain while context_size is
+// unknown. The broker PID lets NVML report this process's own usage, so no
+// lock and no extra context are needed.
+void size_primary_context_lazily(int cudadev) {
+    unsigned long long used = 0;
+    nvmlReturn_t res;
+
+    pthread_mutex_lock(&lazy_sizing_lock);
+    if (lazy_sizing_hostpid > 0 && context_size == 0) {
+        res = get_used_gpu_memory_by_pid(lazy_sizing_hostpid, cudadev, &used);
+        if (res == NVML_SUCCESS) {
+            LOG_INFO("Primary Context Size==%llu", used);
+            context_size = used;
+        } else {
+            LOG_WARN("Primary context size unavailable: %d", res);
+        }
+    }
+    pthread_mutex_unlock(&lazy_sizing_lock);
+}
+
+void reset_lazy_context_sizing(void) {
+    lazy_sizing_lock = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+    lazy_sizing_hostpid = 0;
 }
 
 /*
