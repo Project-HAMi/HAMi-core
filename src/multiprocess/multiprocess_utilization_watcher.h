@@ -1,3 +1,5 @@
+#include <stdint.h>
+
 #define MAX_PIDS 1024
 
 #define CAS(ptr, old, new) __sync_bool_compare_and_swap((ptr), (old), (new))
@@ -17,7 +19,7 @@ static const struct timespec g_wait = {
 };
 
 
-void rate_limiter(int grids, int blocks);
+void rate_limiter(int64_t grids, int64_t blocks);
 void init_utilization_watcher();
 void* utilization_watcher();
 int setspec();
