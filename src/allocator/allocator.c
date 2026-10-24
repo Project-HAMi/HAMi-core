@@ -4,34 +4,14 @@
 #include "multiprocess/multiprocess_memory_limit.h"
 
 
-size_t BITSIZE = 512;
-size_t IPCSIZE = 2097152;
-size_t OVERSIZE = 134217728;
-//int pidfound;
-
-region_list *r_list;
 allocated_list *device_overallocated;
 allocated_list *device_allocasync;
 
-#define ALIGN       2097152
-#define MULTI_PARAM 1
-
-#define CHUNK_SIZE  (OVERSIZE/BITSIZE)
-#define __CHUNK_SIZE__  CHUNK_SIZE
-
-extern size_t initial_offset;
 extern CUresult
     cuMemoryAllocate(CUdeviceptr* dptr, size_t bytesize, void* data);
 extern CUresult cuMemoryFree(CUdeviceptr dptr);
 
-pthread_once_t allocator_allocate_flag = PTHREAD_ONCE_INIT;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-
-size_t round_up(size_t size, size_t unit) {
-    if (size & (unit-1))
-        return ((size / unit) + 1 ) * unit;
-    return size;
-}
 
 /* already_locked: caller already holds lock_shrreg (not reentrant). */
 static int oom_check_impl(const int dev, size_t addon, int already_locked) {
@@ -94,35 +74,6 @@ void release_device_memory(CUdevice dev, size_t size) {
     unlock_shrreg();
 }
 
-CUresult view_vgpu_allocator() {
-    allocated_list_entry *al;
-    size_t total;
-    total=0;
-    LOG_INFO("[view1]:overallocated:");
-    for (al=device_overallocated->head;al!=NULL;al=al->next){
-        LOG_INFO("(%p %lu)\t",(void *)al->entry->address,al->entry->length);
-        total+=al->entry->length;
-    }
-    LOG_INFO("total=%lu",total);
-    size_t t = get_current_device_memory_usage(cuda_to_nvml_map(0));
-    LOG_INFO("current_device_memory_usage:%lu",t);
-    return 0;
-}
-
-CUresult get_listsize(allocated_list *al, size_t *size) {
-    if (al->length == 0){
-        *size = 0;
-        return CUDA_SUCCESS;
-    }
-    size_t count=0;
-    allocated_list_entry *val;
-    for (val=al->head;val!=NULL;val=val->next){
-        count+=val->entry->length;
-    }
-    *size = count;
-    return CUDA_SUCCESS;
-}
-
 void allocator_init() {
     LOG_DEBUG("Allocator_init\n");
 
@@ -164,9 +115,6 @@ int add_chunk(CUdeviceptr *address, size_t size) {
          * device, so forward it to the driver rather than index per-device
          * state with an undefined id. */
         LOG_WARN("add_chunk: no current context, forwarding allocation without tracking");
-        if (size <= IPCSIZE) {
-            return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAlloc_v2, address, size);
-        }
         return cuMemoryAllocate(address, size, NULL);
     }
 
@@ -177,11 +125,7 @@ int add_chunk(CUdeviceptr *address, size_t size) {
         return CUDA_ERROR_OUT_OF_MEMORY;
 
     /* GPU allocation outside lock, the expensive part */
-    if (size <= IPCSIZE) {
-        res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAlloc_v2, address, size);
-    } else {
-        res = cuMemoryAllocate(address, size, NULL);
-    }
+    res = cuMemoryAllocate(address, size, NULL);
     if (res != CUDA_SUCCESS) {
         LOG_ERROR("cuMemoryAllocate failed res=%d", res);
         release_device_memory(dev, size);
@@ -220,7 +164,6 @@ int add_chunk_only(CUdeviceptr address, size_t size, CUdevice dev) {
 
 int check_memory_type(CUdeviceptr address) {
     allocated_list_entry *cursor;
-    cursor = device_overallocated->head;
     for (cursor=device_overallocated->head;cursor!=NULL;cursor=cursor->next){
         if ((cursor->entry->address <= address) && (cursor->entry->address+cursor->entry->length>=address))
             return CU_MEMORYTYPE_DEVICE;

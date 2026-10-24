@@ -55,7 +55,6 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuCtxSetLimit"},
     {.name = "cuCtxSetSharedMemConfig"},
     {.name = "cuCtxSynchronize"},
-    //{.name = "cuCtxEnablePeerAccess"},
     {.name = "cuGetExportTable"},
     /* Stream Part */
     {.name = "cuStreamCreate"},
@@ -142,7 +141,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemImportFromShareableHandle"},
     {.name = "cuMemAllocAsync"},
     {.name = "cuMemFreeAsync"},
-    /* cuda11.7 new api memory part */
+    /* memory APIs */
     {.name = "cuMemHostGetDevicePointer_v2"},
     {.name = "cuMemHostGetFlags"},
     {.name = "cuMemPoolTrimTo"},
@@ -168,7 +167,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemPrefetchAsync_v2"},
     {.name = "cuMemRangeGetAttribute"},
     {.name = "cuMemRangeGetAttributes"},
-    /* cuda 11.7 external resource interoperability */
+    /* external resource interoperability */
     {.name = "cuImportExternalMemory"},
     {.name = "cuExternalMemoryGetMappedBuffer"},
     {.name = "cuExternalMemoryGetMappedMipmappedArray"},
@@ -250,13 +249,10 @@ int prior_function(char tmp[500]) {
 void load_cuda_libraries() {
     void *table = NULL;
     int i = 0;
-    char cuda_filename[FILENAME_MAX];
+    const char *cuda_filename = "libcuda.so.1";
     char tmpfunc[500];
 
     LOG_INFO("Start hijacking");
-
-    snprintf(cuda_filename, FILENAME_MAX - 1, "%s","libcuda.so.1");
-    cuda_filename[FILENAME_MAX - 1] = '\0';
 
     table = dlopen(cuda_filename, RTLD_NOW | RTLD_NODELETE);
     if (!table) {
@@ -304,16 +300,6 @@ const char* get_real_func_name(const char* base_name,int cuda_version) {
   return NULL; // if not found
 }
 
-void* find_real_symbols_in_table(const char *symbol) {
-  void *pfn;
-  //this symbol always has suffix like _v2,_v3
-  pfn = __dlsym_hook_section(NULL,symbol);
-  if (pfn!=NULL) {
-    return pfn;
-  }
-  return NULL;
-}
-
 void *find_symbols_in_table(const char *symbol) {
     char symbol_v[500];
     void *pfn;
@@ -338,13 +324,12 @@ void *find_symbols_in_table_by_cudaversion(const char *symbol,int  cudaVersion) 
     // if not find in multi func version def, use origin logic
     pfn = find_symbols_in_table(symbol);
   } else {
-    pfn = find_real_symbols_in_table(real_symbol);
+    //this symbol always has suffix like _v2,_v3
+    pfn = __dlsym_hook_section(NULL, real_symbol);
   }
   return pfn;
 }
 
-
-CUresult (*cuGetProcAddress_real) ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ); 
 
 CUresult _cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ) {
     LOG_INFO("into _cuGetProcAddress symbol=%s:%d",symbol,cudaVersion);
@@ -364,7 +349,6 @@ CUresult cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cu
     if (strcmp(symbol,"cuGetProcAddress")==0) {
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress,symbol,pfn,cudaVersion,flags); 
         if (res==CUDA_SUCCESS) {
-            cuGetProcAddress_real=*pfn;
             *pfn=_cuGetProcAddress;
         }
         return res;
@@ -401,7 +385,6 @@ CUresult cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, cu
     if (strcmp(symbol,"cuGetProcAddress_v2")==0) {
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress_v2,symbol,pfn,cudaVersion,flags,symbolStatus); 
         if (res==CUDA_SUCCESS) {
-            cuGetProcAddress_real=*pfn;
             *pfn=_cuGetProcAddress_v2;
         }
         return res;

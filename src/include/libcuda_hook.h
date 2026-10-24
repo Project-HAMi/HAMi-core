@@ -22,7 +22,6 @@ typedef struct {
 
 #define FILENAME_MAX 4096
 
-#define CONTEXT_SIZE 104857600
 
 typedef CUresult (*cuda_sym_t)();
 
@@ -87,7 +86,6 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuCtxSetLimit),
     CUDA_OVERRIDE_ENUM(cuCtxSetSharedMemConfig),
     CUDA_OVERRIDE_ENUM(cuCtxSynchronize),
-    //CUDA_OVERRIDE_ENUM(cuCtxEnablePeerAccess),
     CUDA_OVERRIDE_ENUM(cuGetExportTable),
 
     /* cuStream Part */
@@ -176,7 +174,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuMemImportFromShareableHandle),
     CUDA_OVERRIDE_ENUM(cuMemAllocAsync),
     CUDA_OVERRIDE_ENUM(cuMemFreeAsync),
-    /* cuda11.7 new api memory part */
+    /* memory APIs */
     CUDA_OVERRIDE_ENUM(cuMemHostGetDevicePointer_v2),
     CUDA_OVERRIDE_ENUM(cuMemHostGetFlags),
     CUDA_OVERRIDE_ENUM(cuMemPoolTrimTo),

@@ -1,5 +1,4 @@
 #include "include/libcuda_hook.h"
-#include <nvml.h>
 
 CUresult cuEventCreate ( CUevent* phEvent, unsigned int  Flags ){
     LOG_DEBUG("cuEventCreate Event=%p",phEvent);

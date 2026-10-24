@@ -1,12 +1,8 @@
 #include <pthread.h>
 #include "include/nvml_prefix.h"
 #include "include/libnvml_hook.h"
-#include "include/nvml_processes_utilization_subset.h"
 #include "include/utils.h"
 
-extern entry_t cuda_library_entry[];
-extern entry_t nvml_library_entry[];
-//extern resource_data_t g_vcuda_config;
 
 nvmlReturn_t nvmlShutdown(void) {
   return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlShutdown);
@@ -24,19 +20,6 @@ const char *nvmlErrorString(nvmlReturn_t result) {
   return _entry(result);
 }
 
-/*
-nvmlReturn_t nvmlDeviceGetHandleByIndex_v2(unsigned int index,
-                                           nvmlDevice_t *device) {
-  return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetHandleByIndex_v2,
-                         index, device);
-}
-nvmlReturn_t nvmlDeviceGetHandleByIndex(unsigned int index,
-                                        nvmlDevice_t *device) {
-  return NVML_OVERRIDE_CALL_NO_LOG(nvml_library_entry, nvmlDeviceGetHandleByIndex, index,
-                         device);
-}
-*/
-
 nvmlReturn_t nvmlDeviceGetComputeRunningProcesses(nvmlDevice_t device,
                                                   unsigned int *infoCount,
                                                   nvmlProcessInfo_t *infos) {
@@ -44,20 +27,6 @@ nvmlReturn_t nvmlDeviceGetComputeRunningProcesses(nvmlDevice_t device,
                          nvmlDeviceGetComputeRunningProcesses, device,
                          infoCount, infos);
 }
-/*
-nvmlReturn_t nvmlDeviceGetPciInfo_v3(nvmlDevice_t device, nvmlPciInfo_t *pci) {
-  return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetPciInfo_v3, device),
-                         pci);
-}
-
-nvmlReturn_t nvmlDeviceGetPciInfo_v2(nvmlDevice_t device, nvmlPciInfo_t *pci) {
-  return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetPciInfo_v2, device),
-                         pci);
-}
-
-nvmlReturn_t nvmlDeviceGetPciInfo(nvmlDevice_t device, nvmlPciInfo_t *pci) {
-  return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetPciInfo, device, pci);
-}*/
 
 nvmlReturn_t nvmlDeviceGetProcessUtilization(
     nvmlDevice_t device, nvmlProcessUtilizationSample_t *utilization,
@@ -77,15 +46,6 @@ nvmlReturn_t nvmlDeviceGetProcessesUtilizationInfo(
   typedef nvmlReturn_t (*sym_t)(nvmlDevice_t, nvmlProcessesUtilizationInfo_t *);
   return ((sym_t)entry)(device, processesUtilInfo);
 }
-/*
-nvmlReturn_t nvmlDeviceGetCount_v2(unsigned int *deviceCount) {
-  return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetCount_v2,
-                         deviceCount);
-}
-
-nvmlReturn_t nvmlDeviceGetCount(unsigned int *deviceCount) {
-  return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetCount, deviceCount);
-}*/
 
 nvmlReturn_t nvmlDeviceClearAccountingPids(nvmlDevice_t device) {
   return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceClearAccountingPids,
@@ -384,30 +344,6 @@ nvmlReturn_t nvmlDeviceGetGridLicensableFeatures(
                          nvmlDeviceGetGridLicensableFeatures, device,
                          pGridLicensableFeatures);
 }
-/*
-nvmlReturn_t nvmlDeviceGetHandleByPciBusId_v2(const char *pciBusId,
-                                              nvmlDevice_t *device) {
-  return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetHandleByPciBusId_v2,
-                         pciBusId, device);
-}
-
-nvmlReturn_t nvmlDeviceGetHandleByPciBusId(const char *pciBusId,
-                                           nvmlDevice_t *device) {
-  return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetHandleByPciBusId,
-                         pciBusId, device);
-}
-
-nvmlReturn_t nvmlDeviceGetHandleBySerial(const char *serial,
-                                         nvmlDevice_t *device) {
-  return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetHandleBySerial,
-                         serial, device);
-}
-
-nvmlReturn_t nvmlDeviceGetHandleByUUID(const char *uuid, nvmlDevice_t *device) {
-  return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetHandleByUUID, uuid,
-                         device);
-}*/
-
 
 nvmlReturn_t nvmlDeviceGetInforomConfigurationChecksum(nvmlDevice_t device,
                                                        unsigned int *checksum) {
@@ -464,13 +400,7 @@ nvmlReturn_t nvmlDeviceGetMemoryErrorCounter(nvmlDevice_t device,
   return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetMemoryErrorCounter,
                          device, errorType, counterType, locationType, count);
 }
-/*
-nvmlReturn_t nvmlDeviceGetMemoryInfo(nvmlDevice_t device,
-                                     nvmlMemory_t *memory) {
-  return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetMemoryInfo, device,
-                         memory);
-}
-*/
+
 nvmlReturn_t nvmlDeviceGetMinorNumber(nvmlDevice_t device,
                                       unsigned int *minorNumber) {
   return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetMinorNumber, device,
@@ -513,21 +443,6 @@ nvmlReturn_t nvmlDeviceGetNvLinkErrorCounter(nvmlDevice_t device,
   return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetNvLinkErrorCounter,
                          device, link, counter, counterValue);
 }
-/*
-nvmlReturn_t nvmlDeviceGetNvLinkRemotePciInfo_v2(nvmlDevice_t device,
-                                                 unsigned int link,
-                                                 nvmlPciInfo_t *pci) {
-  return NVML_OVERRIDE_CALL(nvml_library_entry,
-                         nvmlDeviceGetNvLinkRemotePciInfo_v2, device, link,
-                         pci);
-}
-
-nvmlReturn_t nvmlDeviceGetNvLinkRemotePciInfo(nvmlDevice_t device,
-                                              unsigned int link,
-                                              nvmlPciInfo_t *pci) {
-  return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetNvLinkRemotePciInfo,
-                         device, link, pci);
-}*/
 
 nvmlReturn_t nvmlDeviceGetNvLinkState(nvmlDevice_t device, unsigned int link,
                                       nvmlEnableState_t *isActive) {
@@ -671,8 +586,6 @@ nvmlReturn_t nvmlDeviceGetSupportedEventTypes(nvmlDevice_t device,
                                               unsigned long long *eventTypes) {
   nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetSupportedEventTypes,
                          device, eventTypes);
-  // nvmlReturn_t res = NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceGetSupportedEventTypes,
-  //                       device, eventTypes); 
   return res;
 }
 
@@ -882,10 +795,6 @@ nvmlReturn_t nvmlDeviceSetAutoBoostedClocksEnabled(nvmlDevice_t device,
 
 nvmlReturn_t nvmlDeviceSetComputeMode(nvmlDevice_t device,
                                       nvmlComputeMode_t mode) {
-  //if (g_vcuda_config.enable) {
-  //  return NVML_ERROR_NOT_SUPPORTED;
-  //}
-
   return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceSetComputeMode, device,
                          mode);
 }
@@ -1566,10 +1475,6 @@ nvmlReturn_t nvmlDeviceSetTemperatureThreshold(
   return NVML_OVERRIDE_CALL(nvml_library_entry, nvmlDeviceSetTemperatureThreshold,
                          device, thresholdType, temp);
 }
-
-/** no prototype
-nvmlReturn_t nvmlRetry_NvRmControl() {}
- */
 
 nvmlReturn_t nvmlVgpuInstanceGetGpuInstanceId(nvmlVgpuInstance_t vgpuInstance,
                                               unsigned int *gpuInstanceId) {

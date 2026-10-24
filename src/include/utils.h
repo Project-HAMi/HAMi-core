@@ -33,7 +33,4 @@ int find_own_hostpid(hostpid_probe_fn probe, void *ctx, int max_attempts,
                      unsigned int *hostpid, uint64_t *used);
 
 //Nvml part utils
-void sort(int vmap[16]);
-int initial_virtual_devices();
-int parser(char *str);
 int need_cuda_virtualize();
