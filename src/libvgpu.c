@@ -1,4 +1,3 @@
-//#include "memory_limit.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <dlfcn.h>
@@ -7,7 +6,6 @@
 #include <string.h>
 #include "include/nvml_prefix.h"
 #include <nvml.h>
-#include "include/nvml_prefix.h"
 #include "include/log_utils.h"
 #include "include/libcuda_hook.h"
 #include "include/libvgpu.h"
@@ -19,13 +17,10 @@
 #include "multiprocess/multiprocess_memory_limit.h"
 
 extern void init_utilization_watcher(void);
-extern void utilization_watcher(void);
-extern void initial_virtual_map(void); 
 extern int set_host_pid(int hostpid);
 extern void allocator_init(void);
 void preInit();
 void childReinitPostInit();
-char *(*real_realpath)(const char *path, char *resolved_path);
 void *vgpulib;
 
 pthread_once_t pre_cuinit_flag = PTHREAD_ONCE_INIT;
@@ -152,7 +147,6 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuGetProcAddress);
     DLSYM_HOOK_FUNC(cuGetProcAddress_v2);
     //Context
-    //DLSYM_HOOK_FUNC(cuCtxGetDevice);
 #if CUDA_VERSION < 13000
     DLSYM_HOOK_FUNC(cuCtxCreate_v2);
     DLSYM_HOOK_FUNC(cuCtxCreate_v3);
@@ -181,8 +175,6 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuCtxSetLimit);
     DLSYM_HOOK_FUNC(cuCtxSetSharedMemConfig);
     DLSYM_HOOK_FUNC(cuCtxSynchronize);
-    //DLSYM_HOOK_FUNC(cuCtxEnablePeerAccess);
-    //DLSYM_HOOK_FUNC(cuGetExportTable);
     DLSYM_HOOK_FUNC(cuArray3DCreate_v2);
     DLSYM_HOOK_FUNC(cuArrayCreate_v2);
     DLSYM_HOOK_FUNC(cuArrayDestroy);
@@ -281,7 +273,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemImportFromShareableHandle);
     DLSYM_HOOK_FUNC(cuMemAllocAsync);
     DLSYM_HOOK_FUNC(cuMemFreeAsync);
-    // cuda 11.7 new memory ops
+    // memory ops
     DLSYM_HOOK_FUNC(cuMemHostGetDevicePointer_v2);
     DLSYM_HOOK_FUNC(cuMemHostGetFlags);
     DLSYM_HOOK_FUNC(cuMemPoolTrimTo);
@@ -310,7 +302,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemPrefetchAsync_v2);
     DLSYM_HOOK_FUNC(cuMemRangeGetAttribute);
     DLSYM_HOOK_FUNC(cuMemRangeGetAttributes);
-    // cuda 11.7 external resource interoperability
+    // external resource interoperability
     DLSYM_HOOK_FUNC(cuImportExternalMemory);
     DLSYM_HOOK_FUNC(cuExternalMemoryGetMappedBuffer);
     DLSYM_HOOK_FUNC(cuExternalMemoryGetMappedMipmappedArray);
@@ -862,8 +854,6 @@ void* __dlsym_hook_section_nvml(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(nvmlDeviceGetGraphicsRunningProcesses_v2);
     /** nvmlDeviceSetTemperatureThreshold */
     DLSYM_HOOK_FUNC(nvmlDeviceSetTemperatureThreshold);
-    /** nvmlRetry_NvRmControl */
-    //DLSYM_HOOK_FUNC(nvmlRetry_NvRmControl);
     /** nvmlVgpuInstanceGetGpuInstanceId */
     DLSYM_HOOK_FUNC(nvmlVgpuInstanceGetGpuInstanceId);
     /** nvmlVgpuTypeGetGpuInstanceProfileId */
@@ -886,9 +876,7 @@ void preInit(){
             }
         }
     }
-    real_realpath = NULL;
     load_cuda_libraries();
-    //nvmlInit();
     ENSURE_INITIALIZED();
     pthread_atfork(NULL, NULL, childReinitPostInit);
 }
@@ -958,7 +946,6 @@ void postInit(){
         pidfound = 1;
     }
 
-    //add_gpu_device_memory_usage(getpid(),0,context_size,0);
     env_utilization_switch = set_env_utilization_switch();
     init_utilization_watcher();
 }
