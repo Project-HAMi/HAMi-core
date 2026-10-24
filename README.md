@@ -68,12 +68,6 @@ export CUDA_DEVICE_MEMORY_LIMIT=1g
 export CUDA_DEVICE_SM_LIMIT=50
 ```
 
-If you run CUDA applications locally, please create the local directory first.
-
-```
-mkdir /tmp/vgpulock/
-```
-
 If you have updated `CUDA_DEVICE_MEMORY_LIMIT` or `CUDA_DEVICE_SM_LIMIT`, please delete the local cache file.
 
 ```
@@ -84,7 +78,7 @@ rm /tmp/cudevshr.cache
 
 ```bash
 # Build docker image
-docker build . -f=dockerfiles/Dockerfile -t cuda_vmem:tf1.8-cu90
+docker build . -f=dockerfiles/Dockerfile -t hami-core:dev
 
 # Configure GPU device and library mounts for container
 export DEVICE_MOUNTS="--device /dev/nvidia0:/dev/nvidia0 --device /dev/nvidia-uvm:/dev/nvidia-uvm --device /dev/nvidiactl:/dev/nvidiactl"
@@ -94,7 +88,7 @@ export LIBRARY_MOUNTS="-v /usr/cuda_files:/usr/cuda_files -v $(which nvidia-smi)
 docker run ${LIBRARY_MOUNTS} ${DEVICE_MOUNTS} -it \
     -e CUDA_DEVICE_MEMORY_LIMIT=2g \
     -e LD_PRELOAD=/libvgpu/build/libvgpu.so \
-    cuda_vmem:tf1.8-cu90 \
+    hami-core:dev \
     nvidia-smi
 ```
 
@@ -146,7 +140,7 @@ logs do not provide an on-demand view of the shared region.
 ## Test Raw APIs
 
 ```bash
-./test/test_alloc
+./build/test/test_alloc
 ```
 
 ## Contributing

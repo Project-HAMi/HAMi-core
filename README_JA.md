@@ -68,12 +68,6 @@ export CUDA_DEVICE_MEMORY_LIMIT=1g
 export CUDA_DEVICE_SM_LIMIT=50
 ```
 
-CUDAアプリケーションをローカルで実行する場合は、まずローカルディレクトリを作成してください。
-
-```
-mkdir /tmp/vgpulock/
-```
-
 `CUDA_DEVICE_MEMORY_LIMIT`または`CUDA_DEVICE_SM_LIMIT`を更新した場合は、ローカルキャッシュファイルを削除してください。
 
 ```
@@ -84,7 +78,7 @@ rm /tmp/cudevshr.cache
 
 ```bash
 # Dockerイメージのビルド
-docker build . -f=dockerfiles/Dockerfile -t cuda_vmem:tf1.8-cu90
+docker build . -f=dockerfiles/Dockerfile -t hami-core:dev
 
 # コンテナ用のGPUデバイスとライブラリマウントの設定
 export DEVICE_MOUNTS="--device /dev/nvidia0:/dev/nvidia0 --device /dev/nvidia-uvm:/dev/nvidia-uvm --device /dev/nvidiactl:/dev/nvidiactl"
@@ -94,7 +88,7 @@ export LIBRARY_MOUNTS="-v /usr/cuda_files:/usr/cuda_files -v $(which nvidia-smi)
 docker run ${LIBRARY_MOUNTS} ${DEVICE_MOUNTS} -it \
     -e CUDA_DEVICE_MEMORY_LIMIT=2g \
     -e LD_PRELOAD=/libvgpu/build/libvgpu.so \
-    cuda_vmem:tf1.8-cu90 \
+    hami-core:dev \
     nvidia-smi
 ```
 
@@ -139,7 +133,7 @@ Mon Dec  2 04:38:12 2024
 ## Raw APIのテスト
 
 ```bash
-./test/test_alloc
+./build/test/test_alloc
 ```
 
 ## コントリビューション
