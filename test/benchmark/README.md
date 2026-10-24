@@ -14,16 +14,16 @@ a real workload process is.
 - total wall time for all processes to finish initialization
 - CPU time per process and time spent blocked (wall minus CPU)
 - voluntary context switches per process, a proxy for blocking on the shared
-  `sem_postinit` semaphore, and involuntary context switches, a proxy for CPU
+  postinit file lock, and involuntary context switches, a proxy for CPU
   preemption when many processes start at once
 
 ## Why `cuInit()`
 
 In HAMi-core, `cuInit()` ends by calling `ensure_post_init()`, which runs
-`postInit()` once per process. `postInit()` takes the shared memory semaphore
-`sem_postinit` through `lock_postinit()` and calls `set_task_pid()` before
+`postInit()` once per process. `postInit()` takes the cross-process postinit
+`fcntl` record lock through `lock_postinit()` and calls `set_task_pid()` before
 releasing it. `set_task_pid()` runs `nvmlInit()`, scans running processes, and
-retains a primary CUDA context. That semaphore serializes `set_task_pid()`
+retains a primary CUDA context. That lock serializes `set_task_pid()`
 across every process on the node, so timing `cuInit()` captures the contention.
 
 ## Build

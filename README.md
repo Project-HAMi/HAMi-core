@@ -5,22 +5,30 @@
 
 English | [中文](README_CN.md) | [日本語](README_JA.md)
 
-## Introduction
-
 HAMi-core is the in-container GPU resource controller. It intercepts CUDA calls to enforce per-container device memory limits and compute utilization limits, without requiring changes to the application or the driver. It has been adopted by [HAMi](https://github.com/Project-HAMi/HAMi) and [volcano](https://github.com/volcano-sh/devices). For the overall HAMi architecture and how HAMi-core fits into it, see the [HAMi project](https://github.com/Project-HAMi/HAMi).
+
+- [Features](#features)
+- [How it works](#how-it-works)
+- [Getting started](#getting-started)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Docker](#docker)
+- [Logging](#logging)
+- [Testing](#testing)
+- [Repository layout](#repository-layout)
+- [Contributing](#contributing)
 
 ## Features
 
-HAMi-core has the following features:
-1. Virtualize device memory
-2. Limit device utilization by self-implemented time shard
-3. Real-time device utilization monitor 
+- **Device memory virtualization.** Each container sees and is held to its own memory limit, per device.
+- **Compute limiting.** SM utilization is limited with a self-implemented time-sharing scheme.
+- **Real-time utilization monitor.** Usage is tracked across all processes in the container through a shared region.
 
 ![image](docs/images/sample_nvidia-smi.png)
 
-## Design
+## How it works
 
-HAMi-core operates by hijacking the API calls between CUDA-Runtime (libcudart.so) and CUDA-Driver (libcuda.so), as shown below:
+HAMi-core hijacks the API calls between the CUDA runtime (`libcudart.so`) and the CUDA driver (`libcuda.so`), as shown below. It also hooks the matching NVML calls so that tools such as `nvidia-smi` report the limited view.
 
 ```mermaid
 flowchart TD
@@ -33,12 +41,13 @@ flowchart TD
     style H fill:#eeeeee,stroke:#333333
 ```
 
-## Getting Started
+## Getting started
 
 ### Prerequisites
 
-- CMake >= 2.8.12
-- A working CUDA toolkit (`CUDA_HOME`, default `/usr/local/cuda`)
+- Linux with glibc (x86_64 or aarch64)
+- CMake >= 3.18
+- A working CUDA toolkit, 12.x or 13.x (`CUDA_HOME`, default `/usr/local/cuda`)
 - Docker, if you prefer the containerized build
 
 ### Build in Docker
@@ -47,7 +56,9 @@ flowchart TD
 make build-in-docker
 ```
 
-### Build Locally
+This builds `libvgpu.so` and runs the CPU-only tests with `ctest`.
+
+### Build locally
 
 ```bash
 ./build.sh
@@ -57,34 +68,49 @@ The resulting `libvgpu.so` is written to the `build/` directory.
 
 ## Usage
 
-_CUDA_DEVICE_MEMORY_LIMIT_ indicates the upper limit of device memory (eg 1g,1024m,1048576k,1073741824) 
-
-_CUDA_DEVICE_SM_LIMIT_ indicates the sm utility percentage of each device
+Preload the library and set the limits through environment variables:
 
 ```bash
-# Add 1GiB memory limit and set max SM utility to 50% for all devices
+# Limit every device to 1 GiB of memory and 50% of the SMs
 export LD_PRELOAD=./libvgpu.so
 export CUDA_DEVICE_MEMORY_LIMIT=1g
 export CUDA_DEVICE_SM_LIMIT=50
 ```
 
-If you run CUDA applications locally, please create the local directory first.
+If you run CUDA applications locally, create the lock directory first:
 
-```
+```bash
 mkdir /tmp/vgpulock/
 ```
 
-If you have updated `CUDA_DEVICE_MEMORY_LIMIT` or `CUDA_DEVICE_SM_LIMIT`, please delete the local cache file.
+Limits are stored in a shared cache file. If you change `CUDA_DEVICE_MEMORY_LIMIT` or `CUDA_DEVICE_SM_LIMIT`, delete it before the next run:
 
-```
+```bash
 rm /tmp/cudevshr.cache
 ```
 
-## Docker Images
+## Configuration
+
+| Variable | Description |
+| -------- | ----------- |
+| `CUDA_DEVICE_MEMORY_LIMIT` | Device memory limit for all devices, for example `1g`, `1024m`, `1048576k` or `1073741824`. Units are `K`, `M` and `G` (also `Ki`, `KB`, `KiB`), 1024 based. `0` or unset means no limit. |
+| `CUDA_DEVICE_MEMORY_LIMIT_<n>` | Memory limit for device `n`, overriding `CUDA_DEVICE_MEMORY_LIMIT`. |
+| `CUDA_DEVICE_SM_LIMIT` | SM utilization limit in percent, for example `50` or `50%`. `0` or unset means no limit. |
+| `CUDA_DEVICE_SM_LIMIT_<n>` | SM limit for device `n`, overriding `CUDA_DEVICE_SM_LIMIT`. |
+| `GPU_CORE_UTILIZATION_POLICY` | `force` always applies the SM limit and `disable` turns it off. Unset keeps the default behavior. |
+| `CUDA_DEVICE_MEMORY_SHARED_CACHE` | Path of the shared cache file (default `/tmp/cudevshr.cache`). |
+| `CUDA_VISIBLE_DEVICES` | Honored when mapping CUDA device indexes to physical devices. |
+| `CUDA_REDIRECT` | Path of `libvgpu.so` to load when intercepting `dlsym` (default `/usr/local/vgpu/libvgpu.so`). |
+| `RECORD_KERNEL_INTERVAL` | Minimum number of seconds between recording kernel launch times (default `1`). |
+| `LIBCUDA_LOG_LEVEL` | Log verbosity, see [Logging](#logging). |
+
+Up to 16 devices are supported per container.
+
+## Docker
 
 ```bash
 # Build docker image
-docker build . -f=dockerfiles/Dockerfile -t cuda_vmem:tf1.8-cu90
+docker build . -f=dockerfiles/Dockerfile -t hami-core:dev
 
 # Configure GPU device and library mounts for container
 export DEVICE_MOUNTS="--device /dev/nvidia0:/dev/nvidia0 --device /dev/nvidia-uvm:/dev/nvidia-uvm --device /dev/nvidiactl:/dev/nvidiactl"
@@ -94,11 +120,11 @@ export LIBRARY_MOUNTS="-v /usr/cuda_files:/usr/cuda_files -v $(which nvidia-smi)
 docker run ${LIBRARY_MOUNTS} ${DEVICE_MOUNTS} -it \
     -e CUDA_DEVICE_MEMORY_LIMIT=2g \
     -e LD_PRELOAD=/libvgpu/build/libvgpu.so \
-    cuda_vmem:tf1.8-cu90 \
+    hami-core:dev \
     nvidia-smi
 ```
 
-After running, you will see nvidia-smi output similar to the following, showing memory limited to 2GiB:
+After running, you will see `nvidia-smi` output similar to the following, showing memory limited to 2 GiB:
 
 ```
 ...
@@ -125,30 +151,55 @@ Mon Dec  2 04:38:12 2024
 [HAMI-core Msg(1:140235494377280:multiprocess_memory_limit.c:497)]: Calling exit handler 1
 ```
 
-## Log
+## Logging
 
-Use environment variable LIBCUDA_LOG_LEVEL to set the visibility of logs
+Use the environment variable `LIBCUDA_LOG_LEVEL` to set the visibility of logs:
 
-| LIBCUDA_LOG_LEVEL | description |
+| LIBCUDA_LOG_LEVEL | Description |
 | ----------------- | ----------- |
-|  0          | errors only |
-|  1(default),2          | errors,warnings,messages |
-|  3                | infos,errors,warnings,messages |
-|  4                | debugs,errors,warnings,messages |
+| 0 | errors only |
+| 1 (default), 2 | errors, warnings, messages |
+| 3 | infos, errors, warnings, messages |
+| 4 | debugs, errors, warnings, messages |
 
-At debug level, HAMi-core logs a shared-region snapshot after host PID discovery.
-It lists the total process count and up to 16 process slots, including the current
-process when present. For detected devices, it logs nonzero SM utilization,
-monitored memory, and recorded memory. A snapshot is skipped if the shared-region
-lock is busy, and values can change while it is collected. These initialization
-logs do not provide an on-demand view of the shared region.
+## Testing
 
-## Test Raw APIs
+The tests are built together with the library. Most of them need no GPU:
 
 ```bash
-./test/test_alloc
+./build.sh
+ctest --test-dir build --output-on-failure
 ```
+
+Tests that allocate device memory need a GPU and `libvgpu.so`. Run them directly from `build/test/`, for example:
+
+```bash
+./build/test/test_alloc
+```
+
+Before opening a pull request, also run the static hook check that CI runs:
+
+```bash
+make check-cuda-hook-consistency
+```
+
+## Repository layout
+
+| Path | Contents |
+| ---- | -------- |
+| `src/cuda/` | Hooked CUDA driver and runtime entry points |
+| `src/nvml/` | Hooked NVML entry points |
+| `src/allocator/` | Device memory tracking |
+| `src/multiprocess/` | Shared region, memory accounting and the utilization watcher |
+| `src/include/` | Headers, including the hook tables |
+| `test/` | Unit tests and GPU tests |
+| `hack/` | Repository checks |
+| `dockerfiles/` | Build image |
 
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow, code of conduct, and review process before opening a pull request.
+
+## License
+
+HAMi-core is licensed under the Apache License 2.0. See [LICENSE](LICENSE).

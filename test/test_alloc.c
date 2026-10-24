@@ -36,10 +36,6 @@ int alloc_trim_test(){
     for (k = 0; k < 90; ++k) {
         printf("k=%d,arr[k]=%lu\n",k,arr[k]);
         assert(test(arr[k])==0);
-        /*if (0 != test(arr[k])) {
-            fprintf(stderr, "Test alloc %lu bytes failed\n", arr[k]);
-            return -1;
-        }*/
     }
 }
 
