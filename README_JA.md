@@ -37,7 +37,7 @@ flowchart TD
 
 ### 前提条件
 
-- CMake >= 2.8.12
+- CMake >= 3.18
 - 有効なCUDAツールチェーン（`CUDA_HOME`、デフォルトは`/usr/local/cuda`）
 - コンテナ化ビルドを行う場合はDockerも必要
 
