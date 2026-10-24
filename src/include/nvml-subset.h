@@ -346,8 +346,6 @@ typedef enum nvmlComputeMode_enum {
 
 typedef unsigned int nvmlVgpuTypeId_t;
 
-#define nvmlEccBitType_t nvmlMemoryErrorType_t
-
 /**
  * Detailed ECC error counts for a device.
  *
@@ -1138,23 +1136,9 @@ typedef struct nvmlFBCStats_st {
 } nvmlFBCStats_t;
 
 /**
- * Buffer size guaranteed to be large enough for storing GPU identifiers.
- */
-#define NVML_DEVICE_UUID_BUFFER_SIZE 80
-
-/**
  * Buffer size guaranteed to be large enough for \ref nvmlDeviceGetUUID
  */
 #define NVML_DEVICE_UUID_V2_BUFFER_SIZE 96
-
-/**
- * Blacklist GPU device information
- **/
-typedef struct nvmlBlacklistDeviceInfo_st {
-  nvmlPciInfo_t pciInfo;  //!< The PCI information for the blacklisted GPU
-  char uuid[NVML_DEVICE_UUID_BUFFER_SIZE];  //!< The ASCII string UUID for the
-  //!< blacklisted GPU
-} nvmlBlacklistDeviceInfo_t;
 
 /**
  * Structure representing a range of vGPU version

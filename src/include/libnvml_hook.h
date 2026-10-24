@@ -539,8 +539,6 @@ typedef enum {
   NVML_OVERRIDE_ENUM(nvmlDeviceGetGraphicsRunningProcesses_v2),
   /** nvmlDeviceSetTemperatureThreshold */
   NVML_OVERRIDE_ENUM(nvmlDeviceSetTemperatureThreshold),
-  /** nvmlRetry_NvRmControl */
-  //NVML_OVERRIDE_ENUM(nvmlRetry_NvRmControl),
   /** nvmlVgpuInstanceGetGpuInstanceId */
   NVML_OVERRIDE_ENUM(nvmlVgpuInstanceGetGpuInstanceId),
   /** nvmlVgpuTypeGetGpuInstanceProfileId */
