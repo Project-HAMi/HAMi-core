@@ -44,7 +44,6 @@ const size_t cuarray_format_bytes[33] = {
     4   // CU_AD_FORMAT_FLOAT = 0x20
 };
 
-extern size_t round_up(size_t size,size_t align);
 extern void rate_limiter(int grids, int blocks);
 
 int check_oom() {
