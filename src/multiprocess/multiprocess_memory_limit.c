@@ -29,10 +29,6 @@
 #define SEM_WAIT_TIME 10
 #endif
 
-#ifndef SEM_WAIT_TIME_ON_EXIT
-#define SEM_WAIT_TIME_ON_EXIT 3
-#endif
-
 #ifndef SEM_WAIT_RETRY_TIMES
 #define SEM_WAIT_RETRY_TIMES 30
 #endif
@@ -51,11 +47,8 @@ int ctx_activate[32];
 static shared_region_info_t region_info = {0, -1, PTHREAD_ONCE_INIT, NULL, 0, NULL};
 static atomic_flag postinit_local_lock = ATOMIC_FLAG_INIT;
 static _Thread_local int postinit_lock_held;
-// size_t initial_offset=117440512;
 int env_utilization_switch;
-int enable_active_oom_killer;
 size_t context_size;
-size_t initial_offset=0;
 //lock for record kernel time
 pthread_mutex_t _kernel_mutex;
 int _record_kernel_interval = 1;
@@ -297,14 +290,6 @@ void do_init_device_sm_limits(uint64_t *arr, int len) {
     }
 }
 
-int active_oom_killer() {
-    int i;
-    for (i=0;i<region_info.shared_region->proc_num;i++) {
-        kill(region_info.shared_region->procs[i].pid,9);
-    }
-    return 0;
-}
-
 void pre_launch_kernel() {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME_COARSE, &ts);
@@ -346,7 +331,7 @@ int shrreg_minor_version() {
 
 // Lock-free memory monitor aggregation
 size_t get_gpu_memory_monitor(const int dev) {
-    LOG_DEBUG("get_gpu_memory_monitor_lockfree dev=%d", dev);
+    LOG_DEBUG("get_gpu_memory_monitor dev=%d", dev);
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
@@ -371,7 +356,7 @@ size_t get_gpu_memory_monitor(const int dev) {
 
 // Lock-free memory usage aggregation with seqlock for consistent snapshots
 size_t get_gpu_memory_usage(const int dev) {
-    LOG_INFO("get_gpu_memory_usage_lockfree dev=%d", dev);
+    LOG_INFO("get_gpu_memory_usage dev=%d", dev);
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
@@ -444,13 +429,11 @@ size_t get_gpu_memory_usage(const int dev) {
         total+=proc_usage;
     }
 
-    total+=initial_offset;
     return total;
 }
 
 // Lock-free memory monitor update
 int set_gpu_device_memory_monitor(int32_t pid,int dev,size_t monitor){
-    // LOG_WARN("set_gpu_device_memory_monitor_lockfree:%d %d %lu",pid,dev,monitor);
     int i;
     ensure_initialized();
 
@@ -461,7 +444,7 @@ int set_gpu_device_memory_monitor(int32_t pid,int dev,size_t monitor){
             uint64_t used_total = atomic_load_explicit(
                 &region_info.shared_region->procs[i].used[dev].total,
                 memory_order_relaxed);
-            LOG_INFO("set_gpu_device_memory_monitor_lockfree:%d %d %lu->%lu", pid, dev, used_total, monitor);
+            LOG_INFO("set_gpu_device_memory_monitor:%d %d %lu->%lu", pid, dev, used_total, monitor);
             atomic_store_explicit(&region_info.shared_region->procs[i].monitorused[dev], monitor, memory_order_relaxed);
             return 1;
         }
@@ -481,7 +464,7 @@ int set_gpu_device_sm_utilization(int32_t pid, int dev, unsigned int smUtil) {
             uint64_t old_util = atomic_load_explicit(
                 &region_info.shared_region->procs[i].device_util[dev].sm_util,
                 memory_order_relaxed);
-            LOG_INFO("set_gpu_device_sm_utilization_lockfree:%d %d %lu->%u", pid, dev, old_util, smUtil);
+            LOG_INFO("set_gpu_device_sm_utilization:%d %d %lu->%u", pid, dev, old_util, smUtil);
             atomic_store_explicit(
                 &region_info.shared_region->procs[i].device_util[dev].sm_util, smUtil,
                 memory_order_relaxed);
@@ -509,43 +492,9 @@ int init_gpu_device_utilization(){
     return 1;
 }
 
-uint64_t nvml_get_device_memory_usage(const int dev) {
-    nvmlDevice_t ndev;
-    nvmlReturn_t ret;
-    ret = nvmlDeviceGetHandleByIndex(dev, &ndev);
-    if (ret != NVML_SUCCESS) {
-        LOG_ERROR("NVML get device %d error, %s", dev, nvmlErrorString(ret));
-    }
-    unsigned int pcnt = SHARED_REGION_MAX_PROCESS_NUM;
-    nvmlProcessInfo_v1_t infos[SHARED_REGION_MAX_PROCESS_NUM];
-    LOG_DEBUG("before nvmlDeviceGetComputeRunningProcesses");
-    ret = nvmlDeviceGetComputeRunningProcesses(ndev, &pcnt, infos);
-    if (ret != NVML_SUCCESS) {
-        LOG_ERROR("NVML get process error, %s", nvmlErrorString(ret));
-    }
-    int i = 0;
-    uint64_t usage = 0;
-    shared_region_t* region = region_info.shared_region;
-
-    // Lock-free read of proc_num and pid fields
-    int proc_num = atomic_load_explicit(&region->proc_num, memory_order_acquire);
-    for (; i < pcnt; i++) {
-        int slot = 0;
-        for (; slot < proc_num; slot++) {
-            int32_t slot_pid = atomic_load_explicit(&region->procs[slot].pid, memory_order_relaxed);
-            if (infos[i].pid != slot_pid)
-                continue;
-            usage += infos[i].usedGpuMemory;
-        }
-    }
-    LOG_DEBUG("Device %d current memory %lu / %lu", 
-            dev, usage, region->limit[dev]);
-    return usage;
-}
-
 // Lock-free memory add using atomics with seqlock for consistent reads
 int add_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type) {
-    LOG_INFO("add_gpu_device_memory_lockfree:%d %d->%d %lu", pid, cudadev, cuda_to_nvml_map(cudadev), usage);
+    LOG_INFO("add_gpu_device_memory:%d %d->%d %lu", pid, cudadev, cuda_to_nvml_map(cudadev), usage);
 
     int dev = cuda_to_nvml_map(cudadev);
     ensure_initialized();
@@ -582,7 +531,7 @@ int add_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type
         // Seqlock protocol: increment to even (write complete)
         atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
 
-        LOG_INFO("gpu_device_memory_added_lockfree:%d %d %lu", pid, dev, usage);
+        LOG_INFO("gpu_device_memory_added:%d %d %lu", pid, dev, usage);
         return 0;
     }
 
@@ -614,7 +563,7 @@ int add_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type
             // Seqlock protocol: increment to even (write complete)
             atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
 
-            LOG_INFO("gpu_device_memory_added_lockfree:%d %d %lu", pid, dev, usage);
+            LOG_INFO("gpu_device_memory_added:%d %d %lu", pid, dev, usage);
             return 0;
         }
     }
@@ -625,7 +574,7 @@ int add_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type
 
 // Lock-free memory remove using atomics with seqlock for consistent reads
 int rm_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type) {
-    LOG_INFO("rm_gpu_device_memory_lockfree:%d %d->%d %d:%lu", pid, cudadev, cuda_to_nvml_map(cudadev), type, usage);
+    LOG_INFO("rm_gpu_device_memory:%d %d->%d %d:%lu", pid, cudadev, cuda_to_nvml_map(cudadev), type, usage);
     int dev = cuda_to_nvml_map(cudadev);
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
@@ -662,7 +611,7 @@ int rm_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type)
         atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
 
         uint64_t new_total = atomic_load_explicit(&slot->used[dev].total, memory_order_acquire);
-        LOG_INFO("after delete_lockfree:%lu", new_total);
+        LOG_INFO("after delete:%lu", new_total);
         return 0;
     }
 
@@ -695,7 +644,7 @@ int rm_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type)
             atomic_fetch_add_explicit(&slot->seqlock, 1, memory_order_release);
 
             uint64_t new_total = atomic_load_explicit(&slot->used[dev].total, memory_order_acquire);
-            LOG_INFO("after delete_lockfree:%lu", new_total);
+            LOG_INFO("after delete:%lu", new_total);
             return 0;
         }
     }
@@ -706,7 +655,7 @@ int rm_gpu_device_memory_usage(int32_t pid, int cudadev, size_t usage, int type)
 
 void get_timespec(int seconds, struct timespec* spec) {
     struct timeval tv;
-    gettimeofday(&tv, NULL);  // struggle with clock_gettime version
+    gettimeofday(&tv, NULL);
     spec->tv_sec = tv.tv_sec + seconds;
     spec->tv_nsec = 0;
 }
@@ -816,48 +765,6 @@ static void lock_postinit_local(void) {
 
 static void unlock_postinit_local(void) {
     atomic_flag_clear_explicit(&postinit_local_lock, memory_order_release);
-}
-
-int fix_lock_shrreg() {
-    int res = 1;
-    if (region_info.fd == -1) {
-        // should never happen
-        LOG_ERROR("Uninitialized shrreg");
-    }
-    // upgrade
-    if (lockf(region_info.fd, F_LOCK, SHARED_REGION_SIZE_MAGIC) != 0) {
-        LOG_ERROR("Fail to upgraded lock: errno=%d", errno);
-    }
-    SEQ_POINT_MARK(SEQ_FIX_SHRREG_ACQUIRE_FLOCK_OK);
-
-    shared_region_t* region = region_info.shared_region;
-    int32_t current_owner = region->owner_pid;
-    if (current_owner != 0) {
-        int flag = 0;
-        if (current_owner == region_info.pid) {
-            LOG_INFO("Detect owner pid = self pid (%d), "
-                "indicates pid loopback or race condition", current_owner);
-            flag = 1;
-        } else {
-            int proc_status = proc_alive(current_owner);
-            if (proc_status == PROC_STATE_NONALIVE) {
-                LOG_INFO("Kick dead owner proc (%d)", current_owner);
-                flag = 1;
-            }
-        }
-        if (flag == 1) {
-            LOG_INFO("Take upgraded lock (%d)", region_info.pid);
-            region->owner_pid = region_info.pid;
-            SEQ_POINT_MARK(SEQ_FIX_SHRREG_UPDATE_OWNER_OK);
-            res = 0;     
-        }
-    }
-
-    if (lockf(region_info.fd, F_ULOCK, SHARED_REGION_SIZE_MAGIC) != 0) {
-        LOG_ERROR("Fail to upgraded unlock: errno=%d", errno);
-    }
-    SEQ_POINT_MARK(SEQ_FIX_SHRREG_RELEASE_FLOCK_OK);
-    return res;
 }
 
 void exit_withlock(int exitcode) {
@@ -1016,9 +923,7 @@ void lock_shrreg() {
         SEQ_POINT_MARK(SEQ_ACQUIRE_SEMLOCK_OK);
 
         if (status == 0) {
-            // TODO: irregular exit here will hang pending locks
             set_shrreg_lock_owner(region);
-            trials = 0;
             break;
         } else if (errno == ETIMEDOUT) {
             trials++;
@@ -1053,11 +958,7 @@ void lock_shrreg() {
             // If we're still waiting after many tries, something is seriously wrong
             if (trials > 30) {  // 30 × 10s = 5 minutes
                 LOG_ERROR("Cannot acquire lock after 5 minutes, owner=%ld", current_owner);
-                if (current_owner != 0 && proc_alive((int32_t)current_owner) == PROC_STATE_ALIVE) {
-                    LOG_ERROR("Owner is still ALIVE - this is a deadlock bug!");
-                } else {
-                    LOG_ERROR("This should not happen - please report this bug");
-                }
+                LOG_ERROR("This should not happen - please report this bug");
                 LOG_ERROR("Workaround: Delete /tmp/cudevshr.cache and restart all processes");
                 exit(-1);
             }
@@ -1074,7 +975,6 @@ void unlock_shrreg() {
 
     __sync_synchronize();
     region->owner_pid = 0;
-    // TODO: irregular exit here will hang pending locks
     SEQ_POINT_MARK(SEQ_RESET_OWNER_OK);
 
     sem_post(&region->sem);
@@ -1303,22 +1203,6 @@ void child_reinit_flag() {
     atomic_flag_clear_explicit(&postinit_local_lock, memory_order_release);
 }
 
-int set_active_oom_killer() {
-    char *oom_killer_env;
-    oom_killer_env = getenv("ACTIVE_OOM_KILLER");
-    if (oom_killer_env!=NULL){
-        if (strcmp(oom_killer_env,"false") == 0)
-            return 0;
-        if (strcmp(oom_killer_env,"true") == 0)
-            return 1;
-        if (strcmp(oom_killer_env,"0")==0)
-            return 0;
-        if (strcmp(oom_killer_env,"1")==0)
-            return 1;
-    }
-    return 1;
-}
-
 int set_env_utilization_switch() {
     char *utilization_env;
     utilization_env = getenv("GPU_CORE_UTILIZATION_POLICY");
@@ -1334,14 +1218,13 @@ int set_env_utilization_switch() {
 void try_create_shrreg() {
     LOG_DEBUG("Try create shrreg")
     if (region_info.fd == -1) {
-        // use .fd to indicate whether a reinit after fork happen
-        // no need to register exit handler after fork
+        // fd is initialized to -1 and only set after this check, so the exit
+        // handler is registered once; a fork child skips it (fd is already set)
         if (0 != atexit(exit_handler)) {
             LOG_ERROR("Register exit handler failed: %d", errno);
         }
     }
 
-    enable_active_oom_killer = set_active_oom_killer();
     env_utilization_switch = set_env_utilization_switch();
     pthread_atfork(NULL, NULL, child_reinit_flag);
 
@@ -1401,12 +1284,6 @@ void try_create_shrreg() {
                      "using default: %s", shr_reg_file);
         }
     }
-    // Initialize NVML BEFORE!! open it
-    //nvmlInit();
-
-    /* If you need sm modification, do it here */
-    /* ... set_sm_scale */
-
     int fd = open(shr_reg_file, O_RDWR | O_CREAT, 0666);
     if (fd == -1 && shr_reg_file_synthesized) {
         LOG_WARN("Fail to open synthesized shrreg %s: errno=%d, "
@@ -1446,7 +1323,6 @@ void try_create_shrreg() {
         LOG_ERROR("Fail to lock shrreg %s: errno=%d", shr_reg_file, errno);
         goto fail;
     }
-    //put_device_info();
     int32_t init_flag = atomic_load_explicit(&region->initialized_flag, memory_order_acquire);
     if (init_flag != MULTIPROCESS_SHARED_REGION_MAGIC_FLAG) {
         region->major_version = MAJOR_VERSION;
@@ -1498,7 +1374,6 @@ void try_create_shrreg() {
                 LOG_INFO("SM limit inconsistency detected for %dth device"
                     ", %lu expected, get %lu", 
                     i, local_limits[i], region->sm_limit[i]);
-            //    exit(1); 
             }
         }
     }
@@ -1640,7 +1515,6 @@ uint64_t get_current_device_memory_monitor(const int dev) {
         return 0;
     }
     uint64_t result = get_gpu_memory_monitor(dev);
-//    result= nvml_get_device_memory_usage(dev);
     return result;
 }
 
@@ -1654,14 +1528,9 @@ uint64_t get_current_device_memory_usage(const int dev) {
         return 0;
     }
     result = get_gpu_memory_usage(dev);
-//    result= nvml_get_device_memory_usage(dev);
     finish=clock();
     LOG_DEBUG("get_current_device_memory_usage:tick=%lu result=%lu\n",finish-start,result);
     return result;
-}
-
-int get_current_priority() {
-    return region_info.shared_region->priority;
 }
 
 int get_recent_kernel(){
@@ -1739,16 +1608,3 @@ shrreg_proc_slot_t *find_proc_by_hostpid(int hostpid) {
 }
 
 
-int comparelwr(const char *s1,char *s2){
-    if ((s1==NULL) || (s2==NULL))
-        return 1;
-    if (strlen(s1)!=strlen(s2)) {
-        return 1;
-    }
-    int i;
-    for (i=0;i<strlen(s1);i++)
-        if (tolower(s1[i])!=tolower(s2[i])){
-            return 1;
-        }
-    return 0;
-}

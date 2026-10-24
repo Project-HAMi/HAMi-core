@@ -37,24 +37,17 @@
 
 #define CUDA_DEVICE_MAX_COUNT 16
 #define CUDA_DEVICE_MEMORY_UPDATE_SUCCESS 0
-#define CUDA_DEVICE_MEMORY_UPDATE_FAILURE 1
-#define MEMORY_LIMIT_TOLERATION_RATE 1.1
 
 #define SHARED_REGION_SIZE_MAGIC  sizeof(shared_region_t)
 #define SHARED_REGION_MAX_PROCESS_NUM 1024
 
 // macros for debugging
-#define SEQ_FIX_SHRREG_ACQUIRE_FLOCK_OK 0
-#define SEQ_FIX_SHRREG_UPDATE_OWNER_OK 1
-#define SEQ_FIX_SHRREG_RELEASE_FLOCK_OK 2
 #define SEQ_ACQUIRE_SEMLOCK_OK 3
 #define SEQ_UPDATE_OWNER_OK 4
 #define SEQ_RESET_OWNER_OK 5
 #define SEQ_RELEASE_SEMLOCK_OK 6
 #define SEQ_BEFORE_UNLOCK_SHRREG 7
 
-#define SEQ_AFTER_INC 8
-#define SEQ_AFTER_DEC 9
 #define SEQ_BEFORE_ACQUIRE_SEMLOCK 10
 
 #ifdef SHRREG_SEQUENCE_POINT_CALLBACK
@@ -128,11 +121,6 @@ typedef struct {
 } shared_region_info_t;
 
 
-typedef struct {
-  size_t tid;
-  CUcontext ctx;
-} thread_context_map;
-
 void ensure_initialized();
 
 int is_gpu_core_limit_enabled(void);
@@ -149,7 +137,6 @@ size_t get_gpu_memory_usage(const int dev);
 size_t get_limit_from_env(const char* env_name);
 
 // Priority-related
-int get_current_priority();
 int set_recent_kernel(int value);
 int get_recent_kernel();
 int cas_recent_kernel(int expected, int desired);
@@ -163,17 +150,11 @@ int add_gpu_device_memory_usage(int32_t pid,int dev,size_t usage,int type);
 int rm_gpu_device_memory_usage(int32_t pid,int dev,size_t usage,int type);
 
 shrreg_proc_slot_t *find_proc_by_hostpid(int hostpid);
-int active_oom_killer();
 void pre_launch_kernel();
 
 int shrreg_major_version();
 int shrreg_minor_version();
 int init_device_info();
-
-//void inc_current_device_memory_usage(const int dev, const uint64_t usage);
-//void decl_current_device_memory_usage(const int dev, const uint64_t usage);
-
-//int oom_check(const int dev,int addon);
 
 void lock_shrreg();
 void unlock_shrreg();
@@ -183,7 +164,6 @@ void unlock_postinit();
 
 //Setspec of the corresponding device
 int setspec();
-//Remove quit process
 
 void suspend_all();
 void resume_all();
@@ -192,8 +172,6 @@ int wait_status_all(int status);
 void print_all();
 
 int load_env_from_file(char *filename);
-int comparelwr(const char *s1,char *s2);
-int put_device_info();
 unsigned int nvml_to_cuda_map(unsigned int nvmldev);
 unsigned int cuda_to_nvml_map(unsigned int cudadev);
 

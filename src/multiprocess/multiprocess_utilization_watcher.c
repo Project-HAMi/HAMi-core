@@ -16,8 +16,6 @@
 #include <cuda.h>
 #include "include/nvml_prefix.h"
 #include <nvml.h>
-#include <sys/time.h>
-#include <sys/wait.h>
 
 #include "multiprocess/multiprocess_memory_limit.h"
 #include "multiprocess/multiprocess_utilization_watcher.h"
@@ -278,8 +276,6 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
 
       unlock_shrreg();
 
-      if (sum < 0)
-        sum = 0;
       userutil[cudadev] = sum;
     }
     return 0;
@@ -357,6 +353,4 @@ void init_utilization_watcher() {
     if (has_limit) {
         pthread_create(&tid, NULL, utilization_watcher, NULL);
     }
-    return;
 }
-
