@@ -958,11 +958,7 @@ void lock_shrreg() {
             // If we're still waiting after many tries, something is seriously wrong
             if (trials > 30) {  // 30 × 10s = 5 minutes
                 LOG_ERROR("Cannot acquire lock after 5 minutes, owner=%ld", current_owner);
-                if (current_owner != 0 && proc_alive((int32_t)current_owner) == PROC_STATE_ALIVE) {
-                    LOG_ERROR("Owner is still ALIVE - this is a deadlock bug!");
-                } else {
-                    LOG_ERROR("This should not happen - please report this bug");
-                }
+                LOG_ERROR("This should not happen - please report this bug");
                 LOG_ERROR("Workaround: Delete /tmp/cudevshr.cache and restart all processes");
                 exit(-1);
             }
