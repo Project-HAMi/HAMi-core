@@ -68,6 +68,12 @@ export CUDA_DEVICE_MEMORY_LIMIT=1g
 export CUDA_DEVICE_SM_LIMIT=50
 ```
 
+CUDAアプリケーションをローカルで実行する場合は、まずローカルディレクトリを作成してください。
+
+```
+mkdir /tmp/vgpulock/
+```
+
 `CUDA_DEVICE_MEMORY_LIMIT`または`CUDA_DEVICE_SM_LIMIT`を更新した場合は、ローカルキャッシュファイルを削除してください。
 
 ```

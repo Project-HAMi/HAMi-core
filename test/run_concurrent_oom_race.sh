@@ -27,6 +27,7 @@ if [[ ! -x "$BIN" ]]; then
   exit 1
 fi
 
+mkdir -p /tmp/vgpulock
 rm -f "$CACHE"
 
 export LD_PRELOAD="$LIB"

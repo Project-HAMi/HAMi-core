@@ -13,6 +13,7 @@
  * Build: discovered by test/CMakeLists.txt via ./build.sh
  *
  * Run (GPU + libvgpu required):
+ *   mkdir -p /tmp/vgpulock
  *   CACHE=/tmp/hami_oom_race.cache
  *   rm -f "$CACHE"
  *   export LD_PRELOAD=$PWD/build/libvgpu.so
