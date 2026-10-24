@@ -17,9 +17,11 @@
  *     postInit file lock)
  *
  * Why cuInit(): in HAMi-core, cuInit() ends by calling ensure_post_init(),
- * which runs postInit() once per process. postInit() takes the shared
- * cross-process fcntl record lock (lock_postinit) and calls set_task_pid()
- * before releasing it. set_task_pid() runs nvmlInit(), scans running
+ * which runs postInit() once per process. When the host PID broker is not
+ * used (LIBVGPU_HOSTPID_BROKER disabled) or its query fails, postInit() takes
+ * the shared cross-process fcntl record lock (lock_postinit) and calls
+ * set_task_pid() before releasing it. A successful broker query skips both, so
+ * run without the broker to measure lock contention. set_task_pid() runs nvmlInit(), scans running
  * processes twice, and retains a primary CUDA context. Because the
  * lock serializes set_task_pid() across every process on the node,
  * timing cuInit() captures the contention this issue is about.
