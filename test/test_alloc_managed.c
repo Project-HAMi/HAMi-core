@@ -10,11 +10,6 @@ size_t usage = 0;
 
 int test(CUdeviceptr *dptr,size_t bytes) {
     CHECK_DRV_API(cuMemAllocManaged(dptr, bytes, CU_MEM_ATTACH_GLOBAL));
-//    CHECK_NVML_API(get_current_memory_usage(&usage));
-//    CHECK_DRV_API(cuMemFree(dptr));
-//    CHECK_NVML_API(get_current_memory_usage(&usage));
-    
-//    printf("\n");
     return 0;
 }
 

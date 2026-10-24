@@ -29,6 +29,7 @@
 #include <cuda_runtime.h>
 #include <unistd.h>
 #include <time.h>
+#include <math.h>
 
 #define CHECK_CUDA(call) \
     do { \
@@ -186,6 +187,7 @@ int main(int argc, char** argv) {
     double min_time = args[0].elapsed_time < args[1].elapsed_time ?
                       args[0].elapsed_time : args[1].elapsed_time;
     double ratio = max_time / min_time;
+    int failed = 0;
 
     if (ratio < 1.2) {
         printf("[PASS] Both GPUs completed in similar time (ratio=%.2fx)\n", ratio);
@@ -195,6 +197,7 @@ int main(int argc, char** argv) {
         printf("[FAIL] Significant time difference (ratio=%.2fx)\n", ratio);
         printf("       One GPU may have been BLOCKED by the other.\n");
         printf("       This could indicate SHARED token pool.\n");
+        failed = 1;
     }
 
     printf("\n[NOTE] Test prerequisites:\n");
@@ -202,5 +205,5 @@ int main(int argc, char** argv) {
     printf("       export CUDA_DEVICE_SM_LIMIT=25\n");
     printf("       export GPU_CORE_UTILIZATION_POLICY=FORCE\n");
 
-    return 0;
+    return failed;
 }
