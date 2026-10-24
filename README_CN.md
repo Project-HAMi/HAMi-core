@@ -37,7 +37,7 @@ flowchart TD
 
 ### 环境依赖
 
-- CMake >= 2.8.12
+- CMake >= 3.18
 - 可用的 CUDA 工具链（`CUDA_HOME`，默认 `/usr/local/cuda`）
 - 如需容器化编译，还需要 Docker
 
