@@ -1,5 +1,3 @@
-#define MAX_PIDS 1024
-
 #define CAS(ptr, old, new) __sync_bool_compare_and_swap((ptr), (old), (new))
 
 #define MILLISEC (1000UL * 1000UL)
@@ -20,4 +18,3 @@ static const struct timespec g_wait = {
 void rate_limiter(int grids, int blocks);
 void init_utilization_watcher();
 void* utilization_watcher();
-int setspec();
