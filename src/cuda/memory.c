@@ -8,42 +8,6 @@
 
 extern int pidfound;
 
-const size_t cuarray_format_bytes[33] = {
-    0,  // 0x00
-    1,  // CU_AD_FORMAT_UNSIGNED_INT8 = 0x01
-    2,  // CU_AD_FORMAT_UNSIGNED_INT16 = 0x02
-    4,  // CU_AD_FORMAT_UNSIGNED_INT32 = 0x03
-    0,  // 0x04
-    0,  // 0x05
-    0,  // 0x06
-    0,  // 0x07
-    1,  // CU_AD_FORMAT_SIGNED_INT8 = 0x08
-    2,  // CU_AD_FORMAT_SIGNED_INT16 = 0x09
-    4,  // CU_AD_FORMAT_SIGNED_INT32 = 0x0a
-    0,  // 0x0b
-    0,  // 0x0c
-    0,  // 0x0d
-    0,  // 0x0e
-    0,  // 0x0f
-    2,  // CU_AD_FORMAT_HALF = 0x10
-    0,  // 0x11
-    0,  // 0x12
-    0,  // 0x13
-    0,  // 0x14
-    0,  // 0x15
-    0,  // 0x16
-    0,  // 0x17
-    0,  // 0x18
-    0,  // 0x19
-    0,  // 0x1a
-    0,  // 0x1b
-    0,  // 0x1c
-    0,  // 0x1d
-    0,  // 0x1e
-    0,  // 0x1f       
-    4   // CU_AD_FORMAT_FLOAT = 0x20
-};
-
 extern void rate_limiter(int grids, int blocks);
 
 int check_oom() {
@@ -51,45 +15,6 @@ int check_oom() {
     CUdevice dev;
     CHECK_DRV_API(cuCtxGetDevice(&dev));
     return oom_check(dev,0);
-}
-
-uint64_t compute_3d_array_alloc_bytes(const CUDA_ARRAY3D_DESCRIPTOR* desc) {
-    if (desc==NULL) {
-        LOG_WARN("compute_3d_array_alloc_bytes desc is null");
-    }else{
-        LOG_DEBUG("compute_3d_array_alloc_bytes height=%ld width=%ld",desc->Height,desc->Width);
-    }
-    uint64_t bytes = desc->Width * desc->NumChannels;
-    if (desc->Height != 0) {
-        bytes *= desc->Height;
-    }
-    if (desc->Depth != 0) {
-        bytes *= desc->Depth;
-    }
-    bytes *= cuarray_format_bytes[desc->Format];
-
-    // TODO: take account of alignment and etc
-    // bytes ++ ???
-    return bytes;
-}
-
-
-uint64_t compute_array_alloc_bytes(const CUDA_ARRAY_DESCRIPTOR* desc) {
-    if (desc==NULL) {
-        LOG_WARN("compute_array_alloc_bytes desc is null");
-    }else{
-        LOG_DEBUG("compute_array_alloc_bytes height=%ld width=%ld",desc->Height,desc->Width);
-    }
-
-    uint64_t bytes = desc->Width * desc->NumChannels;
-    if (desc->Height != 0) {
-        bytes *= desc->Height;
-    }
-    bytes *= cuarray_format_bytes[desc->Format];
-
-    // TODO: take account of alignment and etc
-    // bytes ++ ???
-    return bytes;
 }
 
 CUresult cuArray3DCreate_v2(CUarray* arr, const CUDA_ARRAY3D_DESCRIPTOR* desc) {
@@ -214,10 +139,6 @@ CUresult cuMemFree_v2(CUdeviceptr dptr) {
 
 
 CUresult cuMemFreeHost(void* hptr) {
-    /*CUdeviceptr dptr;*/
-    /*CHECK_DRV_API(cuMemHostGetDevicePointer(&dptr, hptr, 0));*/
-    /*size_t bytesize;*/
-    /*CHECK_DRV_API(cuMemGetAddressRange(NULL, &bytesize, dptr));*/
     LOG_DEBUG("cuMemFreeHost_v2 hptr=%p",hptr);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemFreeHost, hptr);
     return res;
@@ -240,15 +161,8 @@ CUresult cuMemHostAlloc(void** hptr, size_t bytesize, unsigned int flags) {
 
 
 CUresult cuMemHostRegister_v2(void* hptr, size_t bytesize, unsigned int flags) {
-    /*int trackable = 1;*/
-    /*if (flags != CU_MEMHOSTREGISTER_DEVICEMAP) {*/
-    /*    fprintf(stderr, "only CU_MEMHOSTREGISTER_DEVICEMAP can be freed, current=%u\n", flags);*/
-    /*    trackable = 0;*/
-    /*}*/
     // TODO: process flags properly
     LOG_DEBUG("cuMemHostRegister_v2 hptr=%p bytesize=%ld",hptr,bytesize);
-    CUdevice dev;
-    cuCtxGetDevice(&dev);
     ENSURE_RUNNING();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemHostRegister_v2, hptr, bytesize, flags);
     LOG_DEBUG("cuMemHostRegister_v2 returned :%d(%p:%ld)",res,hptr,bytesize);
@@ -259,29 +173,14 @@ CUresult cuMemHostRegister_v2(void* hptr, size_t bytesize, unsigned int flags) {
         CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemHostUnregister, hptr);
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
-    //LOG_WARN("222:%d(%p:%ld)",res,hptr,bytesize);
     return res;
-    //return CUDA_SUCCESS;
 }
 
 
 CUresult cuMemHostUnregister(void* hptr) {
-    /*CUdeviceptr dptr;*/
-    /*CUresult flag = cuMemHostGetDevicePointer(&dptr, hptr, 0);*/
-    /*size_t bytesize = 0;*/
-    /*if (flag == CUDA_SUCCESS) {*/
-    /*    // only device map registry is trackable*/
-    /*    CHECK_DRV_API(cuMemGetAddressRange(NULL, &bytesize, dptr));*/
-    /*}*/
     LOG_DEBUG("cuMemHostUnregister hptr=%p",hptr);
     ENSURE_RUNNING();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemHostUnregister, hptr);
-    
-    /*if (flag == CUDA_SUCCESS && bytesize > 0) {*/
-    /*    // only device map registry is trackable*/
-    /*    DECL_MEMORY_ON_SUCCESS(res, bytesize);*/
-    /*}*/
-    //return CUDA_SUCCESS;    
     return res;
 }
 
@@ -311,7 +210,6 @@ CUresult cuPointerGetAttributes ( unsigned int  numAttributes, CUpointer_attribu
     for (cur=0;cur<numAttributes;cur++){
         if (attributes[cur]==CU_POINTER_ATTRIBUTE_MEMORY_TYPE){
             int j = check_memory_type(ptr);
-            //*(int *)(data[cur])=1;
             LOG_DEBUG("check result = %d %d",j,*(int *)(data[cur]));
         }
     }
@@ -686,7 +584,6 @@ CUresult cuMemFreeAsync(CUdeviceptr dptr, CUstream hStream) {
         return CUDA_SUCCESS;
     }
     CUresult res = free_raw_async(dptr,hStream);
-    //CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemFreeAsync,dptr,hStream); 
     LOG_DEBUG("after free_raw_async dptr=%p res=%d",(void *)dptr,res);
     return res;
 }
@@ -765,52 +662,26 @@ CUresult cuMemPoolImportPointer(CUdeviceptr *ptr_out, CUmemoryPool pool, CUmemPo
     LOG_DEBUG("cuMemPoolImportPointer");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemPoolImportPointer,ptr_out,pool,shareData);
 }
-/*
-CUresult cuMemcpy2D(const CUDA_MEMCPY2D *pCopy) {
-    LOG_DEBUG("cuMemcpy2D");
-    return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemcpy2D,pCopy);
-}*/
 
 CUresult cuMemcpy2D_v2(const CUDA_MEMCPY2D *pCopy) {
     LOG_DEBUG("cuMemcpy2D_v2");
     return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemcpy2D, pCopy);
 }
-/*
-CUresult cuMemcpy2DUnaligned(const CUDA_MEMCPY2D *pCopy) {
-    LOG_DEBUG("cuMemcpy2DUnaligned");
-    return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemcpy2DUnaligned,pCopy);
-}*/
 
 CUresult cuMemcpy2DUnaligned_v2(const CUDA_MEMCPY2D *pCopy) {
     LOG_DEBUG("cuMemcpy2DUnaligned_v2");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemcpy2DUnaligned_v2,pCopy);
 }
-/*
-CUresult cuMemcpy2DAsync(const CUDA_MEMCPY2D *pCopy, CUstream hStream) {
-    LOG_DEBUG("cuMemcpy2DAsync");
-    return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemcpy2DAsync,pCopy,hStream);
-}*/
 
 CUresult cuMemcpy2DAsync_v2(const CUDA_MEMCPY2D *pCopy, CUstream hStream) {
     LOG_DEBUG("cuMemcpy2DAsync_v2");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemcpy2DAsync,pCopy,hStream);
 }
 
-/*
-CUresult cuMemcpy3D(const CUDA_MEMCPY3D *pCopy) {
-    LOG_DEBUG("cuMemcpy3D");
-    return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemcpy3D,pCopy);
-}*/
-
 CUresult cuMemcpy3D_v2(const CUDA_MEMCPY3D *pCopy) {
     LOG_DEBUG("cuMemcpy3D_v2");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemcpy3D_v2,pCopy);
 }
-/*
-CUresult cuMemcpy3DAsync(const CUDA_MEMCPY3D *pCopy, CUstream hStream) {
-    LOG_DEBUG("cuMemcpy3DAsync");
-    return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemcpy3DAsync,pCopy,hStream);
-}*/
 
 CUresult cuMemcpy3DAsync_v2(const CUDA_MEMCPY3D *pCopy, CUstream hStream) {
     LOG_DEBUG("cuMemcpy3DAsync_v2");
