@@ -23,11 +23,10 @@ if [[ ! -f "$LIB" ]]; then
   exit 1
 fi
 if [[ ! -x "$BIN" ]]; then
-  echo "missing $BIN — rebuild so test/CMakeLists.txt picks up the new test" >&2
+  echo "missing $BIN — build it first: (cd \"$ROOT\" && ./build.sh)" >&2
   exit 1
 fi
 
-mkdir -p /tmp/vgpulock
 rm -f "$CACHE"
 
 export LD_PRELOAD="$LIB"

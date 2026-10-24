@@ -1,7 +1,7 @@
 /*
- * Reproducer: cross-process cuMemAlloc TOCTOU against the shared memory limit.
+ * Regression test: cross-process cuMemAlloc TOCTOU against the shared memory limit.
  *
- * Vanilla add_chunk() (src/allocator/allocator.c):
+ * Without inter-process reservation, add_chunk() (src/allocator/allocator.c) would:
  *   1) oom_check(usage + size)   // no inter-process lock / reservation
  *   2) real cuMemAlloc
  *   3) pthread_mutex (process-local) + oom_check again + add_gpu_device_memory_usage
@@ -13,7 +13,6 @@
  * Build: discovered by test/CMakeLists.txt via ./build.sh
  *
  * Run (GPU + libvgpu required):
- *   mkdir -p /tmp/vgpulock
  *   CACHE=/tmp/hami_oom_race.cache
  *   rm -f "$CACHE"
  *   export LD_PRELOAD=$PWD/build/libvgpu.so
@@ -28,8 +27,8 @@
  * Suggested sizing: limit=1024m, alloc=600m so each request fits alone
  * (after two process contexts) but 2*alloc exceeds the limit.
  * Exit codes:
- *   0  race reproduced (both concurrent allocs succeeded)  OR  --expect-fixed
- *      mode and limit held for all rounds
+ *   0  race observed (both concurrent allocs succeeded, default mode)  OR
+ *      --expect-fixed mode and limit held for all rounds
  *   1  setup / sequential control failure
  *   2  race not observed within rounds (inconclusive under default mode)
  */
@@ -314,7 +313,7 @@ int main(int argc, char **argv) {
         rounds = (int)rounds_sz;
     }
 
-    printf("=== HAMi-core concurrent oom_check race reproducer ===\n");
+    printf("=== HAMi-core concurrent oom_check race test ===\n");
     printf("LD_PRELOAD=%s\n", preload ? preload : "(unset — libvgpu will not hook)");
     printf("CUDA_DEVICE_MEMORY_LIMIT=%s\n", limit_env ? limit_env : "(unset)");
     printf("CUDA_DEVICE_MEMORY_SHARED_CACHE=%s\n",
@@ -488,7 +487,7 @@ int main(int argc, char **argv) {
             printf("[round %d] RACE: both succeeded (res=%s / %s)\n", i,
                    cu_res_name(st->child_res[0]), cu_res_name(st->child_res[1]));
             if (!expect_fixed) {
-                /* One hit is enough to prove the bug. */
+                /* One hit is enough to show the race. */
                 break;
             }
         } else if (!st->child_ok[0] && !st->child_ok[1]) {
@@ -525,7 +524,7 @@ int main(int argc, char **argv) {
     }
 
     if (race_hits > 0) {
-        printf("BUG REPRODUCED: concurrent allocs both passed oom_check while "
+        printf("RACE OBSERVED: concurrent allocs both passed oom_check while "
                "sum exceeds limit\n");
         return 0;
     }
