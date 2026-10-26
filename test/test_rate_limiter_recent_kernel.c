@@ -91,6 +91,10 @@ int main(void) {
     check(g_cur_cuda_cores[0] == 1000 - 10 - 128,
           "tokens are charged per thread, not per block");
 
+    run(50, 1, 0);
+    rate_limiter(INT64_MAX / 2 + 1, 4);
+    check(g_cur_cuda_cores[0] < 0, "huge launch saturates instead of wrapping");
+
     run(100, 0, 0);
     check(fake_recent_kernel == 0, "no limit: recent_kernel untouched");
     run(0, 0, 0);

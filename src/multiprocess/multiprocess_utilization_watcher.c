@@ -43,7 +43,9 @@ void rate_limiter(int64_t grids, int64_t blocks) {
   int64_t after_cuda_cores = 0;
   /* Charge by thread count: grid count alone barely charges kernels with few,
    * long-running blocks (large GEMMs), so the bucket never runs dry. */
-  int64_t kernel_size = grids * blocks;
+  int64_t kernel_size = (blocks != 0 && grids > INT64_MAX / blocks)
+                            ? INT64_MAX
+                            : grids * blocks;
 
   /* Fast exit using cached values — no shared memory access needed */
   if (cached_sm_limit[device_id] >= 100 || cached_sm_limit[device_id] == 0) {
