@@ -15,6 +15,7 @@ Welcome to HAMi-core!
     - [File an Issue](#file-an-issue)
 - [Contributor Workflow](#contributor-workflow)
   - [Creating Pull Requests](#creating-pull-requests)
+  - [Issue and PR Lifecycle](#issue-and-pr-lifecycle)
   - [Code Review](#code-review)
 
 # Before you get started
@@ -74,7 +75,7 @@ labels for issues that should not require deep knowledge of the system.
 We can help new contributors who wish to work on such issues.
 
 Another good way to contribute is to find documentation improvements, such as fixing missing or broken links.
-Please see [Contributing](#contributing) below for the workflow.
+Please see [Contributor Workflow](#contributor-workflow) below for the workflow.
 
 #### Work on an issue
 
@@ -85,7 +86,7 @@ When you are willing to take on an issue, simply reply to the issue and a mainta
 While we encourage everyone to contribute code, we also appreciate when someone reports an issue.
 Issues should be filed under the appropriate HAMi sub-repository.
 
-*Example:* A HAMi-core issue should be opened in [Project-HAMi/HAMi-core](https://github.com/Project-HAMi/HAMI-core/issues).
+*Example:* A HAMi-core issue should be opened in [Project-HAMi/HAMi-core](https://github.com/Project-HAMi/HAMi-core/issues).
 
 Please follow the provided submission guidelines when opening an issue.
 
@@ -108,6 +109,7 @@ To submit a proposed change, please develop the code/fix and add new test cases.
 Before submitting a pull request, run these local verifications to predict whether continuous integration will pass or fail:
 
 * Run `make build-in-docker`
+* Run `make check-cuda-hook-consistency`
 
 ## Issue and PR Lifecycle
 

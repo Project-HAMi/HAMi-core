@@ -1,28 +1,24 @@
-// Reproducer for Project-HAMi/HAMi-core issue #93 (the same untracked-free leak
-// class reported in #67): cuMemAllocFromPoolAsync allocations are invisible to
-// libvgpu, so the matching cuMemFreeAsync is rejected.
+// Regression test for Project-HAMi/HAMi-core issue #93 (the same untracked-free
+// leak class reported in #67): allocations made with cuMemAllocFromPoolAsync
+// must be tracked by libvgpu so the matching cuMemFreeAsync is accepted.
 //
-// Mechanism (src/cuda/memory.c + src/allocator/allocator.c on main):
+// Mechanism (src/cuda/memory.c + src/allocator/allocator.c):
 //   cuMemFreeAsync() -> free_raw_async() -> remove_chunk_async() walks the
-//   device_allocasync list for the pointer. cuMemAllocAsync() registers there
-//   (via add_chunk_async); cuMemAllocFromPoolAsync() is a bare pass-through and
-//   never does. For a pool-explicit allocation the pointer is not found, so
-//   remove_chunk_async() returns -1 WITHOUT calling the real cuMemFreeAsync:
-//     (a) -1 surfaces as a CUresult -> "unrecognized error code", and
-//     (b) the real free is skipped -> the device allocation leaks.
+//   device_allocasync list for the pointer. cuMemAllocAsync() and
+//   cuMemAllocFromPoolAsync() (via allocate_from_pool_async_raw) both register
+//   there, so both frees must return CUDA_SUCCESS.
 //
-// Path [A] (default pool) is the control: it IS tracked, so it still frees
-// cleanly under libvgpu. Path [B] (explicit pool) is the bug. On stock CUDA
-// (no LD_PRELOAD) both paths return CUDA_SUCCESS.
+// Path [A] uses the default pool and path [B] an explicit pool. On stock CUDA
+// (no LD_PRELOAD) both paths return CUDA_SUCCESS too.
 //
 // Build (standalone, no HAMi headers needed):
 //   gcc test_alloc_pool_async.c -o test_alloc_pool_async \
 //       -I/usr/local/cuda/include -L/usr/local/cuda/lib64/stubs -lcuda
-// Or drop into HAMi-core/test/ and `make build-in-docker` (auto-discovered).
+// Or drop into HAMi-core/test/ and `make build-in-docker`.
 //
 // Run baseline (no libvgpu, expect PASS):
 //   ./test_alloc_pool_async
-// Run under libvgpu (expect FAIL until fixed):
+// Run under libvgpu (expect PASS):
 //   LD_PRELOAD=/path/to/libvgpu.so CUDA_DEVICE_MEMORY_LIMIT=2g \
 //     LIBCUDA_LOG_LEVEL=1 ./test_alloc_pool_async
 
@@ -90,7 +86,7 @@ int main(void) {
             failures++;
     }
 
-    /* [B] Bug: explicit-pool async path. libvgpu never tracks this one. */
+    /* [B] Explicit-pool async path. */
     printf("[B] cuMemAllocFromPoolAsync + cuMemFreeAsync (explicit pool)\n");
     {
         CUmemPoolProps props;
@@ -115,7 +111,7 @@ int main(void) {
     }
 
     printf("\nResult: %s\n",
-           failures ? "FAIL - pool-async free rejected (issue #93 reproduced)"
+           failures ? "FAIL - pool-async free rejected (issue #93 regression)"
                     : "PASS - both async free paths accepted");
 
     cuStreamDestroy(stream);

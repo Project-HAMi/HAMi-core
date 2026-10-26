@@ -409,10 +409,6 @@ set_tests_properties(hostpid_race PROPERTIES
 add_custom_target(python_test ALL
     COMMAND cp -r ${CMAKE_CURRENT_SOURCE_DIR}/python ${CMAKE_CURRENT_BINARY_DIR})
 
-# add_custom_target(multiprocess_test_scripts ALL
-#    COMMAND cp -r ${CMAKE_CURRENT_SOURCE_DIR}/multiprocess/scripts
-#                  ${CMAKE_CURRENT_BINARY_DIR}/multiprocess)
-
 add_test(NAME cuda_memory_compat COMMAND test_cuda_memory_compat)
 set_tests_properties(cuda_memory_compat PROPERTIES
     ENVIRONMENT "LIBCUDA_LOG_LEVEL=4"
