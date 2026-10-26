@@ -12,7 +12,6 @@
 
 #include "include/log_utils.h"
 #include "static_config.h"
-//#include "memory_limit.h"
 
 #define ENSURE_INITIALIZED() ensure_initialized();        \
 
@@ -20,14 +19,7 @@ extern void load_cuda_libraries();
 
 #if defined(__GNUC__) && defined(__GLIBC__)
 
-#define FUNC_ATTR_VISIBLE  __attribute__((visibility("default"))) 
-#define FUNC_PTR_TYPE(fname) __func_ptr_type_##fname
-#define FUNC_PTR_NAME(fname) __func_ptr_origin_##fname
-#define FUNC_PTR_ALIAS_ATTR(overrided)                           \
-        __attribute__((alias(#overrided), used))                 \
-        FUNC_ATTR_VISIBLE;                                       \
-
-#define FUNC_OVERRIDE_NAME(fname) overrided_##fname
+#define FUNC_ATTR_VISIBLE  __attribute__((visibility("default")))
 
 #if defined(DLSYM_HOOK_DEBUG)
 #define DLSYM_HOOK_FUNC(f)                                       \
@@ -35,19 +27,11 @@ extern void load_cuda_libraries();
         LOG_DEBUG("Detect dlsym for %s\n", #f);                  \
         return (void*) f; }                                      \
 
-#define DLSYM_HOOK_FUNC_REPLACE(f)                               \
-    if (0 == strcmp(symbol, hacked_#f)) {                        \
-        return (void*) f; }                                      \
-
 #else 
 
 #define DLSYM_HOOK_FUNC(f)                                       \
     if (0 == strcmp(symbol, #f)) {                               \
         return (void*) f; }                                      \
-
-#define DLSYM_HOOK_FUNC_REPLACE(f)                               \
-    if (0 == strcmp(symbol, #f)) {                        \
-        return (void*) hacked_##f; }                                      \
 
 #endif     
 
@@ -60,10 +44,6 @@ typedef void* (*fp_dlsym)(void*, const char*);
 #error error, neither __GLIBC__ nor __GNUC__ defined
 
 #endif
-
-/* Determine the return address.  */
-#define RETURN_ADDRESS(nr) \
-  __builtin_extract_return_addr (__builtin_return_address (nr))
 
 nvmlReturn_t set_task_pid();
 // UNKNOWN means the broker query failed; NOT_FOUND means no shared PID slot.

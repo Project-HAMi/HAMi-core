@@ -8,7 +8,6 @@
 
 CUresult CUDAAPI cuDeviceGetAttribute ( int* pi, CUdevice_attribute attrib, CUdevice dev ) {
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDeviceGetAttribute,pi,attrib,dev);
-    //LOG_DEBUG("[%d]cuDeviceGetAttribute dev=%d attrib=%d %d",res,dev,(int)attrib,*pi);
     return res;
 }
 
@@ -102,7 +101,6 @@ CUresult cuDriverGetVersion(int *driverVersion) {
     dlsym(RTLD_DEFAULT,"cuDriverGetVersion");
 
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDriverGetVersion,driverVersion);
-    //*driverVersion=11030;
     if ((res==CUDA_SUCCESS) && (driverVersion!=NULL)) {
         LOG_INFO("driver version=%d",*driverVersion);
     }

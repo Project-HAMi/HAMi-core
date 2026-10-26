@@ -100,15 +100,5 @@ void log_utils_init(void);
         return res;                           \
     } }                                       \
 
-#define CHECK_SUCCESS(res) {                  \
-    if (res != CUDA_SUCCESS)                  \
-        return res;                           \
-}
-
-#define IF_CHECK_OOM(res) {                   \
-    if (res < 0)                              \
-        return CUDA_ERROR_OUT_OF_MEMORY;      \
-}
-
 
 #endif

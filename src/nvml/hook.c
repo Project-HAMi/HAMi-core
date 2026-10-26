@@ -250,7 +250,6 @@ entry_t nvml_library_entry[] = {
     {.name = "nvmlDeviceGetComputeRunningProcesses_v2"},
     {.name = "nvmlDeviceGetGraphicsRunningProcesses_v2"},
     {.name = "nvmlDeviceSetTemperatureThreshold"},
-    //{.name = "nvmlRetry_NvRmControl"},
     {.name = "nvmlVgpuInstanceGetGpuInstanceId"},
     {.name = "nvmlVgpuTypeGetGpuInstanceProfileId"},
 };
@@ -260,7 +259,6 @@ pthread_once_t init_virtual_map_post_flag = PTHREAD_ONCE_INIT;
 
 typedef void* (*fp_dlsym)(void*, const char*);
 extern fp_dlsym real_dlsym;
-extern int virtual_nvml_devices;
 extern int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 
 nvmlReturn_t nvmlDeviceGetIndex(nvmlDevice_t device, unsigned int *index) {
