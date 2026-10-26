@@ -37,7 +37,7 @@ flowchart TD
 
 ### Prerequisites
 
-- CMake >= 2.8.12
+- CMake >= 3.18
 - A working CUDA toolkit (`CUDA_HOME`, default `/usr/local/cuda`)
 - Docker, if you prefer the containerized build
 
