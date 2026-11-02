@@ -588,6 +588,22 @@ CUresult cuMemFreeAsync(CUdeviceptr dptr, CUstream hStream) {
     return res;
 }
 
+/* Graph memory comes from the device graph pool at launch. Reject nodes that
+ * would exceed the limit given current usage. Check only, nothing is
+ * charged, so several graphs can together exceed the limit; per-graph
+ * accounting needs release hooks on graph/exec destroy. */
+CUresult cuGraphAddMemAllocNode(CUgraphNode *phGraphNode, CUgraph hGraph,
+        const CUgraphNode *dependencies, size_t numDependencies,
+        CUDA_MEM_ALLOC_NODE_PARAMS *nodeParams) {
+    LOG_DEBUG("cuGraphAddMemAllocNode");
+    if (nodeParams != NULL && nodeParams->poolProps.location.type == CU_MEM_LOCATION_TYPE_DEVICE
+            && oom_check(nodeParams->poolProps.location.id, nodeParams->bytesize)) {
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphAddMemAllocNode,
+        phGraphNode, hGraph, dependencies, numDependencies, nodeParams);
+}
+
 CUresult cuMemHostGetDevicePointer_v2(CUdeviceptr *pdptr, void *p, unsigned int Flags){
     LOG_INFO("cuMemHostGetDevicePointer");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemHostGetDevicePointer_v2,pdptr,p,Flags);

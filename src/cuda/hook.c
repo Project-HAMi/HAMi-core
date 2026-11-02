@@ -142,6 +142,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemAllocAsync"},
     {.name = "cuMemFreeAsync"},
     {.name = "cuStreamIsCapturing"},
+    {.name = "cuGraphAddMemAllocNode"},
     /* memory APIs */
     {.name = "cuMemHostGetDevicePointer_v2"},
     {.name = "cuMemHostGetFlags"},
