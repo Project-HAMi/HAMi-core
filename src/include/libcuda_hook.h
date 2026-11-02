@@ -261,6 +261,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuGraphDestroyNode),
     CUDA_OVERRIDE_ENUM(cuGraphInstantiate),
     CUDA_OVERRIDE_ENUM(cuGraphInstantiateWithFlags),
+    CUDA_OVERRIDE_ENUM(cuGraphInstantiateWithParams),
     CUDA_OVERRIDE_ENUM(cuGraphUpload),
     CUDA_OVERRIDE_ENUM(cuGraphLaunch),
     CUDA_OVERRIDE_ENUM(cuGraphExecDestroy),

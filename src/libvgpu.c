@@ -362,6 +362,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuGraphDestroyNode);
     DLSYM_HOOK_FUNC(cuGraphInstantiate);
     DLSYM_HOOK_FUNC(cuGraphInstantiateWithFlags);
+    DLSYM_HOOK_FUNC(cuGraphInstantiateWithParams);
     DLSYM_HOOK_FUNC(cuGraphUpload);
     DLSYM_HOOK_FUNC(cuGraphLaunch);
     DLSYM_HOOK_FUNC(cuGraphExecDestroy);

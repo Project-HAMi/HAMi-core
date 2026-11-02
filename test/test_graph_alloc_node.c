@@ -89,9 +89,33 @@ int main(void) {
     CHECK(add_node(g2, 768ull << 20, NULL, 1));
     CHECK(cuGraphDestroy(g2));
 
+    // A graph exec keeps the memory after the graph is destroyed (PyTorch
+    // destroys the graph right after instantiating it), until the exec goes.
+    CUgraphExec ex;
+    CUDA_GRAPH_INSTANTIATE_PARAMS ip;
+    for (int with_params = 0; with_params < 2; with_params++) {
+        CHECK(cuGraphCreate(&g1, 0));
+        CHECK(add_node(g1, 768ull << 20, NULL, 1));
+        if (with_params) {
+            memset(&ip, 0, sizeof(ip));
+            CHECK(cuGraphInstantiateWithParams(&ex, g1, &ip));
+        } else {
+            CHECK(cuGraphInstantiateWithFlags(&ex, g1, 0));
+        }
+        CHECK(cuGraphDestroy(g1));
+        CHECK(cuGraphCreate(&g2, 0));
+        r = add_node(g2, 768ull << 20, NULL, 1);
+        if (r != CUDA_ERROR_OUT_OF_MEMORY) {
+            fprintf(stderr, "FAIL: live exec not charged (params=%d) -> %d\n", with_params, (int)r);
+            return 1;
+        }
+        CHECK(cuGraphExecDestroy(ex));
+        CHECK(add_node(g2, 768ull << 20, NULL, 1));
+        CHECK(cuGraphDestroy(g2));
+    }
+
     // Without a free node the allocation outlives the graph, as in the
     // driver, and is released only when its pointer is freed.
-    CUgraphExec ex;
     CHECK(cuGraphCreate(&g1, 0));
     CHECK(add_node(g1, 768ull << 20, &p, 0));
     CHECK(cuGraphInstantiateWithFlags(&ex, g1, 0));

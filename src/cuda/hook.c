@@ -228,6 +228,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuGraphDestroyNode"},
     {.name = "cuGraphInstantiate"},
     {.name = "cuGraphInstantiateWithFlags"},
+    {.name = "cuGraphInstantiateWithParams"},
     {.name = "cuGraphUpload"},
     {.name = "cuGraphLaunch"},
     {.name = "cuGraphExecDestroy"},
@@ -311,6 +312,10 @@ void *find_symbols_in_table(const char *symbol) {
     if (strncmp(symbol, "cuGraph", 7) == 0 &&
         strcmp(symbol, "cuGraphAddMemAllocNode") != 0 &&
         strcmp(symbol, "cuGraphAddMemFreeNode") != 0 &&
+        strcmp(symbol, "cuGraphInstantiate") != 0 &&
+        strcmp(symbol, "cuGraphInstantiateWithFlags") != 0 &&
+        strcmp(symbol, "cuGraphInstantiateWithParams") != 0 &&
+        strcmp(symbol, "cuGraphExecDestroy") != 0 &&
         strcmp(symbol, "cuGraphDestroy") != 0) {
         return NULL;
     }
