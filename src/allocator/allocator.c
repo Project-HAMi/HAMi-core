@@ -273,8 +273,18 @@ int free_raw_async(CUdeviceptr dptr, CUstream hStream) {
 
 /* Track an allocated async chunk and account it against its pool's high-water
  * limit. Call with mutex held. */
-static int account_async_chunk(allocated_list_entry *e, size_t size, CUmemoryPool pool) {
+static int account_async_chunk(allocated_list_entry *e, size_t size, CUmemoryPool pool, CUstream hStream) {
     size_t poollimit;
+    /* cuMemPoolGetAttribute is illegal while the stream is capturing and
+     * invalidates the capture. The graph owns the memory, so track the pointer
+     * for the matching free but charge nothing. */
+    CUstreamCaptureStatus cap = CU_STREAM_CAPTURE_STATUS_NONE;
+    CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamIsCapturing, hStream, &cap);
+    if (cap != CU_STREAM_CAPTURE_STATUS_NONE) {
+        e->entry->length = 0;
+        LIST_ADD(device_allocasync, e);
+        return 0;
+    }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemPoolGetAttribute, pool,
                                       CU_MEMPOOL_ATTR_RESERVED_MEM_HIGH, &poollimit);
     if (res != CUDA_SUCCESS) {
@@ -321,7 +331,7 @@ int add_chunk_async(CUdeviceptr *address, size_t size, CUstream hStream) {
         LOG_ERROR("cuDeviceGetMemPool failed res=%d",res);
         return res;
     }
-    return account_async_chunk(e, size, pool);
+    return account_async_chunk(e, size, pool, hStream);
 }
 
 int add_chunk_from_pool_async(CUdeviceptr *address, size_t size, CUmemoryPool pool, CUstream hStream) {
@@ -341,7 +351,7 @@ int add_chunk_from_pool_async(CUdeviceptr *address, size_t size, CUmemoryPool po
     }
     *address = e->entry->address;
     /* Account against the caller's pool, not the default. */
-    return account_async_chunk(e, size, pool);
+    return account_async_chunk(e, size, pool, hStream);
 }
 
 int allocate_async_raw(CUdeviceptr *dptr, size_t size, CUstream hStream) {
