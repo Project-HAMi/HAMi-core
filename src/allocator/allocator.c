@@ -347,7 +347,8 @@ static int account_async_chunk(allocated_list_entry *e, size_t size, CUmemoryPoo
     size_t poollimit;
     /* cuMemPoolGetAttribute is illegal while the stream is capturing and
      * invalidates the capture. The graph owns the memory: charge it to the
-     * graph (released on cuGraphDestroy) and track the pointer for the free. */
+     * graph. The pointer is not kept in device_allocasync: its free is passed
+     * through untracked, and graph_* releases the charge. */
     CUstreamCaptureStatus cap = CU_STREAM_CAPTURE_STATUS_NONE;
     cuuint64_t capid;
     CUgraph capgraph = NULL;
@@ -361,8 +362,8 @@ static int account_async_chunk(allocated_list_entry *e, size_t size, CUmemoryPoo
             free(e);
             return CUDA_ERROR_OUT_OF_MEMORY;
         }
-        e->entry->length = 0;
-        LIST_ADD(device_allocasync, e);
+        free(e->entry);
+        free(e);
         return 0;
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemPoolGetAttribute, pool,
