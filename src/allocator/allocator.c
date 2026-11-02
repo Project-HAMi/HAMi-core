@@ -275,15 +275,17 @@ typedef struct graph_charge_entry {
     CUgraph graph;
     CUdevice dev;
     size_t size;
+    CUdeviceptr ptr;
+    int has_free;
     struct graph_charge_entry *next;
 } graph_charge_entry;
 static graph_charge_entry *graph_charges;
 static pthread_mutex_t graph_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-int graph_record(CUgraph graph, CUdevice dev, size_t size) {
+int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr) {
     graph_charge_entry *g = malloc(sizeof(*g));
     if (g == NULL) return CUDA_ERROR_OUT_OF_MEMORY;
-    g->graph = graph; g->dev = dev; g->size = size;
+    g->graph = graph; g->dev = dev; g->size = size; g->ptr = ptr; g->has_free = 0;
     pthread_mutex_lock(&graph_mutex);
     g->next = graph_charges;
     graph_charges = g;
@@ -291,12 +293,14 @@ int graph_record(CUgraph graph, CUdevice dev, size_t size) {
     return 0;
 }
 
-void graph_release(CUgraph graph) {
+/* Walk the list under graph_mutex; drop (and release) entries for which
+ * match(entry) is true. */
+static void graph_drop(int (*match)(graph_charge_entry *, void *), void *arg) {
     pthread_mutex_lock(&graph_mutex);
     graph_charge_entry **pp = &graph_charges;
     while (*pp != NULL) {
         graph_charge_entry *g = *pp;
-        if (g->graph == graph) {
+        if (match(g, arg)) {
             *pp = g->next;
             release_device_memory(g->dev, g->size);
             free(g);
@@ -306,6 +310,36 @@ void graph_release(CUgraph graph) {
     }
     pthread_mutex_unlock(&graph_mutex);
 }
+
+static int match_ptr(graph_charge_entry *g, void *arg) {
+    return g->ptr == *(CUdeviceptr *)arg;
+}
+
+static int match_graph(graph_charge_entry *g, void *arg) {
+    if (g->graph != *(CUgraph *)arg) return 0;
+    if (g->has_free) return 1;
+    g->graph = NULL; /* outlives the graph until its pointer is freed */
+    return 0;
+}
+
+void graph_mark_free(CUdeviceptr ptr) {
+    pthread_mutex_lock(&graph_mutex);
+    for (graph_charge_entry *g = graph_charges; g != NULL; g = g->next)
+        if (g->ptr == ptr) g->has_free = 1;
+    pthread_mutex_unlock(&graph_mutex);
+}
+
+void graph_ptr_freed(CUdeviceptr ptr) { graph_drop(match_ptr, &ptr); }
+
+void graph_ptr_freed_async(CUdeviceptr ptr, CUstream hStream) {
+    CUstreamCaptureStatus cap = CU_STREAM_CAPTURE_STATUS_NONE;
+    cuuint64_t id;
+    CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCaptureInfo_v2, hStream, &cap, &id, NULL, NULL, NULL);
+    if (cap != CU_STREAM_CAPTURE_STATUS_NONE) graph_mark_free(ptr);
+    else graph_ptr_freed(ptr);
+}
+
+void graph_release(CUgraph graph) { graph_drop(match_graph, &graph); }
 
 /* Track an allocated async chunk and account it against its pool's high-water
  * limit. Call with mutex held. */
@@ -321,7 +355,7 @@ static int account_async_chunk(allocated_list_entry *e, size_t size, CUmemoryPoo
                        &capgraph, NULL, NULL);
     if (cap != CU_STREAM_CAPTURE_STATUS_NONE) {
         if (capgraph != NULL && (reserve_device_memory(e->entry->dev, size) != 0
-                || graph_record(capgraph, e->entry->dev, size) != 0)) {
+                || graph_record(capgraph, e->entry->dev, size, e->entry->address) != 0)) {
             CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFreeAsync, e->entry->address, hStream);
             free(e->entry);
             free(e);

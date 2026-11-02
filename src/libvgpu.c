@@ -274,6 +274,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemAllocAsync);
     DLSYM_HOOK_FUNC(cuMemFreeAsync);
     DLSYM_HOOK_FUNC(cuGraphAddMemAllocNode);
+    DLSYM_HOOK_FUNC(cuGraphAddMemFreeNode);
     // memory ops
     DLSYM_HOOK_FUNC(cuMemHostGetDevicePointer_v2);
     DLSYM_HOOK_FUNC(cuMemHostGetFlags);

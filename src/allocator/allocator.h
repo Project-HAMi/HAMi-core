@@ -94,9 +94,14 @@ int oom_check(const int dev,size_t addon);
 int reserve_device_memory(CUdevice dev, size_t size);
 void release_device_memory(CUdevice dev, size_t size);
 
-/* Record size (already reserved via reserve_device_memory) against graph; it
- * is released when graph_release() runs for that graph (cuGraphDestroy). */
-int graph_record(CUgraph graph, CUdevice dev, size_t size);
+/* Graph allocation accounting. graph_record() tracks size (already reserved
+ * via reserve_device_memory) for the allocation at ptr. Memory with a free
+ * node is released when its graph is destroyed; memory without one stays
+ * allocated after the graph is gone, as in the driver, until ptr is freed. */
+int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr);
+void graph_mark_free(CUdeviceptr ptr);
+void graph_ptr_freed(CUdeviceptr ptr);
+void graph_ptr_freed_async(CUdeviceptr ptr, CUstream hStream);
 void graph_release(CUgraph graph);
 
 // Allocate and free device memory

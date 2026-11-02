@@ -38,11 +38,12 @@ int main(void) {
     }
 
     // Capture allocations are charged to the graph: with a 1 GiB limit, two
-    // live 768 MiB captures cannot coexist, and destroying one frees room.
+    // live 768 MiB captures (each with a free node) cannot coexist, and destroying one frees room.
     CUdeviceptr p;
     CUgraph g1, g2;
     CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_RELAXED));
     CHECK(cuMemAllocAsync(&p, 768ull << 20, s));
+    CHECK(cuMemFreeAsync(p, s));
     CHECK(cuStreamEndCapture(s, &g1));
     CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_RELAXED));
     if (cuMemAllocAsync(&p, 768ull << 20, s) != CUDA_ERROR_OUT_OF_MEMORY) {
@@ -53,7 +54,9 @@ int main(void) {
     CHECK(cuGraphDestroy(g1));
     CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_RELAXED));
     CHECK(cuMemAllocAsync(&p, 768ull << 20, s));
+    CHECK(cuMemFreeAsync(p, s));
     CHECK(cuStreamEndCapture(s, &g2));
+    CHECK(cuGraphDestroy(g2));
     printf("PASS\n");
     return 0;
 }

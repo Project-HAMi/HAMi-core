@@ -143,6 +143,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemFreeAsync"},
     {.name = "cuStreamGetCaptureInfo_v2"},
     {.name = "cuGraphAddMemAllocNode"},
+    {.name = "cuGraphAddMemFreeNode"},
     /* memory APIs */
     {.name = "cuMemHostGetDevicePointer_v2"},
     {.name = "cuMemHostGetFlags"},
@@ -305,8 +306,12 @@ const char* get_real_func_name(const char* base_name,int cuda_version) {
 void *find_symbols_in_table(const char *symbol) {
     char symbol_v[500];
     void *pfn;
-    /* Skip CUDA graph functions: let them fall through to real driver */
-    if (strncmp(symbol, "cuGraph", 7) == 0) {
+    /* Skip CUDA graph functions: let them fall through to real driver, except
+     * the ones that account graph memory. */
+    if (strncmp(symbol, "cuGraph", 7) == 0 &&
+        strcmp(symbol, "cuGraphAddMemAllocNode") != 0 &&
+        strcmp(symbol, "cuGraphAddMemFreeNode") != 0 &&
+        strcmp(symbol, "cuGraphDestroy") != 0) {
         return NULL;
     }
     snprintf(symbol_v, sizeof(symbol_v), "%s_v3", symbol);

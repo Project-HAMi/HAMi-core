@@ -132,6 +132,7 @@ CUresult cuMemFree_v2(CUdeviceptr dptr) {
     if (dptr == 0) {  // NULL
         return CUDA_SUCCESS;
     }
+    graph_ptr_freed(dptr);
     CUresult res = free_raw(dptr);
     LOG_INFO("after free_raw dptr=%p res=%d",(void *)dptr,res);
     return res;
@@ -583,14 +584,15 @@ CUresult cuMemFreeAsync(CUdeviceptr dptr, CUstream hStream) {
     if (dptr == 0) {  // NULL
         return CUDA_SUCCESS;
     }
+    graph_ptr_freed_async(dptr, hStream);
     CUresult res = free_raw_async(dptr,hStream);
     LOG_DEBUG("after free_raw_async dptr=%p res=%d",(void *)dptr,res);
     return res;
 }
 
-/* Graph memory is charged to its graph at node creation and released when the
- * graph is destroyed. A graph exec that outlives its graph, and cuGraphClone,
- * are not tracked. */
+/* Graph memory is charged at node creation. See graph_record() for when it is
+ * released. A graph exec that outlives its graph, and cuGraphClone, are not
+ * tracked. */
 CUresult cuGraphAddMemAllocNode(CUgraphNode *phGraphNode, CUgraph hGraph,
         const CUgraphNode *dependencies, size_t numDependencies,
         CUDA_MEM_ALLOC_NODE_PARAMS *nodeParams) {
@@ -604,8 +606,19 @@ CUresult cuGraphAddMemAllocNode(CUgraphNode *phGraphNode, CUgraph hGraph,
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphAddMemAllocNode,
         phGraphNode, hGraph, dependencies, numDependencies, nodeParams);
-    if (charge && (res != CUDA_SUCCESS || graph_record(hGraph, dev, size) != 0)) {
+    if (charge && (res != CUDA_SUCCESS || graph_record(hGraph, dev, size, nodeParams->dptr) != 0)) {
         release_device_memory(dev, size);
+    }
+    return res;
+}
+
+CUresult cuGraphAddMemFreeNode(CUgraphNode *phGraphNode, CUgraph hGraph,
+        const CUgraphNode *dependencies, size_t numDependencies, CUdeviceptr dptr) {
+    LOG_DEBUG("cuGraphAddMemFreeNode");
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphAddMemFreeNode,
+        phGraphNode, hGraph, dependencies, numDependencies, dptr);
+    if (res == CUDA_SUCCESS) {
+        graph_mark_free(dptr);
     }
     return res;
 }
