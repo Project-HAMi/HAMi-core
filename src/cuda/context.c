@@ -1,4 +1,5 @@
 #include "include/libcuda_hook.h"
+#include "include/libvgpu.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
 extern size_t context_size;
@@ -14,6 +15,7 @@ CUresult cuDevicePrimaryCtxGetState( CUdevice dev, unsigned int* flags, int* act
 
 CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
     LOG_INFO("dev=%d context_size=%ld",dev,context_size);
+    ensure_hostpid();
     //for Initialization only
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRetain,pctx,dev);
     if (res == CUDA_SUCCESS && context_size == 0) {
@@ -51,12 +53,14 @@ CUresult cuCtxGetDevice(CUdevice* device) {
 #if CUDA_VERSION < 13000
 CUresult cuCtxCreate_v2 ( CUcontext* pctx, unsigned int  flags, CUdevice dev ){
     LOG_DEBUG("into cuCtxCreate pctx=%p flags=%d dev=%d",pctx,flags,dev);
+    ensure_hostpid();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxCreate_v2,pctx,flags,dev);
     return res;
 }
 
 CUresult cuCtxCreate_v3 ( CUcontext* pctx, CUexecAffinityParam* paramsArray, int  numParams, unsigned int  flags, CUdevice dev ){
     LOG_DEBUG("into cuCtxCreate_v3 pctx=%p paramsArray=%p numParams=%d flags=%d dev=%d",pctx,paramsArray,numParams,flags,dev);
+    ensure_hostpid();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxCreate_v3,pctx,paramsArray,numParams,flags,dev);
     return res;
 }
@@ -64,6 +68,7 @@ CUresult cuCtxCreate_v3 ( CUcontext* pctx, CUexecAffinityParam* paramsArray, int
 
 CUresult cuCtxCreate_v4(CUcontext* pctx, CUctxCreateParams* ctxCreateParams, unsigned int flags, CUdevice dev) {
     LOG_DEBUG("into cuCtxCreate_v4 pctx=%p ctxCreateParams=%p flags=%d dev=%d", pctx, ctxCreateParams, flags, dev);
+    ensure_hostpid();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxCreate_v4, pctx, ctxCreateParams, flags, dev);
     return res;
 }
