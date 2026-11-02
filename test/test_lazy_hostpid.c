@@ -1,3 +1,4 @@
+// Copyright 2026 The HAMi Authors.
 // Host PID detection must not run in cuInit: it takes the node-wide postinit
 // lock and creates primary contexts, which serialized hundreds of short lived
 // children that only initialize the driver (#382). It runs on first GPU use.

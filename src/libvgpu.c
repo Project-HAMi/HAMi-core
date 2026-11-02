@@ -897,7 +897,7 @@ void postInit(){
  * destroys a primary context a few times, about half a second per process.
  * Run it on first GPU use instead of in cuInit so processes that only
  * initialize the driver (compiler children, tools) do not queue on the lock. */
-static void hostpidInit(void){
+static void hostpidInit(void) {
     ensure_post_init();
     int broker_enabled = hostpid_broker_enabled(
         getenv("LIBVGPU_HOSTPID_BROKER"));

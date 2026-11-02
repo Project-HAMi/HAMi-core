@@ -13,7 +13,10 @@ static CUresult driver_result;
 static int failures;
 
 #define EXPECT(x) do { \
-    if (!(x)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #x); failures++; } \
+    if (!(x)) { \
+        fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #x); \
+        failures++; \
+    } \
 } while (0)
 
 void ensure_initialized(void) {}
