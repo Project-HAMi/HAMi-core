@@ -250,26 +250,37 @@ CUresult cuGraphDestroyNode(CUgraphNode hNode) {
 	return CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphDestroyNode,hNode);
 }
 
-CUresult cuGraphInstantiate(CUgraphExec *phGraphExec, CUgraph hGraph, CUgraphNode *phErrorNode, char *logBuffer, size_t bufferSize) {
-	LOG_DEBUG("cuGraphInstantiate");
-	CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphInstantiate,phGraphExec,hGraph,phErrorNode,logBuffer,bufferSize);
-	if (res == CUDA_SUCCESS) graph_exec_created(hGraph, *phGraphExec);
-	return res;
+/* Track the exec so its graph's memory stays charged while it is alive. If
+ * tracking fails, give the exec back rather than leave memory uncounted. */
+static CUresult track_exec(CUresult res, CUgraph hGraph, CUgraphExec *phGraphExec) {
+    if (res != CUDA_SUCCESS || graph_exec_created(hGraph, *phGraphExec) == 0) {
+        return res;
+    }
+    CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecDestroy, *phGraphExec);
+    return CUDA_ERROR_OUT_OF_MEMORY;
+}
+
+CUresult cuGraphInstantiate(CUgraphExec *phGraphExec, CUgraph hGraph, CUgraphNode *phErrorNode,
+                            char *logBuffer, size_t bufferSize) {
+    LOG_DEBUG("cuGraphInstantiate");
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphInstantiate, phGraphExec, hGraph,
+                                      phErrorNode, logBuffer, bufferSize);
+    return track_exec(res, hGraph, phGraphExec);
 }
 
 CUresult cuGraphInstantiateWithFlags(CUgraphExec *phGraphExec, CUgraph hGraph, unsigned long long flags) {
-	LOG_DEBUG("cuGraphInstantiateWithFlags");
-	CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphInstantiateWithFlags,phGraphExec,hGraph,flags);
-	if (res == CUDA_SUCCESS) graph_exec_created(hGraph, *phGraphExec);
-	return res;
-
+    LOG_DEBUG("cuGraphInstantiateWithFlags");
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphInstantiateWithFlags, phGraphExec,
+                                      hGraph, flags);
+    return track_exec(res, hGraph, phGraphExec);
 }
 
-CUresult cuGraphInstantiateWithParams(CUgraphExec *phGraphExec, CUgraph hGraph, CUDA_GRAPH_INSTANTIATE_PARAMS *instantiateParams) {
-	LOG_DEBUG("cuGraphInstantiateWithParams");
-	CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphInstantiateWithParams,phGraphExec,hGraph,instantiateParams);
-	if (res == CUDA_SUCCESS) graph_exec_created(hGraph, *phGraphExec);
-	return res;
+CUresult cuGraphInstantiateWithParams(CUgraphExec *phGraphExec, CUgraph hGraph,
+                                      CUDA_GRAPH_INSTANTIATE_PARAMS *instantiateParams) {
+    LOG_DEBUG("cuGraphInstantiateWithParams");
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphInstantiateWithParams, phGraphExec,
+                                      hGraph, instantiateParams);
+    return track_exec(res, hGraph, phGraphExec);
 }
 
 CUresult cuGraphUpload(CUgraphExec hGraphExec, CUstream hStream) {
@@ -284,16 +295,16 @@ CUresult cuGraphLaunch(CUgraphExec hGraphExec, CUstream hStream) {
 
 CUresult cuGraphExecDestroy(CUgraphExec hGraphExec) {
 	LOG_DEBUG("cuGraphExecDestroy");
-	CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphExecDestroy,hGraphExec);
-	if (res == CUDA_SUCCESS) graph_exec_destroyed(hGraphExec);
-	return res;
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecDestroy, hGraphExec);
+    if (res == CUDA_SUCCESS) graph_exec_destroyed(hGraphExec);
+    return res;
 }
 
 CUresult cuGraphDestroy(CUgraph hGraph) {
-	LOG_DEBUG("cuGraphDestroy");
-	CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphDestroy,hGraph);
-	if (res == CUDA_SUCCESS) {
-		graph_release(hGraph);
-	}
-	return res;
+    LOG_DEBUG("cuGraphDestroy");
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphDestroy, hGraph);
+    if (res == CUDA_SUCCESS) {
+        graph_release(hGraph);
+    }
+    return res;
 }

@@ -132,8 +132,8 @@ CUresult cuMemFree_v2(CUdeviceptr dptr) {
     if (dptr == 0) {  // NULL
         return CUDA_SUCCESS;
     }
-    graph_ptr_freed(dptr);
     CUresult res = free_raw(dptr);
+    if (res == CUDA_SUCCESS) graph_ptr_freed(dptr);
     LOG_INFO("after free_raw dptr=%p res=%d",(void *)dptr,res);
     return res;
 }
@@ -584,8 +584,8 @@ CUresult cuMemFreeAsync(CUdeviceptr dptr, CUstream hStream) {
     if (dptr == 0) {  // NULL
         return CUDA_SUCCESS;
     }
-    graph_ptr_freed_async(dptr, hStream);
     CUresult res = free_raw_async(dptr,hStream);
+    if (res == CUDA_SUCCESS) graph_ptr_freed_async(dptr, hStream);
     LOG_DEBUG("after free_raw_async dptr=%p res=%d",(void *)dptr,res);
     return res;
 }
@@ -623,7 +623,7 @@ CUresult cuGraphAddMemFreeNode(CUgraphNode *phGraphNode, CUgraph hGraph,
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphAddMemFreeNode,
         phGraphNode, hGraph, dependencies, numDependencies, dptr);
     if (res == CUDA_SUCCESS) {
-        graph_mark_free(dptr);
+        graph_mark_free(hGraph, dptr);
     }
     return res;
 }

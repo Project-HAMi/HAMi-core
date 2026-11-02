@@ -1,3 +1,4 @@
+// Copyright 2026 The HAMi Authors.
 // Regression test: cuMemAllocAsync inside a stream capture must not fail and
 // must not invalidate the capture (cuMemPoolGetAttribute is illegal while
 // capturing). Runs for global, thread-local and relaxed capture modes.

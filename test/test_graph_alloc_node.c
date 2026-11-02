@@ -1,3 +1,4 @@
+// Copyright 2026 The HAMi Authors.
 // Regression test for #387: a graph memory allocation node larger than the
 // device memory limit must be rejected, a small one must still be accepted.
 // Run with CUDA_DEVICE_MEMORY_LIMIT=1g.

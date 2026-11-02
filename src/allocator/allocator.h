@@ -100,11 +100,11 @@ void release_device_memory(CUdevice dev, size_t size);
  * destroyed; memory without one stays allocated, as in the driver, until ptr
  * is freed. */
 int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr);
-void graph_mark_free(CUdeviceptr ptr);
+void graph_mark_free(CUgraph graph, CUdeviceptr ptr);
 void graph_ptr_freed(CUdeviceptr ptr);
 void graph_ptr_freed_async(CUdeviceptr ptr, CUstream hStream);
 void graph_release(CUgraph graph);
-void graph_exec_created(CUgraph graph, CUgraphExec exec);
+int graph_exec_created(CUgraph graph, CUgraphExec exec);
 void graph_exec_destroyed(CUgraphExec exec);
 
 // Allocate and free device memory
