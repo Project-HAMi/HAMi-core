@@ -588,20 +588,26 @@ CUresult cuMemFreeAsync(CUdeviceptr dptr, CUstream hStream) {
     return res;
 }
 
-/* Graph memory comes from the device graph pool at launch. Reject nodes that
- * would exceed the limit given current usage. Check only, nothing is
- * charged, so several graphs can together exceed the limit; per-graph
- * accounting needs release hooks on graph/exec destroy. */
+/* Graph memory is charged to its graph at node creation and released when the
+ * graph is destroyed. A graph exec that outlives its graph, and cuGraphClone,
+ * are not tracked. */
 CUresult cuGraphAddMemAllocNode(CUgraphNode *phGraphNode, CUgraph hGraph,
         const CUgraphNode *dependencies, size_t numDependencies,
         CUDA_MEM_ALLOC_NODE_PARAMS *nodeParams) {
     LOG_DEBUG("cuGraphAddMemAllocNode");
-    if (nodeParams != NULL && nodeParams->poolProps.location.type == CU_MEM_LOCATION_TYPE_DEVICE
-            && oom_check(nodeParams->poolProps.location.id, nodeParams->bytesize)) {
+    int charge = nodeParams != NULL &&
+        nodeParams->poolProps.location.type == CU_MEM_LOCATION_TYPE_DEVICE;
+    CUdevice dev = charge ? nodeParams->poolProps.location.id : 0;
+    size_t size = charge ? nodeParams->bytesize : 0;
+    if (charge && reserve_device_memory(dev, size) != 0) {
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
-    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphAddMemAllocNode,
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphAddMemAllocNode,
         phGraphNode, hGraph, dependencies, numDependencies, nodeParams);
+    if (charge && (res != CUDA_SUCCESS || graph_record(hGraph, dev, size) != 0)) {
+        release_device_memory(dev, size);
+    }
+    return res;
 }
 
 CUresult cuMemHostGetDevicePointer_v2(CUdeviceptr *pdptr, void *p, unsigned int Flags){

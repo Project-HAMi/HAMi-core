@@ -141,7 +141,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemImportFromShareableHandle"},
     {.name = "cuMemAllocAsync"},
     {.name = "cuMemFreeAsync"},
-    {.name = "cuStreamIsCapturing"},
+    {.name = "cuStreamGetCaptureInfo_v2"},
     {.name = "cuGraphAddMemAllocNode"},
     /* memory APIs */
     {.name = "cuMemHostGetDevicePointer_v2"},

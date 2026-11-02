@@ -36,6 +36,24 @@ int main(void) {
         CHECK(cuStreamEndCapture(s, &g));
         CHECK(cuGraphDestroy(g));
     }
+
+    // Capture allocations are charged to the graph: with a 1 GiB limit, two
+    // live 768 MiB captures cannot coexist, and destroying one frees room.
+    CUdeviceptr p;
+    CUgraph g1, g2;
+    CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_RELAXED));
+    CHECK(cuMemAllocAsync(&p, 768ull << 20, s));
+    CHECK(cuStreamEndCapture(s, &g1));
+    CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_RELAXED));
+    if (cuMemAllocAsync(&p, 768ull << 20, s) != CUDA_ERROR_OUT_OF_MEMORY) {
+        fprintf(stderr, "FAIL: second 768 MiB capture alloc not rejected\n");
+        return 1;
+    }
+    cuStreamEndCapture(s, &g2);
+    CHECK(cuGraphDestroy(g1));
+    CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_RELAXED));
+    CHECK(cuMemAllocAsync(&p, 768ull << 20, s));
+    CHECK(cuStreamEndCapture(s, &g2));
     printf("PASS\n");
     return 0;
 }

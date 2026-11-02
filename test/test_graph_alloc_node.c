@@ -42,6 +42,22 @@ int main(void) {
         fprintf(stderr, "FAIL: 2 GiB node under 1 GiB limit -> %d\n", (int)r);
         return 1;
     }
+
+    CHECK(cuGraphDestroy(g));
+
+    // Two 768 MiB graphs together exceed the 1 GiB limit: the second is
+    // rejected while the first is alive, accepted once it is destroyed.
+    CUgraph g1, g2;
+    CHECK(cuGraphCreate(&g1, 0));
+    CHECK(cuGraphCreate(&g2, 0));
+    CHECK(add_node(g1, 768ull << 20));
+    r = add_node(g2, 768ull << 20);
+    if (r != CUDA_ERROR_OUT_OF_MEMORY) {
+        fprintf(stderr, "FAIL: second 768 MiB graph -> %d\n", (int)r);
+        return 1;
+    }
+    CHECK(cuGraphDestroy(g1));
+    CHECK(add_node(g2, 768ull << 20));
     printf("PASS\n");
     return 0;
 }

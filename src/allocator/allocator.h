@@ -94,6 +94,11 @@ int oom_check(const int dev,size_t addon);
 int reserve_device_memory(CUdevice dev, size_t size);
 void release_device_memory(CUdevice dev, size_t size);
 
+/* Record size (already reserved via reserve_device_memory) against graph; it
+ * is released when graph_release() runs for that graph (cuGraphDestroy). */
+int graph_record(CUgraph graph, CUdevice dev, size_t size);
+void graph_release(CUgraph graph);
+
 // Allocate and free device memory
 int allocate_raw(CUdeviceptr *dptr, size_t size);
 int free_raw(CUdeviceptr dptr);

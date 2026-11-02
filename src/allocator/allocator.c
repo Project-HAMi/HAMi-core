@@ -271,16 +271,62 @@ int free_raw_async(CUdeviceptr dptr, CUstream hStream) {
     return tmp;
 }
 
+typedef struct graph_charge_entry {
+    CUgraph graph;
+    CUdevice dev;
+    size_t size;
+    struct graph_charge_entry *next;
+} graph_charge_entry;
+static graph_charge_entry *graph_charges;
+static pthread_mutex_t graph_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+int graph_record(CUgraph graph, CUdevice dev, size_t size) {
+    graph_charge_entry *g = malloc(sizeof(*g));
+    if (g == NULL) return CUDA_ERROR_OUT_OF_MEMORY;
+    g->graph = graph; g->dev = dev; g->size = size;
+    pthread_mutex_lock(&graph_mutex);
+    g->next = graph_charges;
+    graph_charges = g;
+    pthread_mutex_unlock(&graph_mutex);
+    return 0;
+}
+
+void graph_release(CUgraph graph) {
+    pthread_mutex_lock(&graph_mutex);
+    graph_charge_entry **pp = &graph_charges;
+    while (*pp != NULL) {
+        graph_charge_entry *g = *pp;
+        if (g->graph == graph) {
+            *pp = g->next;
+            release_device_memory(g->dev, g->size);
+            free(g);
+        } else {
+            pp = &g->next;
+        }
+    }
+    pthread_mutex_unlock(&graph_mutex);
+}
+
 /* Track an allocated async chunk and account it against its pool's high-water
  * limit. Call with mutex held. */
 static int account_async_chunk(allocated_list_entry *e, size_t size, CUmemoryPool pool, CUstream hStream) {
     size_t poollimit;
     /* cuMemPoolGetAttribute is illegal while the stream is capturing and
-     * invalidates the capture. The graph owns the memory, so track the pointer
-     * for the matching free but charge nothing. */
+     * invalidates the capture. The graph owns the memory: charge it to the
+     * graph (released on cuGraphDestroy) and track the pointer for the free. */
     CUstreamCaptureStatus cap = CU_STREAM_CAPTURE_STATUS_NONE;
-    CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamIsCapturing, hStream, &cap);
+    cuuint64_t capid;
+    CUgraph capgraph = NULL;
+    CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCaptureInfo_v2, hStream, &cap, &capid,
+                       &capgraph, NULL, NULL);
     if (cap != CU_STREAM_CAPTURE_STATUS_NONE) {
+        if (capgraph != NULL && (reserve_device_memory(e->entry->dev, size) != 0
+                || graph_record(capgraph, e->entry->dev, size) != 0)) {
+            CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFreeAsync, e->entry->address, hStream);
+            free(e->entry);
+            free(e);
+            return CUDA_ERROR_OUT_OF_MEMORY;
+        }
         e->entry->length = 0;
         LIST_ADD(device_allocasync, e);
         return 0;

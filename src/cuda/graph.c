@@ -1,4 +1,5 @@
 #include "include/libcuda_hook.h"
+#include "allocator/allocator.h"
 
 CUresult cuGraphCreate(CUgraph *phGraph, unsigned int flags){
 	LOG_DEBUG("cuGraphCreate");
@@ -276,5 +277,9 @@ CUresult cuGraphExecDestroy(CUgraphExec hGraphExec) {
 
 CUresult cuGraphDestroy(CUgraph hGraph) {
 	LOG_DEBUG("cuGraphDestroy");
-	return CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphDestroy,hGraph);
+	CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphDestroy,hGraph);
+	if (res == CUDA_SUCCESS) {
+		graph_release(hGraph);
+	}
+	return res;
 }
