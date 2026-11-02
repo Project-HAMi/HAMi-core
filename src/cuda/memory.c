@@ -606,8 +606,13 @@ CUresult cuGraphAddMemAllocNode(CUgraphNode *phGraphNode, CUgraph hGraph,
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphAddMemAllocNode,
         phGraphNode, hGraph, dependencies, numDependencies, nodeParams);
-    if (charge && (res != CUDA_SUCCESS || graph_record(hGraph, dev, size, nodeParams->dptr) != 0)) {
+    if (charge && res != CUDA_SUCCESS) {
         release_device_memory(dev, size);
+    } else if (charge && graph_record(hGraph, dev, size, nodeParams->dptr) != 0) {
+        /* Untracked graph memory would escape the limit: undo the node. */
+        CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphDestroyNode, *phGraphNode);
+        release_device_memory(dev, size);
+        return CUDA_ERROR_OUT_OF_MEMORY;
     }
     return res;
 }

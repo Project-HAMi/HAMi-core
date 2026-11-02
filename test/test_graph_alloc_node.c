@@ -41,6 +41,30 @@ int main(void) {
     CUstream st;
     CHECK(cuStreamCreate(&st, CU_STREAM_NON_BLOCKING));
 
+    // The accounting hook is also what cuGetProcAddress hands out (this is how
+    // the runtime API reaches the driver).
+    typedef CUresult (*add_node_fn)(CUgraphNode *, CUgraph, const CUgraphNode *, size_t,
+                                    CUDA_MEM_ALLOC_NODE_PARAMS *);
+    add_node_fn pfn = NULL;
+    CUdriverProcAddressQueryResult qr;
+    int drv;
+    CHECK(cuDriverGetVersion(&drv));
+    CHECK(cuGetProcAddress("cuGraphAddMemAllocNode", (void **)&pfn, drv, 0, &qr));
+    CHECK(cuGraphCreate(&g, 0));
+    {
+        CUDA_MEM_ALLOC_NODE_PARAMS prm;
+        CUgraphNode n;
+        memset(&prm, 0, sizeof(prm));
+        prm.poolProps.allocType = CU_MEM_ALLOCATION_TYPE_PINNED;
+        prm.poolProps.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+        prm.bytesize = 2048ull << 20;
+        if (pfn == NULL || pfn(&n, g, NULL, 0, &prm) != CUDA_ERROR_OUT_OF_MEMORY) {
+            fprintf(stderr, "FAIL: proc-address lookup bypasses the limit\n");
+            return 1;
+        }
+    }
+    CHECK(cuGraphDestroy(g));
+
     // A node larger than the limit is rejected, a small one is accepted.
     CHECK(cuGraphCreate(&g, 0));
     CHECK(add_node(g, 128ull << 20, NULL, 1));

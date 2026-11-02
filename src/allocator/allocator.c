@@ -355,12 +355,18 @@ static int account_async_chunk(allocated_list_entry *e, size_t size, CUmemoryPoo
     CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCaptureInfo_v2, hStream, &cap, &capid,
                        &capgraph, NULL, NULL);
     if (cap != CU_STREAM_CAPTURE_STATUS_NONE) {
-        if (capgraph != NULL && (reserve_device_memory(e->entry->dev, size) != 0
-                || graph_record(capgraph, e->entry->dev, size, e->entry->address) != 0)) {
-            CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFreeAsync, e->entry->address, hStream);
-            free(e->entry);
-            free(e);
-            return CUDA_ERROR_OUT_OF_MEMORY;
+        if (capgraph != NULL) {
+            int failed = reserve_device_memory(e->entry->dev, size) != 0;
+            if (!failed && graph_record(capgraph, e->entry->dev, size, e->entry->address) != 0) {
+                release_device_memory(e->entry->dev, size);
+                failed = 1;
+            }
+            if (failed) {
+                CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFreeAsync, e->entry->address, hStream);
+                free(e->entry);
+                free(e);
+                return CUDA_ERROR_OUT_OF_MEMORY;
+            }
         }
         free(e->entry);
         free(e);
