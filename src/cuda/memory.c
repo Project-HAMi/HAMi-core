@@ -133,6 +133,7 @@ CUresult cuMemFree_v2(CUdeviceptr dptr) {
         return CUDA_SUCCESS;
     }
     CUresult res = free_raw(dptr);
+    if (res == CUDA_SUCCESS) graph_ptr_freed(dptr);
     LOG_INFO("after free_raw dptr=%p res=%d",(void *)dptr,res);
     return res;
 }
@@ -584,7 +585,46 @@ CUresult cuMemFreeAsync(CUdeviceptr dptr, CUstream hStream) {
         return CUDA_SUCCESS;
     }
     CUresult res = free_raw_async(dptr,hStream);
+    if (res == CUDA_SUCCESS) graph_ptr_freed_async(dptr, hStream);
     LOG_DEBUG("after free_raw_async dptr=%p res=%d",(void *)dptr,res);
+    return res;
+}
+
+/* Graph memory is charged at node creation. See graph_record() for when it is
+ * released. A graph exec that outlives its graph, and cuGraphClone, are not
+ * tracked. */
+CUresult cuGraphAddMemAllocNode(CUgraphNode *phGraphNode, CUgraph hGraph,
+        const CUgraphNode *dependencies, size_t numDependencies,
+        CUDA_MEM_ALLOC_NODE_PARAMS *nodeParams) {
+    LOG_DEBUG("cuGraphAddMemAllocNode");
+    int charge = nodeParams != NULL &&
+        nodeParams->poolProps.location.type == CU_MEM_LOCATION_TYPE_DEVICE;
+    CUdevice dev = charge ? nodeParams->poolProps.location.id : 0;
+    size_t size = charge ? nodeParams->bytesize : 0;
+    if (charge && reserve_device_memory(dev, size) != 0) {
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphAddMemAllocNode,
+        phGraphNode, hGraph, dependencies, numDependencies, nodeParams);
+    if (charge && res != CUDA_SUCCESS) {
+        release_device_memory(dev, size);
+    } else if (charge && graph_record(hGraph, dev, size, nodeParams->dptr) != 0) {
+        /* Untracked graph memory would escape the limit: undo the node. */
+        CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphDestroyNode, *phGraphNode);
+        release_device_memory(dev, size);
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+    return res;
+}
+
+CUresult cuGraphAddMemFreeNode(CUgraphNode *phGraphNode, CUgraph hGraph,
+        const CUgraphNode *dependencies, size_t numDependencies, CUdeviceptr dptr) {
+    LOG_DEBUG("cuGraphAddMemFreeNode");
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphAddMemFreeNode,
+        phGraphNode, hGraph, dependencies, numDependencies, dptr);
+    if (res == CUDA_SUCCESS) {
+        graph_mark_free(hGraph, dptr);
+    }
     return res;
 }
 

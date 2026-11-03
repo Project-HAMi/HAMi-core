@@ -21,6 +21,8 @@ static int deducted_dev;
 } } while (0)
 
 void ensure_initialized(void) {}
+void lock_shrreg(void) {}
+void unlock_shrreg(void) {}
 unsigned int cuda_to_nvml_map(unsigned int dev) {
     EXPECT(dev == 0); return 3;
 }
