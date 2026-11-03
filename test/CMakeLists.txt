@@ -159,6 +159,20 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_device_total_mem")
+        # Links the production device-memory hook and supplies a driver entry
+        # table, so it needs no NVIDIA driver or GPU at runtime.
+        add_executable(${TEST_TARGET_NAME}
+            ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/device.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_memory_limit.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures")
         # Links the production NVML pass-through wrappers and supplies its own
         # entry table, so it needs no NVIDIA driver and no GPU at runtime.
@@ -259,7 +273,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_memory_index_map"
             OR TEST_TARGET_NAME STREQUAL "test_meminfo_null_out"
-            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_mapping")
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_mapping"
+            OR TEST_TARGET_NAME STREQUAL "test_device_total_mem")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread -ldl)
     elseif (TEST_TARGET_NAME STREQUAL "test_cuda_version_map")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread -ldl)
@@ -312,6 +327,12 @@ set_tests_properties(override_env PROPERTIES TIMEOUT 20)
 add_test(NAME meminfo_null_out
     COMMAND test_meminfo_null_out)
 set_tests_properties(meminfo_null_out PROPERTIES TIMEOUT 20)
+
+# A zero memory limit means unlimited memory, so cuDeviceTotalMem_v2 must
+# preserve the driver's physical-memory value (issue #367).
+add_test(NAME device_total_mem
+    COMMAND test_device_total_mem)
+set_tests_properties(device_total_mem PROPERTIES TIMEOUT 20)
 
 add_test(NAME fork_child_exit_cleanup
     COMMAND test_fork_child_exit_cleanup)
