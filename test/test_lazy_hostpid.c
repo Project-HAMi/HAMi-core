@@ -6,8 +6,8 @@
 #include <cuda.h>
 #include <stdio.h>
 
-// Defined by libvgpu.so; null when it is not preloaded.
-extern int pidfound __attribute__((weak));
+// Exported by libvgpu.so; null when it is not preloaded.
+extern int vgpu_hostpid_found(void) __attribute__((weak));
 
 #define CHECK(call)                                                            \
     do {                                                                       \
@@ -20,7 +20,7 @@ extern int pidfound __attribute__((weak));
     } while (0)
 
 int main(void) {
-    if (&pidfound == NULL) {
+    if (vgpu_hostpid_found == NULL) {
         fprintf(stderr, "SKIP: libvgpu.so not preloaded\n");
         return 77;
     }
@@ -31,12 +31,12 @@ int main(void) {
         return 77;
     }
     CHECK(cuDeviceGet(&dev, 0));
-    if (pidfound != 0) {
+    if (vgpu_hostpid_found() != 0) {
         fprintf(stderr, "FAIL: host pid detected during cuInit\n");
         return 1;
     }
     CHECK(cuDevicePrimaryCtxRetain(&ctx, dev));
-    if (pidfound != 1) {
+    if (vgpu_hostpid_found() != 1) {
         fprintf(stderr, "FAIL: host pid not detected on first context\n");
         return 1;
     }

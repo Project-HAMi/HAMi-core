@@ -959,6 +959,11 @@ static void hostpidInit(void) {
     init_utilization_watcher();
 }
 
+/* Exported for tests: pidfound itself is hidden in release builds. */
+FUNC_ATTR_VISIBLE int vgpu_hostpid_found(void) {
+    return pidfound;
+}
+
 void childReinitPostInit() {
     hostpid_fallback_lock_after_fork();
     reset_lazy_context_sizing();
