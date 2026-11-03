@@ -393,6 +393,12 @@ if (TARGET vgpu)
     set_tests_properties(dlsym_rtld_next_preloaded PROPERTIES
         ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:vgpu>"
         TIMEOUT 10)
+    # Needs a GPU: skips (77) when cuInit fails.
+    add_test(NAME lazy_hostpid COMMAND test_lazy_hostpid)
+    set_tests_properties(lazy_hostpid PROPERTIES
+        ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:vgpu>;CUDA_DEVICE_MEMORY_LIMIT=4g"
+        SKIP_RETURN_CODE 77
+        TIMEOUT 30)
 endif()
 
 # GPU + LD_PRELOAD regression for cross-process cuMemAlloc TOCTOU (#273).

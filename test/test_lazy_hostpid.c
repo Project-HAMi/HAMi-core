@@ -26,7 +26,10 @@ int main(void) {
     }
     CUdevice dev;
     CUcontext ctx;
-    CHECK(cuInit(0));
+    if (cuInit(0) != CUDA_SUCCESS) {
+        fprintf(stderr, "SKIP: no usable GPU\n");
+        return 77;
+    }
     CHECK(cuDeviceGet(&dev, 0));
     if (pidfound != 0) {
         fprintf(stderr, "FAIL: host pid detected during cuInit\n");
