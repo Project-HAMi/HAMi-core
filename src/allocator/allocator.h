@@ -112,6 +112,14 @@ int allocate_raw(CUdeviceptr *dptr, size_t size);
 int free_raw(CUdeviceptr dptr);
 int add_chunk_only(CUdeviceptr address, size_t size, CUdevice dev);
 int remove_chunk_only(CUdeviceptr address);
+
+/* VMM accounting: the charge from cuMemCreate is dropped only after the
+ * handle is fully released and all of its mappings are unmapped. */
+int vmm_handle_created(CUmemGenericAllocationHandle handle);
+void vmm_handle_retained(CUmemGenericAllocationHandle handle);
+void vmm_handle_released(CUmemGenericAllocationHandle handle);
+void vmm_mapped(CUdeviceptr ptr, CUmemGenericAllocationHandle handle);
+void vmm_unmapped(CUdeviceptr ptr, size_t size);
 int allocate_async_raw(CUdeviceptr *dptr, size_t size, CUstream hStream);
 int allocate_from_pool_async_raw(CUdeviceptr *dptr, size_t size, CUmemoryPool pool, CUstream hStream);
 int free_raw_async(CUdeviceptr dptr, CUstream hStream);

@@ -229,6 +229,106 @@ int remove_chunk_only(CUdeviceptr dptr) {
     return -1;
 }
 
+/* VMM accounting. Memory from cuMemCreate stays allocated in the driver until
+ * every handle reference is released and every mapping of it is unmapped, so
+ * the charge is held until both are true. */
+typedef struct vmm_handle_entry {
+    CUmemGenericAllocationHandle handle;
+    int refs;   /* create + retain - release */
+    int nmaps;  /* live cuMemMap ranges */
+    struct vmm_handle_entry *next;
+} vmm_handle_entry;
+typedef struct vmm_map_entry {
+    CUdeviceptr ptr;
+    vmm_handle_entry *h;
+    struct vmm_map_entry *next;
+} vmm_map_entry;
+static vmm_handle_entry *vmm_handles;
+static vmm_map_entry *vmm_maps;
+static pthread_mutex_t vmm_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static vmm_handle_entry *vmm_find(CUmemGenericAllocationHandle handle) {
+    for (vmm_handle_entry *h = vmm_handles; h != NULL; h = h->next) {
+        if (h->handle == handle) return h;
+    }
+    return NULL;
+}
+
+/* Drop the charge once nothing keeps the memory alive. Call with vmm_mutex held. */
+static void vmm_maybe_drop(vmm_handle_entry *h) {
+    if (h->refs > 0 || h->nmaps > 0) return;
+    vmm_handle_entry **pp = &vmm_handles;
+    while (*pp != h) pp = &(*pp)->next;
+    *pp = h->next;
+    remove_chunk_only(h->handle);
+    free(h);
+}
+
+int vmm_handle_created(CUmemGenericAllocationHandle handle) {
+    vmm_handle_entry *h = calloc(1, sizeof(*h));
+    if (h == NULL) return -1;
+    h->handle = handle;
+    h->refs = 1;
+    pthread_mutex_lock(&vmm_mutex);
+    h->next = vmm_handles;
+    vmm_handles = h;
+    pthread_mutex_unlock(&vmm_mutex);
+    return 0;
+}
+
+void vmm_handle_retained(CUmemGenericAllocationHandle handle) {
+    pthread_mutex_lock(&vmm_mutex);
+    vmm_handle_entry *h = vmm_find(handle);
+    if (h != NULL) h->refs++;
+    pthread_mutex_unlock(&vmm_mutex);
+}
+
+void vmm_handle_released(CUmemGenericAllocationHandle handle) {
+    pthread_mutex_lock(&vmm_mutex);
+    vmm_handle_entry *h = vmm_find(handle);
+    if (h == NULL) {
+        /* Not tracked here (e.g. bookkeeping failed at create time). */
+        remove_chunk_only(handle);
+    } else if (h->refs > 0) {
+        h->refs--;
+        vmm_maybe_drop(h);
+    }
+    pthread_mutex_unlock(&vmm_mutex);
+}
+
+void vmm_mapped(CUdeviceptr ptr, CUmemGenericAllocationHandle handle) {
+    pthread_mutex_lock(&vmm_mutex);
+    vmm_handle_entry *h = vmm_find(handle);
+    if (h != NULL) {
+        vmm_map_entry *m = calloc(1, sizeof(*m));
+        if (m != NULL) {
+            m->ptr = ptr;
+            m->h = h;
+            m->next = vmm_maps;
+            vmm_maps = m;
+            h->nmaps++;
+        }
+    }
+    pthread_mutex_unlock(&vmm_mutex);
+}
+
+void vmm_unmapped(CUdeviceptr ptr, size_t size) {
+    pthread_mutex_lock(&vmm_mutex);
+    vmm_map_entry **mp = &vmm_maps;
+    while (*mp != NULL) {
+        vmm_map_entry *m = *mp;
+        if (m->ptr >= ptr && m->ptr - ptr < size) {
+            *mp = m->next;
+            m->h->nmaps--;
+            vmm_maybe_drop(m->h);
+            free(m);
+        } else {
+            mp = &m->next;
+        }
+    }
+    pthread_mutex_unlock(&vmm_mutex);
+}
+
 int allocate_raw(CUdeviceptr *dptr, size_t size) {
     return add_chunk(dptr, size);
 }
