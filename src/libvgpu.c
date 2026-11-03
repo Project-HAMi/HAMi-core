@@ -270,6 +270,8 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemCreate);
     DLSYM_HOOK_FUNC(cuMemRelease);
     DLSYM_HOOK_FUNC(cuMemMap);
+    DLSYM_HOOK_FUNC(cuMemUnmap);
+    DLSYM_HOOK_FUNC(cuMemRetainAllocationHandle);
     DLSYM_HOOK_FUNC(cuMemImportFromShareableHandle);
     DLSYM_HOOK_FUNC(cuMemAllocAsync);
     DLSYM_HOOK_FUNC(cuMemFreeAsync);
