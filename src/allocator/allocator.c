@@ -296,20 +296,25 @@ void vmm_handle_released(CUmemGenericAllocationHandle handle) {
     pthread_mutex_unlock(&vmm_mutex);
 }
 
-void vmm_mapped(CUdeviceptr ptr, CUmemGenericAllocationHandle handle) {
+/* Returns -1 if the handle is tracked but the mapping could not be recorded. */
+int vmm_mapped(CUdeviceptr ptr, CUmemGenericAllocationHandle handle) {
+    vmm_map_entry *m = calloc(1, sizeof(*m));
+    int ret = 0;
     pthread_mutex_lock(&vmm_mutex);
     vmm_handle_entry *h = vmm_find(handle);
-    if (h != NULL) {
-        vmm_map_entry *m = calloc(1, sizeof(*m));
-        if (m != NULL) {
-            m->ptr = ptr;
-            m->h = h;
-            m->next = vmm_maps;
-            vmm_maps = m;
-            h->nmaps++;
-        }
+    if (h != NULL && m != NULL) {
+        m->ptr = ptr;
+        m->h = h;
+        m->next = vmm_maps;
+        vmm_maps = m;
+        h->nmaps++;
+        m = NULL;
+    } else if (h != NULL) {
+        ret = -1;
     }
     pthread_mutex_unlock(&vmm_mutex);
+    free(m);
+    return ret;
 }
 
 void vmm_unmapped(CUdeviceptr ptr, size_t size) {

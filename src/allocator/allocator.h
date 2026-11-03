@@ -118,7 +118,7 @@ int remove_chunk_only(CUdeviceptr address);
 int vmm_handle_created(CUmemGenericAllocationHandle handle);
 void vmm_handle_retained(CUmemGenericAllocationHandle handle);
 void vmm_handle_released(CUmemGenericAllocationHandle handle);
-void vmm_mapped(CUdeviceptr ptr, CUmemGenericAllocationHandle handle);
+int vmm_mapped(CUdeviceptr ptr, CUmemGenericAllocationHandle handle);
 void vmm_unmapped(CUdeviceptr ptr, size_t size);
 int allocate_async_raw(CUdeviceptr *dptr, size_t size, CUstream hStream);
 int allocate_from_pool_async_raw(CUdeviceptr *dptr, size_t size, CUmemoryPool pool, CUstream hStream);
