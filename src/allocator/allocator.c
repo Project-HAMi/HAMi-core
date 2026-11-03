@@ -238,11 +238,11 @@ typedef struct vmm_handle_entry {
     int nmaps;  /* live cuMemMap ranges */
     struct vmm_handle_entry *next;
 } vmm_handle_entry;
-typedef struct vmm_map_entry {
+struct vmm_map_entry {
     CUdeviceptr ptr;
     vmm_handle_entry *h;
     struct vmm_map_entry *next;
-} vmm_map_entry;
+};
 static vmm_handle_entry *vmm_handles;
 static vmm_map_entry *vmm_maps;
 static pthread_mutex_t vmm_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -296,18 +296,19 @@ void vmm_handle_released(CUmemGenericAllocationHandle handle) {
     pthread_mutex_unlock(&vmm_mutex);
 }
 
-/* Returns -1 if the handle is tracked but the mapping could not be recorded. */
-int vmm_mapped(CUdeviceptr ptr, CUmemGenericAllocationHandle handle) {
+/* Called before the driver cuMemMap. For a tracked handle, takes a temporary
+ * reference so a concurrent release cannot drop the charge before the mapping
+ * is recorded. *out stays NULL for untracked handles. Returns -1 on OOM. */
+int vmm_map_begin(CUmemGenericAllocationHandle handle, vmm_map_entry **out) {
     vmm_map_entry *m = calloc(1, sizeof(*m));
     int ret = 0;
+    *out = NULL;
     pthread_mutex_lock(&vmm_mutex);
     vmm_handle_entry *h = vmm_find(handle);
     if (h != NULL && m != NULL) {
-        m->ptr = ptr;
+        h->refs++;
         m->h = h;
-        m->next = vmm_maps;
-        vmm_maps = m;
-        h->nmaps++;
+        *out = m;
         m = NULL;
     } else if (h != NULL) {
         ret = -1;
@@ -315,6 +316,25 @@ int vmm_mapped(CUdeviceptr ptr, CUmemGenericAllocationHandle handle) {
     pthread_mutex_unlock(&vmm_mutex);
     free(m);
     return ret;
+}
+
+/* Called after the driver cuMemMap: records the mapping if it succeeded and
+ * drops the temporary reference. */
+void vmm_map_end(vmm_map_entry *m, CUdeviceptr ptr, int mapped) {
+    if (m == NULL) return;
+    pthread_mutex_lock(&vmm_mutex);
+    vmm_handle_entry *h = m->h;
+    if (mapped) {
+        m->ptr = ptr;
+        m->next = vmm_maps;
+        vmm_maps = m;
+        h->nmaps++;
+        m = NULL;
+    }
+    h->refs--;
+    vmm_maybe_drop(h);
+    pthread_mutex_unlock(&vmm_mutex);
+    free(m);
 }
 
 void vmm_unmapped(CUdeviceptr ptr, size_t size) {

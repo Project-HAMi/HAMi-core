@@ -567,11 +567,12 @@ CUresult cuMemRelease(CUmemGenericAllocationHandle handle) {
 
 CUresult cuMemMap( CUdeviceptr ptr, size_t size, size_t offset, CUmemGenericAllocationHandle handle, unsigned long long flags ) {
     LOG_INFO("cuMemMap:%lld(%llx,%llx)", size, ptr, offset);
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemMap,ptr,size,offset,handle,flags);
-    if (res == CUDA_SUCCESS && vmm_mapped(ptr, handle) != 0) {
-        CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemUnmap, ptr, size);
+    vmm_map_entry *m = NULL;
+    if (vmm_map_begin(handle, &m) != 0) {
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemMap,ptr,size,offset,handle,flags);
+    vmm_map_end(m, ptr, res == CUDA_SUCCESS);
     return res;
 }
 
