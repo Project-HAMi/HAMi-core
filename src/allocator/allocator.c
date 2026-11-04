@@ -474,6 +474,7 @@ void graph_ptr_freed(CUdeviceptr ptr) {
  * on a stream that joined the capture must still be traced back to it. */
 typedef struct capture_link {
     CUstream stream;
+    CUgraph graph;
     cuuint64_t id;
     struct capture_link *next;
 } capture_link;
@@ -501,6 +502,7 @@ void graph_capture_begin(CUstream stream) {
     capture_link *l = id != 0 ? malloc(sizeof(*l)) : NULL;
     if (l == NULL) return;
     l->stream = stream;
+    l->graph = graph;
     l->id = id;
     pthread_mutex_lock(&graph_mutex);
     l->next = capture_links;
@@ -508,8 +510,9 @@ void graph_capture_begin(CUstream stream) {
     pthread_mutex_unlock(&graph_mutex);
 }
 
-/* The id of the capture that ends on stream, 0 if unknown. */
-cuuint64_t graph_capture_take(CUstream stream) {
+/* The id of the capture running on stream, 0 if unknown. With take, the
+ * association ends with the capture. */
+cuuint64_t graph_capture_id(CUstream stream, int take) {
     cuuint64_t id = 0;
     pthread_mutex_lock(&graph_mutex);
     capture_link **pp = &capture_links;
@@ -517,10 +520,26 @@ cuuint64_t graph_capture_take(CUstream stream) {
         capture_link *l = *pp;
         if (l->stream == stream) {
             id = l->id;
-            *pp = l->next;
-            free(l);
-        } else {
-            pp = &l->next;
+            if (take) {
+                *pp = l->next;
+                free(l);
+            }
+            break;
+        }
+        pp = &l->next;
+    }
+    pthread_mutex_unlock(&graph_mutex);
+    return id;
+}
+
+/* The id of the running capture that builds graph, 0 for a standalone graph. */
+cuuint64_t graph_capture_id_of(CUgraph graph) {
+    cuuint64_t id = 0;
+    pthread_mutex_lock(&graph_mutex);
+    for (capture_link *l = capture_links; l != NULL; l = l->next) {
+        if (l->graph == graph) {
+            id = l->id;
+            break;
         }
     }
     pthread_mutex_unlock(&graph_mutex);

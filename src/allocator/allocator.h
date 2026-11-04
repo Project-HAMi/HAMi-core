@@ -110,7 +110,8 @@ void graph_exec_destroyed(CUgraphExec exec);
 void graph_exec_launched(CUgraphExec exec);
 void graph_capture_info(CUstream hStream, CUstreamCaptureStatus *cap, cuuint64_t *id, CUgraph *graph);
 void graph_capture_begin(CUstream stream);
-cuuint64_t graph_capture_take(CUstream stream);
+cuuint64_t graph_capture_id(CUstream stream, int take);
+cuuint64_t graph_capture_id_of(CUgraph graph);
 void graph_capture_end(cuuint64_t capid, CUgraph graph);
 
 // Allocate and free device memory
