@@ -132,6 +132,22 @@ int main(void) {
     }
     CHECK(cuMemFree(p));
     CHECK(add_node(g2, 768ull << 20, NULL, 1));
+    CHECK(cuGraphDestroy(g2));
+
+    // A graph that never ran allocated nothing: destroying it frees the charge
+    // even without a free node (#392), also after an exec was made but not run.
+    for (int with_exec = 0; with_exec < 2; with_exec++) {
+        CHECK(cuGraphCreate(&g1, 0));
+        CHECK(add_node(g1, 768ull << 20, NULL, 0));
+        if (with_exec) {
+            CHECK(cuGraphInstantiateWithFlags(&ex, g1, 0));
+            CHECK(cuGraphExecDestroy(ex));
+        }
+        CHECK(cuGraphDestroy(g1));
+        CHECK(cuGraphCreate(&g2, 0));
+        CHECK(add_node(g2, 768ull << 20, NULL, 1));
+        CHECK(cuGraphDestroy(g2));
+    }
     printf("PASS\n");
     return 0;
 }

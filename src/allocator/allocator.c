@@ -401,8 +401,11 @@ typedef struct graph_charge_entry {
     CUdevice dev;
     size_t size;
     CUdeviceptr ptr;
+    CUstream cstream;    /* stream of the capture it was recorded in, NULL for explicit nodes */
+    int capturing;       /* that capture has not ended yet */
     int has_free;
     int nexec;           /* live execs instantiated from the graph */
+    int launched;        /* an exec of the graph was launched or uploaded */
     struct graph_charge_entry *next;
 } graph_charge_entry;
 typedef struct graph_exec_link {
@@ -414,10 +417,12 @@ static graph_charge_entry *graph_charges;
 static graph_exec_link *graph_execs;
 static pthread_mutex_t graph_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr) {
+int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr, CUstream cstream) {
     graph_charge_entry *g = calloc(1, sizeof(*g));
     if (g == NULL) return CUDA_ERROR_OUT_OF_MEMORY;
     g->graph = graph; g->dev = dev; g->size = size; g->ptr = ptr;
+    g->cstream = cstream;
+    g->capturing = cstream != NULL;
     pthread_mutex_lock(&graph_mutex);
     g->next = graph_charges;
     graph_charges = g;
@@ -524,8 +529,36 @@ void graph_exec_destroyed(CUgraphExec exec) {
         graph_charge_entry *e = l->entry;
         *lp = l->next;
         free(l);
-        if (--e->nexec == 0 && e->graph == NULL && e->has_free) graph_drop_entry(e);
+        if (--e->nexec == 0 && e->graph == NULL && (e->has_free || !e->launched)) {
+            graph_drop_entry(e);
+        }
         lp = &graph_execs;  /* graph_drop_entry may have freed other links */
+    }
+    pthread_mutex_unlock(&graph_mutex);
+}
+
+void graph_exec_launched(CUgraphExec exec) {
+    pthread_mutex_lock(&graph_mutex);
+    for (graph_exec_link *l = graph_execs; l != NULL; l = l->next) {
+        if (l->exec == exec) l->entry->launched = 1;
+    }
+    pthread_mutex_unlock(&graph_mutex);
+}
+
+/* A failed capture is discarded by the driver without a cuGraphDestroy, so
+ * the memory it recorded was never allocated. An invalidated capture no
+ * longer reports its graph or id, hence the stream identifies it. A capture
+ * that ended well keeps its entries, now owned by the graph. */
+void graph_capture_end(CUstream stream, CUgraph graph) {
+    pthread_mutex_lock(&graph_mutex);
+    for (graph_charge_entry *g = graph_charges, *n; g != NULL; g = n) {
+        n = g->next;
+        if (!g->capturing) continue;
+        if (graph != NULL && g->graph == graph) {
+            g->capturing = 0;  /* ended well, now owned by the graph */
+        } else if (graph == NULL && g->cstream == stream) {
+            graph_drop_entry(g);
+        }
     }
     pthread_mutex_unlock(&graph_mutex);
 }
@@ -538,7 +571,8 @@ void graph_release(CUgraph graph) {
         n = g->next;
         if (g->graph != graph) continue;
         g->graph = NULL;
-        if (g->has_free && g->nexec == 0) graph_drop_entry(g);
+        /* Memory of a graph that never ran was never allocated. */
+        if ((g->has_free || !g->launched) && g->nexec == 0) graph_drop_entry(g);
     }
     pthread_mutex_unlock(&graph_mutex);
 }
@@ -559,7 +593,7 @@ static int account_async_chunk(allocated_list_entry *e, size_t size, CUmemoryPoo
     if (cap != CU_STREAM_CAPTURE_STATUS_NONE) {
         if (capgraph != NULL) {
             int failed = reserve_device_memory(e->entry->dev, size) != 0;
-            if (!failed && graph_record(capgraph, e->entry->dev, size, e->entry->address) != 0) {
+            if (!failed && graph_record(capgraph, e->entry->dev, size, e->entry->address, hStream) != 0) {
                 release_device_memory(e->entry->dev, size);
                 failed = 1;
             }

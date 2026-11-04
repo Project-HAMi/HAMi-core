@@ -138,6 +138,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemCreate"},
     {.name = "cuMemRelease"},
     {.name = "cuMemMap"},
+    {.name = "cuStreamEndCapture"},
     {.name = "cuMemUnmap"},
     {.name = "cuMemRetainAllocationHandle"},
     {.name = "cuMemImportFromShareableHandle"},
@@ -318,6 +319,8 @@ void *find_symbols_in_table(const char *symbol) {
         strcmp(symbol, "cuGraphInstantiateWithFlags") != 0 &&
         strcmp(symbol, "cuGraphInstantiateWithParams") != 0 &&
         strcmp(symbol, "cuGraphExecDestroy") != 0 &&
+        strcmp(symbol, "cuGraphLaunch") != 0 &&
+        strcmp(symbol, "cuGraphUpload") != 0 &&
         strcmp(symbol, "cuGraphDestroy") != 0) {
         return NULL;
     }
