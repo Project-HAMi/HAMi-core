@@ -5,6 +5,12 @@
 // Run under LD_PRELOAD=libvgpu.so; exit 77 (skip) without it.
 #include <cuda.h>
 #include <stdio.h>
+#include <string.h>
+
+// CUDA 13 headers do not declare the older context creation entry points.
+CUresult cuCtxCreate_v2(CUcontext *pctx, unsigned int flags, CUdevice dev);
+CUresult cuCtxCreate_v3(CUcontext *pctx, CUexecAffinityParam *paramsArray, int numParams,
+                        unsigned int flags, CUdevice dev);
 
 // Exported by libvgpu.so; null when it is not preloaded.
 extern int vgpu_hostpid_found(void) __attribute__((weak));
@@ -19,7 +25,9 @@ extern int vgpu_hostpid_found(void) __attribute__((weak));
         }                                                                      \
     } while (0)
 
-int main(void) {
+// usage: test_lazy_hostpid [primary|v2|v3|v4|green]: the call that creates the first context.
+int main(int argc, char **argv) {
+    const char *mode = argc > 1 ? argv[1] : "primary";
     if (vgpu_hostpid_found == NULL) {
         fprintf(stderr, "SKIP: libvgpu.so not preloaded\n");
         return 77;
@@ -35,9 +43,26 @@ int main(void) {
         fprintf(stderr, "FAIL: host pid detected during cuInit\n");
         return 1;
     }
-    CHECK(cuDevicePrimaryCtxRetain(&ctx, dev));
+    if (!strcmp(mode, "v2")) {
+        CHECK(cuCtxCreate_v2(&ctx, 0, dev));
+    } else if (!strcmp(mode, "v3")) {
+        CHECK(cuCtxCreate_v3(&ctx, NULL, 0, 0, dev));
+    } else if (!strcmp(mode, "v4")) {
+        CUctxCreateParams params;
+        memset(&params, 0, sizeof(params));
+        CHECK(cuCtxCreate(&ctx, &params, 0, dev));
+    } else if (!strcmp(mode, "green")) {
+        CUdevResource resource;
+        CUdevResourceDesc desc;
+        CUgreenCtx green;
+        CHECK(cuDeviceGetDevResource(dev, &resource, CU_DEV_RESOURCE_TYPE_SM));
+        CHECK(cuDevResourceGenerateDesc(&desc, &resource, 1));
+        CHECK(cuGreenCtxCreate(&green, desc, dev, CU_GREEN_CTX_DEFAULT_STREAM));
+    } else {
+        CHECK(cuDevicePrimaryCtxRetain(&ctx, dev));
+    }
     if (vgpu_hostpid_found() != 1) {
-        fprintf(stderr, "FAIL: host pid not detected on first context\n");
+        fprintf(stderr, "FAIL: host pid not detected on first context (%s)\n", mode);
         return 1;
     }
     printf("PASS\n");

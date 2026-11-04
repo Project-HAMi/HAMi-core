@@ -50,7 +50,6 @@ CUresult cuCtxGetDevice(CUdevice* device) {
     return res;
 }
 
-#if CUDA_VERSION < 13000
 CUresult cuCtxCreate_v2 ( CUcontext* pctx, unsigned int  flags, CUdevice dev ){
     LOG_DEBUG("into cuCtxCreate pctx=%p flags=%d dev=%d",pctx,flags,dev);
     ensure_hostpid();
@@ -63,6 +62,13 @@ CUresult cuCtxCreate_v3 ( CUcontext* pctx, CUexecAffinityParam* paramsArray, int
     ensure_hostpid();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxCreate_v3,pctx,paramsArray,numParams,flags,dev);
     return res;
+}
+
+#if CUDA_VERSION >= 12040
+CUresult cuGreenCtxCreate(CUgreenCtx *phCtx, CUdevResourceDesc desc, CUdevice dev, unsigned int flags) {
+    LOG_DEBUG("into cuGreenCtxCreate dev=%d flags=%u", dev, flags);
+    ensure_hostpid();
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuGreenCtxCreate, phCtx, desc, dev, flags);
 }
 #endif
 
