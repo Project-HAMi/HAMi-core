@@ -3,6 +3,7 @@
 // must not invalidate the capture (cuMemPoolGetAttribute is illegal while
 // capturing). Runs for global, thread-local and relaxed capture modes.
 #include <cuda.h>
+#include <pthread.h>
 #include <stdio.h>
 
 #define CHECK(call)                                                            \
@@ -14,6 +15,18 @@
             return 1;                                                          \
         }                                                                      \
     } while (0)
+
+static CUcontext thread_ctx;
+static CUstream thread_stream;
+static CUresult thread_result;
+
+static void *end_on_other_thread(void *arg) {
+    CUgraph g;
+    (void)arg;
+    cuCtxSetCurrent(thread_ctx);
+    thread_result = cuStreamEndCapture(thread_stream, &g);
+    return NULL;
+}
 
 int main(void) {
     CUdevice dev;
@@ -87,6 +100,23 @@ int main(void) {
     cuStreamWaitEvent(s, ev, 0);
     if (cuStreamEndCapture(s, &g2) == CUDA_SUCCESS) {
         fprintf(stderr, "FAIL: joined-stream capture was not invalidated\n");
+        return 1;
+    }
+    CHECK(cuMemAlloc(&q, 768ull << 20));
+    CHECK(cuMemFree(q));
+
+    // Ending a global capture from another thread is refused and terminates
+    // the capture: its allocation never happened, so the charge must go.
+    pthread_t t;
+    CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_GLOBAL));
+    CHECK(cuMemAllocAsync(&p, 768ull << 20, s));
+    CHECK(cuMemFreeAsync(p, s));
+    thread_ctx = ctx;
+    thread_stream = s;
+    pthread_create(&t, NULL, end_on_other_thread, NULL);
+    pthread_join(t, NULL);
+    if (thread_result != CUDA_ERROR_STREAM_CAPTURE_WRONG_THREAD) {
+        fprintf(stderr, "FAIL: end from another thread -> %d\n", (int)thread_result);
         return 1;
     }
     CHECK(cuMemAlloc(&q, 768ull << 20));

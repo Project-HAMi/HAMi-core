@@ -636,7 +636,7 @@ CUresult cuGraphAddMemAllocNode(CUgraphNode *phGraphNode, CUgraph hGraph,
         phGraphNode, hGraph, dependencies, numDependencies, nodeParams);
     if (charge && res != CUDA_SUCCESS) {
         release_device_memory(dev, size);
-    } else if (charge && graph_record(hGraph, dev, size, nodeParams->dptr, 0) != 0) {
+    } else if (charge && graph_record(hGraph, dev, size, nodeParams->dptr, graph_capture_id_of(hGraph)) != 0) {
         /* Untracked graph memory would escape the limit: undo the node. */
         CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphDestroyNode, *phGraphNode);
         release_device_memory(dev, size);
