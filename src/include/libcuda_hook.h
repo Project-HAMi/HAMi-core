@@ -171,6 +171,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuMemCreate),
     CUDA_OVERRIDE_ENUM(cuMemRelease),
     CUDA_OVERRIDE_ENUM(cuMemMap),
+    CUDA_OVERRIDE_ENUM(cuStreamBeginCapture_v2),
     CUDA_OVERRIDE_ENUM(cuStreamEndCapture),
     CUDA_OVERRIDE_ENUM(cuMemUnmap),
     CUDA_OVERRIDE_ENUM(cuMemRetainAllocationHandle),
@@ -178,6 +179,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuMemAllocAsync),
     CUDA_OVERRIDE_ENUM(cuMemFreeAsync),
     CUDA_OVERRIDE_ENUM(cuStreamGetCaptureInfo_v2),
+    CUDA_OVERRIDE_ENUM(cuStreamGetCaptureInfo_v3),
     CUDA_OVERRIDE_ENUM(cuGraphAddMemAllocNode),
     CUDA_OVERRIDE_ENUM(cuGraphAddMemFreeNode),
     /* memory APIs */

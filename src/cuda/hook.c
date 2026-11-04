@@ -138,6 +138,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemCreate"},
     {.name = "cuMemRelease"},
     {.name = "cuMemMap"},
+    {.name = "cuStreamBeginCapture_v2"},
     {.name = "cuStreamEndCapture"},
     {.name = "cuMemUnmap"},
     {.name = "cuMemRetainAllocationHandle"},
@@ -145,6 +146,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemAllocAsync"},
     {.name = "cuMemFreeAsync"},
     {.name = "cuStreamGetCaptureInfo_v2"},
+    {.name = "cuStreamGetCaptureInfo_v3"},
     {.name = "cuGraphAddMemAllocNode"},
     {.name = "cuGraphAddMemFreeNode"},
     /* memory APIs */

@@ -71,6 +71,26 @@ int main(void) {
     CUdeviceptr q;
     CHECK(cuMemAlloc(&q, 768ull << 20));
     CHECK(cuMemFree(q));
+
+    // Same when the allocation happens on a stream that joined the capture:
+    // the capture is terminated on the origin stream.
+    CUstream side;
+    CUevent ev;
+    CHECK(cuStreamCreate(&side, CU_STREAM_NON_BLOCKING));
+    CHECK(cuEventCreate(&ev, CU_EVENT_DISABLE_TIMING));
+    CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_GLOBAL));
+    CHECK(cuEventRecord(ev, s));
+    CHECK(cuStreamWaitEvent(side, ev, 0));
+    CHECK(cuMemAllocAsync(&p, 768ull << 20, side));
+    cuStreamQuery(s);  // invalidates the capture
+    cuEventRecord(ev, side);
+    cuStreamWaitEvent(s, ev, 0);
+    if (cuStreamEndCapture(s, &g2) == CUDA_SUCCESS) {
+        fprintf(stderr, "FAIL: joined-stream capture was not invalidated\n");
+        return 1;
+    }
+    CHECK(cuMemAlloc(&q, 768ull << 20));
+    CHECK(cuMemFree(q));
     printf("PASS\n");
     return 0;
 }
