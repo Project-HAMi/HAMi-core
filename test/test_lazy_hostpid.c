@@ -55,9 +55,15 @@ int main(int argc, char **argv) {
         CUdevResource resource;
         CUdevResourceDesc desc;
         CUgreenCtx green;
-        CHECK(cuDeviceGetDevResource(dev, &resource, CU_DEV_RESOURCE_TYPE_SM));
-        CHECK(cuDevResourceGenerateDesc(&desc, &resource, 1));
-        CHECK(cuGreenCtxCreate(&green, desc, dev, CU_GREEN_CTX_DEFAULT_STREAM));
+        // Not every device supports green contexts: that is a skip, not a failure.
+        CUresult r = cuDeviceGetDevResource(dev, &resource, CU_DEV_RESOURCE_TYPE_SM);
+        if (r == CUDA_SUCCESS) r = cuDevResourceGenerateDesc(&desc, &resource, 1);
+        if (r == CUDA_SUCCESS) r = cuGreenCtxCreate(&green, desc, dev, CU_GREEN_CTX_DEFAULT_STREAM);
+        if (r == CUDA_ERROR_NOT_SUPPORTED) {
+            fprintf(stderr, "SKIP: green contexts not supported\n");
+            return 77;
+        }
+        CHECK(r);
     } else {
         CHECK(cuDevicePrimaryCtxRetain(&ctx, dev));
     }
