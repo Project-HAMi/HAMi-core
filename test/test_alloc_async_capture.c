@@ -58,6 +58,19 @@ int main(void) {
     CHECK(cuMemFreeAsync(p, s));
     CHECK(cuStreamEndCapture(s, &g2));
     CHECK(cuGraphDestroy(g2));
+
+    // A capture that gets invalidated is discarded by the driver without a
+    // cuGraphDestroy; its allocation never happened and must not stay charged (#392).
+    CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_GLOBAL));
+    CHECK(cuMemAllocAsync(&p, 768ull << 20, s));
+    cuStreamQuery(s);  // not allowed while capturing: invalidates the capture
+    if (cuStreamEndCapture(s, &g2) == CUDA_SUCCESS) {
+        fprintf(stderr, "FAIL: capture was not invalidated\n");
+        return 1;
+    }
+    CUdeviceptr q;
+    CHECK(cuMemAlloc(&q, 768ull << 20));
+    CHECK(cuMemFree(q));
     printf("PASS\n");
     return 0;
 }

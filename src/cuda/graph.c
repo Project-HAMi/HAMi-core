@@ -284,13 +284,25 @@ CUresult cuGraphInstantiateWithParams(CUgraphExec *phGraphExec, CUgraph hGraph,
 }
 
 CUresult cuGraphUpload(CUgraphExec hGraphExec, CUstream hStream) {
-	LOG_DEBUG("cuGraphUpload");
-	return CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphUpload,hGraphExec,hStream);
+    LOG_DEBUG("cuGraphUpload");
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphUpload, hGraphExec, hStream);
+    if (res == CUDA_SUCCESS) graph_exec_launched(hGraphExec);
+    return res;
 }
 
 CUresult cuGraphLaunch(CUgraphExec hGraphExec, CUstream hStream) {
-	LOG_DEBUG("cuGraphLaunch");
-	return CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphLaunch,hGraphExec,hStream);
+    LOG_DEBUG("cuGraphLaunch");
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphLaunch, hGraphExec, hStream);
+    if (res == CUDA_SUCCESS) graph_exec_launched(hGraphExec);
+    return res;
+}
+
+CUresult cuStreamEndCapture(CUstream hStream, CUgraph *phGraph) {
+    LOG_DEBUG("cuStreamEndCapture");
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamEndCapture, hStream, phGraph);
+    /* graph is NULL when the capture failed. */
+    graph_capture_end(hStream, res == CUDA_SUCCESS && phGraph != NULL ? *phGraph : NULL);
+    return res;
 }
 
 CUresult cuGraphExecDestroy(CUgraphExec hGraphExec) {
