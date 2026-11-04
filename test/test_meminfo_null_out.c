@@ -18,6 +18,8 @@
 #include "include/libcuda_hook.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
+void ensure_hostpid(void) {}
+
 #define TEST_DEV 0
 #define DRV_TOTAL (UINT64_C(24) << 30)
 #define DRV_FREE (UINT64_C(20) << 30)

@@ -89,8 +89,16 @@ CUresult cuDeviceGetLuid(char *luid, unsigned int *deviceNodeMask,
 CUresult cuDeviceTotalMem_v2 ( size_t* bytes, CUdevice dev ) {
     LOG_DEBUG("into cuDeviceTotalMem");
     ENSURE_INITIALIZED();
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceTotalMem_v2, bytes, dev);
+    if (res != CUDA_SUCCESS || bytes == NULL) {
+        return res;
+    }
+    /* A limit of 0 means unlimited, and a limit above the device cannot be
+     * handed out: report the smaller of limit and the real total. */
     size_t limit = get_current_device_memory_limit(dev);
-    *bytes = limit;
+    if (limit != 0 && limit < *bytes) {
+        *bytes = limit;
+    }
     return CUDA_SUCCESS;
 }
 
