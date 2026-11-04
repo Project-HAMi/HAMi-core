@@ -297,11 +297,19 @@ CUresult cuGraphLaunch(CUgraphExec hGraphExec, CUstream hStream) {
     return res;
 }
 
+CUresult cuStreamBeginCapture_v2(CUstream hStream, CUstreamCaptureMode mode) {
+    LOG_DEBUG("cuStreamBeginCapture_v2");
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamBeginCapture_v2, hStream, mode);
+    if (res == CUDA_SUCCESS) graph_capture_begin(hStream);
+    return res;
+}
+
 CUresult cuStreamEndCapture(CUstream hStream, CUgraph *phGraph) {
     LOG_DEBUG("cuStreamEndCapture");
+    cuuint64_t id = graph_capture_take(hStream);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamEndCapture, hStream, phGraph);
-    /* graph is NULL when the capture failed. */
-    graph_capture_end(hStream, res == CUDA_SUCCESS && phGraph != NULL ? *phGraph : NULL);
+    /* The graph is NULL when the capture failed. */
+    graph_capture_end(id, res == CUDA_SUCCESS && phGraph != NULL ? *phGraph : NULL);
     return res;
 }
 

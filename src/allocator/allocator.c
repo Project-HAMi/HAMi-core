@@ -401,7 +401,7 @@ typedef struct graph_charge_entry {
     CUdevice dev;
     size_t size;
     CUdeviceptr ptr;
-    CUstream cstream;    /* stream of the capture it was recorded in, NULL for explicit nodes */
+    cuuint64_t capid;    /* stream capture it was recorded in, 0 for explicit nodes */
     int capturing;       /* that capture has not ended yet */
     int has_free;
     int nexec;           /* live execs instantiated from the graph */
@@ -417,12 +417,12 @@ static graph_charge_entry *graph_charges;
 static graph_exec_link *graph_execs;
 static pthread_mutex_t graph_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr, CUstream cstream) {
+int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr, cuuint64_t capid) {
     graph_charge_entry *g = calloc(1, sizeof(*g));
     if (g == NULL) return CUDA_ERROR_OUT_OF_MEMORY;
     g->graph = graph; g->dev = dev; g->size = size; g->ptr = ptr;
-    g->cstream = cstream;
-    g->capturing = cstream != NULL;
+    g->capid = capid;
+    g->capturing = capid != 0;
     pthread_mutex_lock(&graph_mutex);
     g->next = graph_charges;
     graph_charges = g;
@@ -469,12 +469,69 @@ void graph_ptr_freed(CUdeviceptr ptr) {
     pthread_mutex_unlock(&graph_mutex);
 }
 
-void graph_ptr_freed_async(CUdeviceptr ptr, CUstream hStream) {
-    CUstreamCaptureStatus cap = CU_STREAM_CAPTURE_STATUS_NONE;
+/* A capture's id, remembered per origin stream at its start: an invalidated
+ * capture no longer reports its id or graph when it ends, and an allocation
+ * on a stream that joined the capture must still be traced back to it. */
+typedef struct capture_link {
+    CUstream stream;
     cuuint64_t id;
-    CUgraph graph = NULL;
-    CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCaptureInfo_v2, hStream, &cap, &id,
-                       &graph, NULL, NULL);
+    struct capture_link *next;
+} capture_link;
+static capture_link *capture_links;
+
+/* Capture state of a stream. The id is 0 when the driver cannot report it. */
+void graph_capture_info(CUstream hStream, CUstreamCaptureStatus *cap, cuuint64_t *id, CUgraph *graph) {
+    *cap = CU_STREAM_CAPTURE_STATUS_NONE;
+    *id = 0;
+    *graph = NULL;
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuStreamGetCaptureInfo_v3) != NULL) {
+        CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCaptureInfo_v3, hStream, cap, id, graph,
+                           NULL, NULL, NULL);
+    } else {
+        CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCaptureInfo_v2, hStream, cap, id, graph,
+                           NULL, NULL);
+    }
+}
+
+void graph_capture_begin(CUstream stream) {
+    CUstreamCaptureStatus cap;
+    cuuint64_t id;
+    CUgraph graph;
+    graph_capture_info(stream, &cap, &id, &graph);
+    capture_link *l = id != 0 ? malloc(sizeof(*l)) : NULL;
+    if (l == NULL) return;
+    l->stream = stream;
+    l->id = id;
+    pthread_mutex_lock(&graph_mutex);
+    l->next = capture_links;
+    capture_links = l;
+    pthread_mutex_unlock(&graph_mutex);
+}
+
+/* The id of the capture that ends on stream, 0 if unknown. */
+cuuint64_t graph_capture_take(CUstream stream) {
+    cuuint64_t id = 0;
+    pthread_mutex_lock(&graph_mutex);
+    capture_link **pp = &capture_links;
+    while (*pp != NULL) {
+        capture_link *l = *pp;
+        if (l->stream == stream) {
+            id = l->id;
+            *pp = l->next;
+            free(l);
+        } else {
+            pp = &l->next;
+        }
+    }
+    pthread_mutex_unlock(&graph_mutex);
+    return id;
+}
+
+void graph_ptr_freed_async(CUdeviceptr ptr, CUstream hStream) {
+    CUstreamCaptureStatus cap;
+    cuuint64_t id;
+    CUgraph graph;
+    graph_capture_info(hStream, &cap, &id, &graph);
     if (cap != CU_STREAM_CAPTURE_STATUS_NONE) {
         graph_mark_free(graph, ptr);
     } else {
@@ -546,17 +603,16 @@ void graph_exec_launched(CUgraphExec exec) {
 }
 
 /* A failed capture is discarded by the driver without a cuGraphDestroy, so
- * the memory it recorded was never allocated. An invalidated capture no
- * longer reports its graph or id, hence the stream identifies it. A capture
- * that ended well keeps its entries, now owned by the graph. */
-void graph_capture_end(CUstream stream, CUgraph graph) {
+ * the memory it recorded was never allocated. The capture id covers every
+ * stream that joined the capture. */
+void graph_capture_end(cuuint64_t capid, CUgraph graph) {
     pthread_mutex_lock(&graph_mutex);
     for (graph_charge_entry *g = graph_charges, *n; g != NULL; g = n) {
         n = g->next;
         if (!g->capturing) continue;
         if (graph != NULL && g->graph == graph) {
             g->capturing = 0;  /* ended well, now owned by the graph */
-        } else if (graph == NULL && g->cstream == stream) {
+        } else if (graph == NULL && capid != 0 && g->capid == capid) {
             graph_drop_entry(g);
         }
     }
@@ -585,15 +641,14 @@ static int account_async_chunk(allocated_list_entry *e, size_t size, CUmemoryPoo
      * invalidates the capture. The graph owns the memory: charge it to the
      * graph. The pointer is not kept in device_allocasync: its free is passed
      * through untracked, and graph_* releases the charge. */
-    CUstreamCaptureStatus cap = CU_STREAM_CAPTURE_STATUS_NONE;
+    CUstreamCaptureStatus cap;
     cuuint64_t capid;
-    CUgraph capgraph = NULL;
-    CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCaptureInfo_v2, hStream, &cap, &capid,
-                       &capgraph, NULL, NULL);
+    CUgraph capgraph;
+    graph_capture_info(hStream, &cap, &capid, &capgraph);
     if (cap != CU_STREAM_CAPTURE_STATUS_NONE) {
         if (capgraph != NULL) {
             int failed = reserve_device_memory(e->entry->dev, size) != 0;
-            if (!failed && graph_record(capgraph, e->entry->dev, size, e->entry->address, hStream) != 0) {
+            if (!failed && graph_record(capgraph, e->entry->dev, size, e->entry->address, capid) != 0) {
                 release_device_memory(e->entry->dev, size);
                 failed = 1;
             }
