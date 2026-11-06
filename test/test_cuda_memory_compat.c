@@ -23,6 +23,21 @@ static int deducted_dev;
 void ensure_initialized(void) {}
 void lock_shrreg(void) {}
 void unlock_shrreg(void) {}
+size_t get_gpu_memory_usage(const int dev) {
+    (void)dev;
+    return 0;
+}
+int add_gpu_device_memory_usage(int32_t pid, int dev, size_t usage, int type) {
+    (void)pid;
+    (void)dev;
+    (void)usage;
+    (void)type;
+    return 0;
+}
+int clear_proc_slot_nolock(int force) {
+    (void)force;
+    return 0;
+}
 unsigned int cuda_to_nvml_map(unsigned int dev) {
     EXPECT(dev == 0); return 3;
 }
