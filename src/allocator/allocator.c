@@ -681,11 +681,16 @@ void graph_exec_destroyed(CUgraphExec exec) {
 }
 
 void graph_exec_launched(CUgraphExec exec) {
+    int changed = 0;
     pthread_mutex_lock(&graph_mutex);
     for (graph_exec_link *l = graph_execs; l != NULL; l = l->next) {
-        if (l->exec == exec) l->entry->launched = 1;
+        if (l->exec == exec && !l->entry->launched) {
+            l->entry->launched = 1;
+            changed = 1;
+        }
     }
-    graph_rebalance(0);
+    /* Replays are the hot path: only the first launch changes the charge. */
+    if (changed) graph_rebalance(0);
     pthread_mutex_unlock(&graph_mutex);
 }
 
