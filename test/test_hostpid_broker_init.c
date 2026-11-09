@@ -10,6 +10,7 @@
 void postInit(void);
 void childReinitPostInit(void);
 extern pthread_once_t post_cuinit_flag;
+extern pthread_once_t hostpid_flag;
 
 int pidfound;
 int env_utilization_switch;
@@ -150,6 +151,7 @@ static void reset(const char *gate) {
     pidfound = -1;
     env_utilization_switch = -1;
     post_cuinit_flag = PTHREAD_ONCE_INIT;
+    hostpid_flag = PTHREAD_ONCE_INIT;
 }
 
 static void expect(const char *sequence, int found) {
@@ -162,86 +164,92 @@ static void expect(const char *sequence, int found) {
 int main(void) {
     static const char *disabled[] = {NULL, "", "0", "true", "01", " 1"};
     static const char legacy[] =
-        "allocator map cache_lock probe cache_unlock utilization watcher ";
-    static const char broker[] = "allocator map broker utilization watcher ";
-    static const char fallback[] = "allocator map broker deadline node_lock "
-        "cache_lock probe cache_unlock node_unlock utilization watcher ";
+        "allocator map utilization cache_lock probe cache_unlock watcher ";
+    static const char broker[] = "allocator map utilization broker watcher ";
+    static const char fallback[] = "allocator map utilization broker deadline "
+        "node_lock cache_lock probe cache_unlock node_unlock watcher ";
+
+    reset("1");
+    ensure_post_init();  // what cuInit does
+    check(strcmp(events, "allocator map utilization ") == 0,
+          "cuInit does not discover the host PID");
+    check(pidfound == -1, "pidfound is untouched until first GPU use");
 
     for (size_t i = 0; i < sizeof(disabled) / sizeof(disabled[0]); i++) {
         reset(disabled[i]);
-        ensure_post_init();
+        ensure_hostpid();
         expect(legacy, 1);
     }
 
     reset("1");
-    ensure_post_init();
+    ensure_hostpid();
     expect(broker, 1);
-    ensure_post_init();
+    ensure_hostpid();
     expect(broker, 1);  // pthread_once must not discover or size twice.
 
     reset("1");
     broker_result = NVML_ERROR_NOT_FOUND;
-    ensure_post_init();
+    ensure_hostpid();
     expect(broker, 0);  // NVML cannot repair a missing shared-region slot.
 
     reset("1");
     broker_result = NVML_ERROR_UNKNOWN;
-    ensure_post_init();
+    ensure_hostpid();
     expect(fallback, 1);
 
     reset("1");
     broker_result = NVML_ERROR_UNKNOWN;
     probe_result = NVML_ERROR_DRIVER_NOT_LOADED;
-    ensure_post_init();
+    ensure_hostpid();
     expect(fallback, 0);
 
     reset("1");
     broker_result = NVML_ERROR_UNKNOWN;
     deadline_result = -1;
-    ensure_post_init();
-    expect("allocator map broker deadline utilization watcher ", 0);
+    ensure_hostpid();
+    expect("allocator map utilization broker deadline watcher ", 0);
 
     static const int errors[] = {EACCES, ENOENT, ETIMEDOUT};
     for (size_t i = 0; i < sizeof(errors) / sizeof(errors[0]); i++) {
         reset("1");
         broker_result = NVML_ERROR_UNKNOWN;
         node_lock_errno = errors[i];
-        ensure_post_init();
-        expect("allocator map broker deadline node_lock utilization watcher ", 0);
+        ensure_hostpid();
+        expect("allocator map utilization broker deadline node_lock watcher ", 0);
     }
 
     reset("1");
     broker_result = NVML_ERROR_UNKNOWN;
     cache_lock_result = 0;
-    ensure_post_init();
-    expect("allocator map broker deadline node_lock cache_lock "
-           "node_unlock utilization watcher ", 0);
+    ensure_hostpid();
+    expect("allocator map utilization broker deadline node_lock "
+           "cache_lock node_unlock watcher ", 0);
 
     reset("1");
     broker_result = NVML_ERROR_UNKNOWN;
     release_result = -1;
-    ensure_post_init();
+    ensure_hostpid();
     expect(fallback, 1);
 
     reset(NULL);
     cache_lock_result = 0;
-    ensure_post_init();
-    expect("allocator map cache_lock utilization watcher ", 0);
+    ensure_hostpid();
+    expect("allocator map utilization cache_lock watcher ", 0);
 
     reset(NULL);
     probe_result = NVML_ERROR_UNKNOWN;
-    ensure_post_init();
+    ensure_hostpid();
     expect(legacy, 0);
 
     reset("1");
-    ensure_post_init();
+    ensure_hostpid();
     events[0] = '\0';
     node_locked = 1;  // The child may inherit an in-flight fallback lock.
     childReinitPostInit();
     check(strcmp(events, "fork_reset ") == 0, "child discards inherited lock");
     check(pidfound == 0, "child must rediscover its own PID");
     events[0] = '\0';
-    ensure_post_init();
+    ensure_hostpid();
     expect(broker, 1);
 
     if (failures != 0) {

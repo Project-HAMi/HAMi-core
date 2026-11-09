@@ -25,6 +25,7 @@ void *vgpulib;
 
 pthread_once_t pre_cuinit_flag = PTHREAD_ONCE_INIT;
 pthread_once_t post_cuinit_flag = PTHREAD_ONCE_INIT;
+pthread_once_t hostpid_flag = PTHREAD_ONCE_INIT;
 
 /* pidfound is to enable core utilization, if we don't find hostpid in container, then we have no
  where to find its core utilization */
@@ -147,11 +148,12 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuGetProcAddress);
     DLSYM_HOOK_FUNC(cuGetProcAddress_v2);
     //Context
-#if CUDA_VERSION < 13000
     DLSYM_HOOK_FUNC(cuCtxCreate_v2);
     DLSYM_HOOK_FUNC(cuCtxCreate_v3);
-#endif
     DLSYM_HOOK_FUNC(cuCtxCreate_v4);
+#if CUDA_VERSION >= 12040
+    DLSYM_HOOK_FUNC(cuGreenCtxCreate);
+#endif
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxGetState);
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxRetain);
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxSetFlags_v2);
@@ -889,11 +891,20 @@ void preInit(){
 void postInit(){
     allocator_init();
     map_cuda_visible_devices();
+    print_all();
+    LOG_MSG("Initialized");
+    env_utilization_switch = set_env_utilization_switch();
+}
 
+/* Host PID detection takes the node-wide postinit lock and creates and
+ * destroys a primary context a few times, about half a second per process.
+ * Run it on first GPU use instead of in cuInit so processes that only
+ * initialize the driver (compiler children, tools) do not queue on the lock. */
+static void hostpidInit(void) {
+    ensure_post_init();
     int broker_enabled = hostpid_broker_enabled(
         getenv("LIBVGPU_HOSTPID_BROKER"));
     nvmlReturn_t res;
-
     if (broker_enabled) {
         res = set_task_pid_from_broker();
         // Retry only a failed query. NVML cannot repair a missing shared slot.
@@ -941,9 +952,6 @@ void postInit(){
         }
     }
 
-    print_all();
-
-    LOG_MSG("Initialized");
     if (res != NVML_SUCCESS) {
         LOG_WARN("SET_TASK_PID FAILED - using container PID for accounting");
         pidfound = 0;
@@ -951,8 +959,12 @@ void postInit(){
         pidfound = 1;
     }
 
-    env_utilization_switch = set_env_utilization_switch();
     init_utilization_watcher();
+}
+
+/* Exported for tests: pidfound itself is hidden in release builds. */
+FUNC_ATTR_VISIBLE int vgpu_hostpid_found(void) {
+    return pidfound;
 }
 
 void childReinitPostInit() {
@@ -960,11 +972,23 @@ void childReinitPostInit() {
     reset_lazy_context_sizing();
     LOG_DEBUG("Reset postInit state after fork");
     post_cuinit_flag = PTHREAD_ONCE_INIT;
+    hostpid_flag = PTHREAD_ONCE_INIT;
     pidfound = 0;
 }
 
 void ensure_post_init() {
     pthread_once(&post_cuinit_flag, (void(*) (void))postInit);
+}
+
+/* hostpidInit() retains a primary context through our own hook, which asks for
+ * host PID detection again: skip that re-entry on this thread. */
+static __thread int in_hostpid_init;
+
+void ensure_hostpid() {
+    if (in_hostpid_init) return;
+    in_hostpid_init = 1;
+    pthread_once(&hostpid_flag, (void(*) (void))hostpidInit);
+    in_hostpid_init = 0;
 }
 
 CUresult cuInit(unsigned int Flags){

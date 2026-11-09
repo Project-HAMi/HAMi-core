@@ -71,6 +71,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuCtxCreate_v2),
     CUDA_OVERRIDE_ENUM(cuCtxCreate_v3),
     CUDA_OVERRIDE_ENUM(cuCtxCreate_v4),
+    CUDA_OVERRIDE_ENUM(cuGreenCtxCreate),
     CUDA_OVERRIDE_ENUM(cuCtxDestroy_v2),
     CUDA_OVERRIDE_ENUM(cuCtxGetApiVersion),
     CUDA_OVERRIDE_ENUM(cuCtxGetCacheConfig),
@@ -277,6 +278,12 @@ typedef enum {
 extern cuda_entry_t cuda_library_entry[];
 
 #endif
+
+/* CUDA 13 headers no longer declare these, but drivers and applications still
+ * resolve them, so they stay hooked. Older headers declare them identically. */
+CUresult cuCtxCreate_v2(CUcontext *pctx, unsigned int flags, CUdevice dev);
+CUresult cuCtxCreate_v3(CUcontext *pctx, CUexecAffinityParam *paramsArray, int numParams,
+                        unsigned int flags, CUdevice dev);
 
 #undef cuGetProcAddress
 CUresult cuGetProcAddress( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags );
