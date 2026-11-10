@@ -90,7 +90,15 @@ CUresult cuDeviceTotalMem_v2 ( size_t* bytes, CUdevice dev ) {
     LOG_DEBUG("into cuDeviceTotalMem");
     ENSURE_INITIALIZED();
     size_t limit = get_current_device_memory_limit(dev);
-    *bytes = limit;
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceTotalMem_v2,
+                                      bytes, dev);
+    if (res != CUDA_SUCCESS || limit == 0) {
+        return res;
+    }
+
+    if (*bytes > limit) {
+        *bytes = limit;
+    }
     return CUDA_SUCCESS;
 }
 
