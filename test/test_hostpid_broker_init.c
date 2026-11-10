@@ -237,12 +237,26 @@ int main(void) {
     ensure_post_init();
     events[0] = '\0';
     node_locked = 1;  // The child may inherit an in-flight fallback lock.
+    hostpid_broker_admission_fork_prepare();  // As fork() runs it.
     childReinitPostInit();
     check(strcmp(events, "fork_reset ") == 0, "child discards inherited lock");
     check(pidfound == 0, "child must rediscover its own PID");
     events[0] = '\0';
     ensure_post_init();
     expect(broker, 1);
+
+    // Admission is opt in, and a missing broker never blocks the driver call.
+    check(unsetenv("LIBVGPU_DRIVER_ADMISSION") == 0, "unset admission gate");
+    check(driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_INIT) == -1,
+          "admission is off without its gate");
+    check(setenv("LIBVGPU_DRIVER_ADMISSION", "1", 1) == 0,
+          "set admission gate");
+    reset(NULL);
+    check(driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_INIT) == -1,
+          "admission needs the broker gate too");
+    reset("1");
+    check(driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_RETAIN) == -1,
+          "admission without a trusted broker falls through");
 
     if (failures != 0) {
         fprintf(stderr, "%d host PID broker init checks failed\n", failures);

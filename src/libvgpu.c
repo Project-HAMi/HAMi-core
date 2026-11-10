@@ -883,7 +883,30 @@ void preInit(){
     }
     load_cuda_libraries();
     ENSURE_INITIALIZED();
-    pthread_atfork(NULL, NULL, childReinitPostInit);
+    pthread_atfork(hostpid_broker_admission_fork_prepare,
+                   hostpid_broker_admission_fork_parent,
+                   childReinitPostInit);
+}
+
+int driver_admission_acquire(hostpid_driver_admission_operation_t operation) {
+    int lease_fd = -1;
+
+    if (!hostpid_broker_enabled(getenv("LIBVGPU_HOSTPID_BROKER")) ||
+        !hostpid_broker_enabled(getenv("LIBVGPU_DRIVER_ADMISSION"))) {
+        return -1;
+    }
+    // Admission only smooths bursts, so a missing permit never fails the call.
+    if (hostpid_broker_acquire_driver_admission_trusted(operation,
+                                                        &lease_fd) != 0) {
+        LOG_WARN("No driver admission permit, calling the driver anyway: %s",
+                 strerror(errno));
+        return -1;
+    }
+    return lease_fd;
+}
+
+void driver_admission_release(int *lease_fd) {
+    hostpid_broker_release_driver_admission(lease_fd);
 }
 
 void postInit(){
@@ -956,6 +979,7 @@ void postInit(){
 }
 
 void childReinitPostInit() {
+    hostpid_broker_admission_fork_child();
     hostpid_fallback_lock_after_fork();
     reset_lazy_context_sizing();
     LOG_DEBUG("Reset postInit state after fork");
@@ -971,7 +995,9 @@ CUresult cuInit(unsigned int Flags){
     LOG_INFO("Into cuInit");
     pthread_once(&pre_cuinit_flag,(void(*)(void))preInit);
     ENSURE_INITIALIZED();
+    int lease_fd = driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_INIT);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuInit,Flags);
+    driver_admission_release(&lease_fd);
     if (res != CUDA_SUCCESS){
         LOG_ERROR("cuInit failed:%d",res);
         return res;

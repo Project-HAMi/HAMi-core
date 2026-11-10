@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <poll.h>
 #include <stddef.h>
 #include <pthread.h>
 #include <signal.h>
@@ -45,8 +46,11 @@ void hostpid_broker_test_connect_retry(int fd) {
 }
 #endif
 
-static void read_request(int connection) {
+static void read_request_command(int connection, unsigned char command) {
     unsigned char request[REQUEST_SIZE];
+    const unsigned char expected[REQUEST_SIZE] = {
+        'H', 'P', 'I', 'D', 0, 1, 0, command,
+    };
     size_t offset = 0;
 
     while (offset < sizeof(request)) {
@@ -55,7 +59,11 @@ static void read_request(int connection) {
         assert(received > 0);
         offset += (size_t)received;
     }
-    assert(memcmp(request, "HPID\0\1\0\1", sizeof(request)) == 0);
+    assert(memcmp(request, expected, sizeof(request)) == 0);
+}
+
+static void read_request(int connection) {
+    read_request_command(connection, 1);
 }
 
 static void write_all(int connection, const unsigned char *buffer,
@@ -276,6 +284,242 @@ static void test_protocol(void) {
     run_query_case(serve_large_pid, -1, ERANGE, 0);
     run_query_case(serve_partial_response, -1, ECONNRESET, 0);
     run_query_case(serve_silent, -1, ETIMEDOUT, 0);
+}
+
+static unsigned char admission_command;
+static uint16_t admission_status;
+
+// Grants or refuses one admission, then holds the lease until the client
+// closes it. A granted lease must end in EOF, not in more bytes.
+static void serve_admission(int connection) {
+    unsigned char response[RESPONSE_SIZE];
+    unsigned char byte;
+
+    read_request_command(connection, admission_command);
+    make_response(response, 1, admission_status, 0);
+    write_all(connection, response, sizeof(response));
+    if (admission_status == 0) {
+        assert(read(connection, &byte, 1) == 0);
+    }
+}
+
+static void serve_admission_bad_magic(int connection) {
+    unsigned char response[RESPONSE_SIZE];
+
+    read_request_command(connection, 2);
+    make_response(response, 1, 0, 0);
+    response[0] = 'B';
+    write_all(connection, response, sizeof(response));
+}
+
+static void serve_admission_partial_response(int connection) {
+    unsigned char response[RESPONSE_SIZE];
+
+    read_request_command(connection, 2);
+    make_response(response, 1, 0, 0);
+    write_all(connection, response, 5);
+}
+
+// A permit can come long after the 100 ms test deadline.
+static void serve_admission_late(int connection) {
+    const struct timespec delay = {.tv_sec = 0, .tv_nsec = 300000000L};
+
+    nanosleep(&delay, NULL);
+    serve_admission(connection);
+}
+
+static void run_admission_case(server_action_t action,
+                               hostpid_driver_admission_operation_t operation,
+                               int expected_result, int expected_errno) {
+    char directory[PATH_MAX];
+    char socket_path[PATH_MAX];
+    pid_t child;
+    int lease_fd = 99;
+    int status;
+    int free_fd;
+    int listener = make_listener(socket_path, sizeof(socket_path),
+                                 directory, sizeof(directory));
+
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        alarm(5);
+        int connection = accept(listener, NULL, NULL);
+        assert(connection >= 0);
+        action(connection);
+        close(connection);
+        close(listener);
+        _exit(0);
+    }
+    close(listener);
+
+    // A leaked socket would take the lowest free descriptor.
+    free_fd = dup(0);
+    assert(free_fd >= 0);
+    close(free_fd);
+    errno = 0;
+    assert(hostpid_broker_acquire_driver_admission(socket_path, operation,
+                                                   &lease_fd) ==
+           expected_result);
+    if (expected_result == 0) {
+        assert(lease_fd >= 0);
+        hostpid_broker_release_driver_admission(&lease_fd);
+        assert(lease_fd == -1);
+        hostpid_broker_release_driver_admission(&lease_fd);
+    } else {
+        assert(lease_fd == -1);
+        assert(errno == expected_errno);
+    }
+    assert(dup(0) == free_fd);
+    close(free_fd);
+
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+    assert(unlink(socket_path) == 0);
+    assert(rmdir(directory) == 0);
+}
+
+static void test_driver_admission_protocol(void) {
+    const hostpid_driver_admission_operation_t operations[] = {
+        HOSTPID_DRIVER_ADMISSION_INIT,
+        HOSTPID_DRIVER_ADMISSION_RETAIN,
+        HOSTPID_DRIVER_ADMISSION_RELEASE,
+    };
+    int lease_fd;
+
+    admission_status = 0;
+    for (size_t i = 0; i < sizeof(operations) / sizeof(operations[0]); i++) {
+        admission_command = (unsigned char)(i + 2);
+        run_admission_case(serve_admission, operations[i], 0, 0);
+    }
+    admission_command = 2;
+    run_admission_case(serve_admission_late, HOSTPID_DRIVER_ADMISSION_INIT,
+                       0, 0);
+    admission_status = 2;
+    run_admission_case(serve_admission, HOSTPID_DRIVER_ADMISSION_INIT,
+                       -1, EAGAIN);
+    admission_status = 1;
+    run_admission_case(serve_admission, HOSTPID_DRIVER_ADMISSION_INIT,
+                       -1, EPROTO);
+    run_admission_case(serve_admission_bad_magic,
+                       HOSTPID_DRIVER_ADMISSION_INIT, -1, EPROTO);
+    run_admission_case(serve_admission_partial_response,
+                       HOSTPID_DRIVER_ADMISSION_INIT, -1, ECONNRESET);
+
+    lease_fd = 99;
+    errno = 0;
+    assert(hostpid_broker_acquire_driver_admission(
+               NULL, HOSTPID_DRIVER_ADMISSION_INIT, &lease_fd) == -1);
+    assert(lease_fd == -1 && errno == EINVAL);
+    errno = 0;
+    assert(hostpid_broker_acquire_driver_admission(
+               "/tmp/unused", HOSTPID_DRIVER_ADMISSION_INIT, NULL) == -1);
+    assert(errno == EINVAL);
+    lease_fd = 99;
+    errno = 0;
+    assert(hostpid_broker_acquire_driver_admission(
+               "/tmp/unused", (hostpid_driver_admission_operation_t)99,
+               &lease_fd) == -1);
+    assert(lease_fd == -1 && errno == EINVAL);
+    puts("driver admission protocol");
+}
+
+// The broker frees a permit only on EOF, so a forked child must not keep a
+// copy of the parent's lease open.
+static void test_driver_admission_fork_closes_child_lease(void) {
+    char directory[PATH_MAX];
+    char socket_path[PATH_MAX];
+    int child_ready[2];
+    int child_exit[2];
+    int lease_fd = -1;
+    int status;
+    unsigned char value = 1;
+    int listener = make_listener(socket_path, sizeof(socket_path),
+                                 directory, sizeof(directory));
+    pid_t server;
+    pid_t child;
+
+    admission_command = 2;
+    admission_status = 0;
+    server = fork();
+    assert(server >= 0);
+    if (server == 0) {
+        alarm(5);
+        int connection = accept(listener, NULL, NULL);
+        assert(connection >= 0);
+        serve_admission(connection);
+        _exit(0);
+    }
+    close(listener);
+
+    assert(hostpid_broker_acquire_driver_admission(
+               socket_path, HOSTPID_DRIVER_ADMISSION_INIT, &lease_fd) == 0);
+    assert(pipe(child_ready) == 0);
+    assert(pipe(child_exit) == 0);
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        close(child_ready[0]);
+        close(child_exit[1]);
+        assert(write(child_ready[1], &value, 1) == 1);
+        assert(read(child_exit[0], &value, 1) == 1);
+        _exit(0);
+    }
+    close(child_ready[1]);
+    close(child_exit[0]);
+    assert(read(child_ready[0], &value, 1) == 1);
+
+    // The child is still alive here; the server exits only if the child
+    // closed its copy of the lease.
+    hostpid_broker_release_driver_admission(&lease_fd);
+    assert(waitpid(server, &status, 0) == server);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+
+    assert(write(child_exit[1], &value, 1) == 1);
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    close(child_ready[0]);
+    close(child_exit[1]);
+    assert(unlink(socket_path) == 0);
+    assert(rmdir(directory) == 0);
+    puts("forked child closes its copy of a driver admission lease");
+}
+
+static void *admission_in_thread(void *argument) {
+    int lease_fd = -1;
+    hostpid_broker_acquire_driver_admission(
+        argument, HOSTPID_DRIVER_ADMISSION_INIT, &lease_fd);
+    return NULL;
+}
+
+static void test_cancelled_admission_wait_closes_socket(void) {
+    char directory[PATH_MAX];
+    char socket_path[PATH_MAX];
+    pthread_t thread;
+    void *result;
+    unsigned char byte;
+    struct pollfd descriptor;
+    int listener = make_listener(socket_path, sizeof(socket_path),
+                                 directory, sizeof(directory));
+
+    assert(pthread_create(&thread, NULL, admission_in_thread,
+                          socket_path) == 0);
+    int connection = accept(listener, NULL, NULL);
+    assert(connection >= 0);
+    read_request_command(connection, 2);
+    assert(pthread_cancel(thread) == 0);
+    assert(pthread_join(thread, &result) == 0);
+    assert(result == PTHREAD_CANCELED);
+    descriptor.fd = connection;
+    descriptor.events = POLLIN;
+    assert(poll(&descriptor, 1, 1000) == 1);
+    assert(recv(connection, &byte, 1, MSG_DONTWAIT) == 0);
+    close(connection);
+    close(listener);
+    assert(unlink(socket_path) == 0);
+    assert(rmdir(directory) == 0);
+    puts("cancelled driver admission wait closes its socket");
 }
 
 static void *query_in_thread(void *argument) {
@@ -623,6 +867,9 @@ static void test_trust_validation(void) {
 int main(void) {
     alarm(15);
     signal(SIGPIPE, SIG_IGN);
+    assert(pthread_atfork(hostpid_broker_admission_fork_prepare,
+                          hostpid_broker_admission_fork_parent,
+                          hostpid_broker_admission_fork_child) == 0);
 #if defined(__linux__) && defined(HOSTPID_BROKER_TESTING)
     test_full_accept_queue_timeout();
     test_full_accept_queue_recovers();
@@ -632,6 +879,9 @@ int main(void) {
 #endif
     test_cancelled_query_closes_socket();
     test_protocol();
+    test_driver_admission_protocol();
+    test_driver_admission_fork_closes_child_lease();
+    test_cancelled_admission_wait_closes_socket();
     test_absolute_timeout();
     test_missing_socket();
     test_enable_gate();

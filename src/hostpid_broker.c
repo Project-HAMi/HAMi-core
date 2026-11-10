@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -21,7 +22,11 @@
 
 #define HOSTPID_PROTOCOL_VERSION 1
 #define HOSTPID_COMMAND_GET_PID 1
+#define HOSTPID_COMMAND_ACQUIRE_DRIVER_INIT 2
+#define HOSTPID_COMMAND_ACQUIRE_DRIVER_RETAIN 3
+#define HOSTPID_COMMAND_ACQUIRE_DRIVER_RELEASE 4
 #define HOSTPID_STATUS_OK 0
+#define HOSTPID_STATUS_UNAVAILABLE 2
 #define HOSTPID_REQUEST_SIZE 8
 #define HOSTPID_RESPONSE_SIZE 12
 
@@ -34,6 +39,16 @@ enum {
 #endif
 
 static const unsigned char hostpid_magic[4] = {'H', 'P', 'I', 'D'};
+
+// Open admission sockets, so a forked child can close its copies and the
+// broker sees the lease end when the parent releases it.
+typedef struct admission_lease {
+    int fd;
+    struct admission_lease *next;
+} admission_lease_t;
+
+static pthread_mutex_t admission_leases_lock = PTHREAD_MUTEX_INITIALIZER;
+static admission_lease_t *admission_leases;
 
 int hostpid_broker_enabled(const char *value) {
     return value != NULL && strcmp(value, "1") == 0;
@@ -239,6 +254,47 @@ static int read_before_deadline(int fd, unsigned char *buffer, size_t length,
     return remaining_ms(deadline) < 0 ? -1 : 0;
 }
 
+// An admission request waits in the broker queue for as long as it takes.
+static int read_without_deadline(int fd, unsigned char *buffer,
+                                 size_t length) {
+    while (length > 0) {
+        struct pollfd descriptor = {
+            .fd = fd,
+            .events = POLLIN,
+        };
+        ssize_t received = recv(fd, buffer, length, MSG_DONTWAIT);
+
+        if (received > 0) {
+            buffer += received;
+            length -= (size_t)received;
+            continue;
+        }
+        if (received < 0 && errno == EINTR) {
+            continue;
+        }
+        if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            int result;
+
+            do {
+                result = poll(&descriptor, 1, -1);
+            } while (result < 0 && errno == EINTR);
+            if (result < 0) {
+                return -1;
+            }
+            if ((descriptor.revents & POLLNVAL) != 0) {
+                errno = EBADF;
+                return -1;
+            }
+            continue;
+        }
+        if (received == 0) {
+            errno = ECONNRESET;
+        }
+        return -1;
+    }
+    return 0;
+}
+
 static uint16_t read_u16(const unsigned char *buffer) {
     return (uint16_t)((uint16_t)buffer[0] << 8 | buffer[1]);
 }
@@ -346,6 +402,61 @@ static void close_broker_socket(void *argument) {
     errno = saved_errno;
 }
 
+static int check_socket_path(const char *socket_path) {
+    size_t path_length;
+
+    if (socket_path == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+    path_length = strlen(socket_path);
+    if (path_length == 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (path_length >= kUnixSocketPathCapacity) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    return 0;
+}
+
+// Callers check the path first and keep cancellation disabled until they
+// own the returned descriptor.
+static int open_broker_socket(const char *socket_path,
+                              struct sockaddr_un *address,
+                              socklen_t *address_length) {
+    size_t path_length = strlen(socket_path);
+    int fd;
+
+#ifdef __linux__
+    fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+#else
+    fd = socket(AF_UNIX, SOCK_STREAM, 0);
+#endif
+    if (fd < 0) {
+        return -1;
+    }
+#ifndef __linux__
+    if (fcntl(fd, F_SETFD, FD_CLOEXEC) != 0 ||
+        fcntl(fd, F_SETFL, O_NONBLOCK) != 0) {
+        int saved_errno = errno;
+        close(fd);
+        errno = saved_errno;
+        return -1;
+    }
+#endif
+    memset(address, 0, sizeof(*address));
+    address->sun_family = AF_UNIX;
+    memcpy(address->sun_path, socket_path, path_length + 1);
+    *address_length =
+        (socklen_t)(offsetof(struct sockaddr_un, sun_path) + path_length + 1);
+#ifdef __APPLE__
+    address->sun_len = *address_length;
+#endif
+    return fd;
+}
+
 static int query_broker(const char *socket_path, pid_t *host_pid,
                         int verify_peer, uid_t trusted_uid) {
     static const unsigned char request[HOSTPID_REQUEST_SIZE] = {
@@ -355,8 +466,8 @@ static int query_broker(const char *socket_path, pid_t *host_pid,
     };
     unsigned char response[HOSTPID_RESPONSE_SIZE];
     struct sockaddr_un address;
+    socklen_t address_length;
     struct timespec deadline;
-    size_t path_length;
     int fd;
     int saved_errno;
     int cancel_state;
@@ -367,17 +478,7 @@ static int query_broker(const char *socket_path, pid_t *host_pid,
         return -1;
     }
     *host_pid = 0;
-    if (socket_path == NULL) {
-        errno = EINVAL;
-        return -1;
-    }
-    path_length = strlen(socket_path);
-    if (path_length == 0) {
-        errno = EINVAL;
-        return -1;
-    }
-    if (path_length >= sizeof(address.sun_path)) {
-        errno = ENAMETOOLONG;
+    if (check_socket_path(socket_path) != 0) {
         return -1;
     }
     if (deadline_after_ms(&deadline, HOSTPID_TIMEOUT_MS) != 0) {
@@ -390,35 +491,13 @@ static int query_broker(const char *socket_path, pid_t *host_pid,
         return -1;
     }
 
-#ifdef __linux__
-    fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
-#else
-    fd = socket(AF_UNIX, SOCK_STREAM, 0);
-#endif
+    fd = open_broker_socket(socket_path, &address, &address_length);
     if (fd < 0) {
         saved_errno = errno;
         pthread_setcancelstate(cancel_state, NULL);
         errno = saved_errno;
         return -1;
     }
-#ifndef __linux__
-    if (fcntl(fd, F_SETFD, FD_CLOEXEC) != 0 ||
-        fcntl(fd, F_SETFL, O_NONBLOCK) != 0) {
-        saved_errno = errno;
-        close(fd);
-        pthread_setcancelstate(cancel_state, NULL);
-        errno = saved_errno;
-        return -1;
-    }
-#endif
-    memset(&address, 0, sizeof(address));
-    address.sun_family = AF_UNIX;
-    memcpy(address.sun_path, socket_path, path_length + 1);
-    socklen_t address_length =
-        (socklen_t)(offsetof(struct sockaddr_un, sun_path) + path_length + 1);
-#ifdef __APPLE__
-    address.sun_len = address_length;
-#endif
 
     pthread_cleanup_push(close_broker_socket, &fd);
     pthread_setcancelstate(cancel_state, NULL);
@@ -470,6 +549,179 @@ int hostpid_broker_query_trusted(const char *socket_path, pid_t *host_pid) {
         return -1;
     }
     return query_broker(socket_path, host_pid, 1, 0);
+}
+
+static void release_lease_on_cancel(void *argument) {
+    int saved_errno = errno;
+    int cancel_state;
+
+    pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cancel_state);
+    hostpid_broker_release_driver_admission(argument);
+    pthread_setcancelstate(cancel_state, NULL);
+    errno = saved_errno;
+}
+
+static int acquire_driver_admission(
+    const char *socket_path, hostpid_driver_admission_operation_t operation,
+    int *lease_fd, int verify_peer) {
+    unsigned char request[HOSTPID_REQUEST_SIZE] = {
+        'H', 'P', 'I', 'D',
+        0, HOSTPID_PROTOCOL_VERSION,
+        0, 0,
+    };
+    unsigned char response[HOSTPID_RESPONSE_SIZE];
+    struct sockaddr_un address;
+    socklen_t address_length;
+    struct timespec deadline;
+    admission_lease_t *lease;
+    uint16_t status;
+    int fd;
+    int saved_errno;
+    int cancel_state;
+    int result;
+
+    if (lease_fd == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+    *lease_fd = -1;
+    switch (operation) {
+        case HOSTPID_DRIVER_ADMISSION_INIT:
+            request[7] = HOSTPID_COMMAND_ACQUIRE_DRIVER_INIT;
+            break;
+        case HOSTPID_DRIVER_ADMISSION_RETAIN:
+            request[7] = HOSTPID_COMMAND_ACQUIRE_DRIVER_RETAIN;
+            break;
+        case HOSTPID_DRIVER_ADMISSION_RELEASE:
+            request[7] = HOSTPID_COMMAND_ACQUIRE_DRIVER_RELEASE;
+            break;
+        default:
+            errno = EINVAL;
+            return -1;
+    }
+    if (check_socket_path(socket_path) != 0 ||
+        deadline_after_ms(&deadline, HOSTPID_TIMEOUT_MS) != 0) {
+        return -1;
+    }
+    lease = malloc(sizeof(*lease));
+    if (lease == NULL) {
+        return -1;
+    }
+    result = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cancel_state);
+    if (result != 0) {
+        free(lease);
+        errno = result;
+        return -1;
+    }
+
+    // Track the socket before a fork can copy it.
+    pthread_mutex_lock(&admission_leases_lock);
+    fd = open_broker_socket(socket_path, &address, &address_length);
+    if (fd < 0) {
+        saved_errno = errno;
+        pthread_mutex_unlock(&admission_leases_lock);
+        pthread_setcancelstate(cancel_state, NULL);
+        free(lease);
+        errno = saved_errno;
+        return -1;
+    }
+    lease->fd = fd;
+    lease->next = admission_leases;
+    admission_leases = lease;
+    pthread_mutex_unlock(&admission_leases_lock);
+
+    pthread_cleanup_push(release_lease_on_cancel, &fd);
+    pthread_setcancelstate(cancel_state, NULL);
+    result = 0;
+    if (connect_before_deadline(fd, &address, address_length, &deadline) != 0 ||
+        (verify_peer && verify_peer_uid(fd, 0) != 0) ||
+        write_before_deadline(fd, request, sizeof(request), &deadline) != 0 ||
+        read_without_deadline(fd, response, sizeof(response)) != 0) {
+        result = -1;
+    }
+    saved_errno = errno;
+    pthread_cleanup_pop(result != 0);
+    errno = saved_errno;
+    if (result != 0) {
+        return -1;
+    }
+
+    status = read_u16(response + 6);
+    if (memcmp(response, hostpid_magic, sizeof(hostpid_magic)) != 0 ||
+        read_u16(response + 4) != HOSTPID_PROTOCOL_VERSION ||
+        status != HOSTPID_STATUS_OK) {
+        hostpid_broker_release_driver_admission(&fd);
+        errno = status == HOSTPID_STATUS_UNAVAILABLE ? EAGAIN : EPROTO;
+        return -1;
+    }
+    *lease_fd = fd;
+    return 0;
+}
+
+int hostpid_broker_acquire_driver_admission(
+    const char *socket_path, hostpid_driver_admission_operation_t operation,
+    int *lease_fd) {
+    return acquire_driver_admission(socket_path, operation, lease_fd, 0);
+}
+
+int hostpid_broker_acquire_driver_admission_trusted(
+    hostpid_driver_admission_operation_t operation, int *lease_fd) {
+    if (lease_fd == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+    *lease_fd = -1;
+    if (hostpid_broker_validate_trust(HOSTPID_BROKER_SOCKET_PATH, 0, 1) != 0) {
+        return -1;
+    }
+    return acquire_driver_admission(HOSTPID_BROKER_SOCKET_PATH, operation,
+                                    lease_fd, 1);
+}
+
+void hostpid_broker_release_driver_admission(int *lease_fd) {
+    admission_lease_t **cursor;
+    admission_lease_t *lease = NULL;
+
+    if (lease_fd == NULL || *lease_fd < 0) {
+        return;
+    }
+    pthread_mutex_lock(&admission_leases_lock);
+    for (cursor = &admission_leases; *cursor != NULL;
+         cursor = &(*cursor)->next) {
+        if ((*cursor)->fd == *lease_fd) {
+            lease = *cursor;
+            *cursor = lease->next;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&admission_leases_lock);
+    if (lease != NULL) {
+        close(lease->fd);
+        free(lease);
+    }
+    *lease_fd = -1;
+}
+
+void hostpid_broker_admission_fork_prepare(void) {
+    pthread_mutex_lock(&admission_leases_lock);
+}
+
+void hostpid_broker_admission_fork_parent(void) {
+    pthread_mutex_unlock(&admission_leases_lock);
+}
+
+void hostpid_broker_admission_fork_child(void) {
+    admission_lease_t *lease = admission_leases;
+
+    while (lease != NULL) {
+        admission_lease_t *next = lease->next;
+
+        close(lease->fd);
+        free(lease);
+        lease = next;
+    }
+    admission_leases = NULL;
+    pthread_mutex_unlock(&admission_leases_lock);
 }
 
 #ifdef HOSTPID_BROKER_TESTING
