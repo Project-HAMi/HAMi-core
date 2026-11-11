@@ -332,22 +332,35 @@ CUresult cuGraphLaunch_ptsz(CUgraphExec hGraphExec, CUstream hStream) {
     return submit_graph((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuGraphLaunch_ptsz), hGraphExec, hStream, 1);
 }
 
-CUresult cuStreamBeginCapture_v2(CUstream hStream, CUstreamCaptureMode mode) {
-    LOG_DEBUG("cuStreamBeginCapture_v2");
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamBeginCapture_v2, hStream, mode);
-    if (res == CUDA_SUCCESS) graph_capture_begin(hStream);
+static CUresult begin_capture(cuda_sym_t begin, CUstream stream, CUstreamCaptureMode mode, int per_thread) {
+    CUresult res = begin(stream, mode);
+    if (res == CUDA_SUCCESS) graph_capture_begin(per_thread && stream == NULL ? CU_STREAM_PER_THREAD : stream);
     return res;
 }
 
-CUresult cuStreamEndCapture(CUstream hStream, CUgraph *phGraph) {
-    LOG_DEBUG("cuStreamEndCapture");
-    /* Even a refused end (wrong thread) terminates the capture, so the
-     * association always ends here. */
-    cuuint64_t id = graph_capture_id(hStream, 1);
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamEndCapture, hStream, phGraph);
-    /* The graph is NULL when the capture failed. */
-    graph_capture_end(id, res == CUDA_SUCCESS && phGraph != NULL ? *phGraph : NULL);
+CUresult cuStreamBeginCapture_v2(CUstream stream, CUstreamCaptureMode mode) {
+    return begin_capture((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuStreamBeginCapture_v2), stream, mode, 0);
+}
+
+CUresult cuStreamBeginCapture_v2_ptsz(CUstream stream, CUstreamCaptureMode mode) {
+    return begin_capture((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuStreamBeginCapture_v2_ptsz),
+                         stream, mode, 1);
+}
+
+static CUresult end_capture(cuda_sym_t end, CUstream stream, CUgraph *graph, int per_thread) {
+    CUstream accounting_stream = per_thread && stream == NULL ? CU_STREAM_PER_THREAD : stream;
+    cuuint64_t id = graph_capture_id(accounting_stream, 1);
+    CUresult res = end(stream, graph);
+    graph_capture_end(id, res == CUDA_SUCCESS && graph != NULL ? *graph : NULL);
     return res;
+}
+
+CUresult cuStreamEndCapture(CUstream stream, CUgraph *graph) {
+    return end_capture((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuStreamEndCapture), stream, graph, 0);
+}
+
+CUresult cuStreamEndCapture_ptsz(CUstream stream, CUgraph *graph) {
+    return end_capture((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuStreamEndCapture_ptsz), stream, graph, 1);
 }
 
 CUresult cuGraphExecDestroy(CUgraphExec hGraphExec) {

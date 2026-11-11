@@ -71,15 +71,24 @@ static int check_cases(const char *base, const char *const *present,
 #define STATUS_POISON ((CUdriverProcAddressQueryResult)0x5A5A)
 
 static CUdriverProcAddressQueryResult *seen_status;
+static CUresult lookup_result;
+static CUdriverProcAddressQueryResult lookup_status;
+static void *lookup_pointer = (void *)"native";
+
+static CUresult stub_get_proc_address(const char *symbol, void **pfn, int version, cuuint64_t flags) {
+    (void)symbol; (void)version; (void)flags;
+    if (pfn != NULL) *pfn = lookup_pointer;
+    return lookup_result;
+}
 
 static CUresult stub_get_proc_address_v2(const char *symbol, void **pfn,
                                          int cudaVersion, cuuint64_t flags,
                                          CUdriverProcAddressQueryResult *status) {
     (void)symbol; (void)cudaVersion; (void)flags;
     seen_status = status;
-    if (pfn != NULL) *pfn = NULL;
-    if (status != NULL) *status = CU_GET_PROC_ADDRESS_SUCCESS;
-    return CUDA_SUCCESS;
+    if (pfn != NULL) *pfn = lookup_pointer;
+    if (status != NULL) *status = lookup_status;
+    return lookup_result;
 }
 
 static int check_symbol_status(void) {
@@ -110,14 +119,19 @@ static int check_symbol_status(void) {
 }
 
 static int check_graph_stream_flags(void) {
-    const char *names[] = {"cuGraphLaunch", "cuGraphUpload", "cuGraphInstantiateWithParams"};
-    const char *ptsz[] = {"cuGraphLaunch_ptsz", "cuGraphUpload_ptsz", "cuGraphInstantiateWithParams_ptsz"};
-    for (int i = 0; i < 3; i++) {
-        g_present[0] = names[i]; g_present[1] = ptsz[i]; g_present[2] = NULL;
+    const char *names[] = {"cuGraphLaunch", "cuGraphUpload", "cuGraphInstantiateWithParams",
+                           "cuStreamBeginCapture", "cuStreamEndCapture"};
+    const char *legacy[] = {"cuGraphLaunch", "cuGraphUpload", "cuGraphInstantiateWithParams",
+                            "cuStreamBeginCapture_v2", "cuStreamEndCapture"};
+    const char *ptsz[] = {"cuGraphLaunch_ptsz", "cuGraphUpload_ptsz", "cuGraphInstantiateWithParams_ptsz",
+                          "cuStreamBeginCapture_v2_ptsz", "cuStreamEndCapture_ptsz"};
+    cuda_library_entry[CUDA_OVERRIDE_ENUM(cuGetProcAddress)].fn_ptr = (void *)stub_get_proc_address;
+    for (int i = 0; i < 5; i++) {
+        g_present[0] = legacy[i]; g_present[1] = ptsz[i]; g_present[2] = NULL;
         for (int per_thread = 0; per_thread < 2; per_thread++) {
             cuuint64_t flags = per_thread ? CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM
                                           : CU_GET_PROC_ADDRESS_LEGACY_STREAM;
-            const char *expected = per_thread ? ptsz[i] : names[i];
+            const char *expected = per_thread ? ptsz[i] : legacy[i];
             for (int entry = 0; entry < 4; entry++) {
                 void *pfn = NULL;
                 CUdriverProcAddressQueryResult status = STATUS_POISON;
@@ -128,13 +142,58 @@ static int check_graph_stream_flags(void) {
                 else res = _cuGetProcAddress_v2(names[i], &pfn, 13000, flags, &status);
                 if (res != CUDA_SUCCESS || pfn == NULL || strcmp(pfn, expected) != 0 ||
                     (entry >= 2 && status != CU_GET_PROC_ADDRESS_SUCCESS)) {
-                    printf("FAIL stream flags: %s flags=%llu entry=%d\n", names[i], (unsigned long long)flags, entry);
+                    printf("FAIL stream flags: %s flags=%llu entry=%d\n", names[i], flags, entry);
                     return 1;
                 }
             }
         }
     }
     puts("ok   graph stream flags: legacy and per-thread lookup paths");
+    return 0;
+}
+
+static int check_graph_lookup_failures(void) {
+    const char *names[] = {"cuGraphLaunch", "cuGraphUpload", "cuGraphInstantiateWithParams",
+                           "cuStreamBeginCapture", "cuStreamEndCapture"};
+    const char *hooks[] = {"cuGraphLaunch_ptsz", "cuGraphUpload_ptsz", "cuGraphInstantiateWithParams_ptsz",
+                           "cuStreamBeginCapture_v2_ptsz", "cuStreamEndCapture_ptsz"};
+    for (int i = 0; i < 5; i++) {
+        g_present[0] = hooks[i]; g_present[1] = NULL;
+        for (int failure = 0; failure < 3; failure++) {
+            lookup_result = failure == 0 ? CUDA_ERROR_NOT_FOUND : CUDA_SUCCESS;
+            lookup_status = failure == 1 ? CU_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT
+                                         : CU_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND;
+            lookup_pointer = NULL;
+            for (int entry = 0; entry < 4; entry++) {
+                void *pfn = (void *)"poison";
+                CUdriverProcAddressQueryResult status = STATUS_POISON;
+                cuuint64_t flags = CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM;
+                CUresult result;
+                if (entry == 0) result = cuGetProcAddress(names[i], &pfn, 10000, flags);
+                else if (entry == 1) result = _cuGetProcAddress(names[i], &pfn, 10000, flags);
+                else if (entry == 2) result = cuGetProcAddress_v2(names[i], &pfn, 10000, flags, &status);
+                else result = _cuGetProcAddress_v2(names[i], &pfn, 10000, flags, &status);
+                if (result != lookup_result || pfn != NULL || (entry >= 2 && status != lookup_status)) {
+                    printf("FAIL lookup preservation: %s entry=%d failure=%d\n", names[i], entry, failure);
+                    return 1;
+                }
+            }
+        }
+    }
+    lookup_result = CUDA_SUCCESS;
+    lookup_status = CU_GET_PROC_ADDRESS_SUCCESS;
+    lookup_pointer = (void *)"native";
+    g_present[0] = "cuStreamBeginCapture_v2";
+    g_present[1] = "cuStreamBeginCapture_v2_ptsz";
+    g_present[2] = NULL;
+    void *pfn = NULL;
+    CUresult result = cuGetProcAddress("cuStreamBeginCapture", &pfn, 10000,
+                                      CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM);
+    if (result != CUDA_SUCCESS || pfn != lookup_pointer) {
+        puts("FAIL CUDA 10.0 capture ABI passthrough");
+        return 1;
+    }
+    puts("ok   graph lookup failures preserve native results and pointers");
     return 0;
 }
 
@@ -185,6 +244,7 @@ int main(void) {
                             prefetch_on13, 3);
     failures += check_symbol_status();
     failures += check_graph_stream_flags();
+    failures += check_graph_lookup_failures();
 
     if (failures) {
         printf("%d version map check(s) failed\n", failures);

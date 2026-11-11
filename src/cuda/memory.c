@@ -618,8 +618,7 @@ CUresult cuMemFreeAsync(CUdeviceptr dptr, CUstream hStream) {
     return res;
 }
 
-/* Reserve before changing the graph: CUDA forbids destroying individual nodes
- * in a graph containing memory nodes, so a successful add cannot be undone. */
+/* Reserve quota before adding nodes because CUDA cannot remove memory nodes. */
 CUresult cuGraphAddMemAllocNode(CUgraphNode *phGraphNode, CUgraph hGraph,
         const CUgraphNode *dependencies, size_t numDependencies,
         CUDA_MEM_ALLOC_NODE_PARAMS *nodeParams) {
@@ -630,7 +629,8 @@ CUresult cuGraphAddMemAllocNode(CUgraphNode *phGraphNode, CUgraph hGraph,
     size_t size = charge ? nodeParams->bytesize : 0;
     graph_charge_entry *entry = NULL;
     if (charge) {
-        CUresult res = graph_alloc_begin(hGraph, dev, size, graph_capture_id_of(hGraph), &entry);
+        cuuint64_t capid = graph_capture_id_of(hGraph);
+        CUresult res = graph_alloc_begin(hGraph, dev, size, capid, capid != 0, &entry);
         if (res != CUDA_SUCCESS) return res;
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphAddMemAllocNode,

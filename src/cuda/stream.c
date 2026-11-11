@@ -9,7 +9,7 @@ CUresult cuStreamCreate(CUstream *phstream, unsigned int flags){
 
 CUresult cuStreamDestroy_v2 ( CUstream hStream ){
     LOG_DEBUG("cuStreamDestroy_v2 %p",hStream);
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuStreamDestroy_v2,hStream);
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamDestroy_v2, hStream);
     if (res == CUDA_SUCCESS) graph_stream_destroyed(hStream);
     return res;
 }

@@ -94,10 +94,9 @@ int oom_check(const int dev,size_t addon);
 int reserve_device_memory(CUdevice dev, size_t size);
 void release_device_memory(CUdevice dev, size_t size);
 
-/* Reserve bookkeeping and quota before adding an allocation node. A failed
- * driver call cancels the reservation; a successful one commits its pointer. */
+/* Reserve graph-allocation quota and roll it back if the native call fails. */
 typedef struct graph_charge_entry graph_charge_entry;
-int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, cuuint64_t capid,
+int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, cuuint64_t capid, int capturing,
                       graph_charge_entry **out);
 void graph_alloc_end(graph_charge_entry *entry, CUdeviceptr ptr, CUresult result);
 void graph_mark_free(CUgraph graph, CUdeviceptr ptr);

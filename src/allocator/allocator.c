@@ -541,8 +541,7 @@ static int graph_stream_equal(const graph_stream_key *a, const graph_stream_key 
     return a->stream == b->stream && a->thread == b->thread && a->epoch == b->epoch;
 }
 
-/* The caller holds graph_mutex. Native IDs are optional: the fallback key is
- * retired by cuStreamDestroy, so a reused handle cannot merge with old work. */
+/* Retire fallback stream keys on destruction to prevent handle reuse from merging queued work. */
 static CUresult graph_stream_info(CUstream stream, graph_stream_key *key) {
     memset(key, 0, sizeof(*key));
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCtx, stream, &key->ctx);
@@ -580,9 +579,7 @@ static void graph_active_remove(graph_exec_state *s) {
     graph_active_dirty = 1;
 }
 
-/* A launch stays active until its event completes, even if the application
- * destroys the exec first. Events observe completion without synchronizing
- * streams or serializing GPU work. Call with graph_mutex held. */
+/* Keep temporary allocations charged until their completion event succeeds. */
 static void graph_poll_active(void) {
     for (graph_exec_state *s = graph_active, *next; s != NULL; s = next) {
         next = s->active_next;
@@ -597,8 +594,7 @@ static void graph_refresh_pool(void) {
     for (int dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
         int tracked = graph_total[dev] != 0;
         if (!tracked && graph_charged[dev] == 0) continue;
-        /* Once the last allocation is forgotten, return unused cached graph
-         * memory too. The driver retains backing still used by GPU work. */
+        /* Trim unused graph backing after the last allocation is forgotten. */
         if (!tracked && CUDA_FIND_ENTRY(cuda_library_entry, cuDeviceGraphMemTrim) != NULL)
             CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGraphMemTrim, dev);
         cuuint64_t reserved;
@@ -618,9 +614,7 @@ static void graph_refresh(void) {
     graph_refresh_pool();
 }
 
-/* Metadata is updated when nodes change. Recompute only a dirty graph peak,
- * and only inspect the active list when its membership or stream key changes.
- * Neither operation runs on an unchanged replay. */
+/* Recompute dirty peaks from cached groups and active executions. */
 static void graph_update_cache(void) {
     for (int dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
         if (!(graph_pending_dirty & (1u << dev))) continue;
@@ -651,10 +645,7 @@ static void graph_update_cache(void) {
     graph_active_dirty = 0;
 }
 
-/* Pending graphs can reuse a pool, but overlapping executions cannot. Charge
- * at least the pending graph peak, persistent + active temporary allocations,
- * and the driver's retained physical pool. The latter must not be added to
- * persistent bytes: it already includes their backing. */
+/* Charge the maximum of pending demand, live allocations and driver-retained graph backing. */
 static size_t graph_wanted(int dev) {
     size_t want = graph_persistent[dev] + graph_active_bytes[dev];
     if (graph_pending_peak[dev] > want) want = graph_pending_peak[dev];
@@ -662,8 +653,7 @@ static size_t graph_wanted(int dev) {
     return want;
 }
 
-/* Bring the charged usage in line with what the entries need. With check,
- * growth is refused when it would pass the limit; returns the CUDA error. */
+/* Rebalance graph charges and check quota before allowing growth. */
 static int graph_rebalance(int check) {
     graph_update_cache();
     int ret = 0;
@@ -730,7 +720,7 @@ static void graph_drop_entry(graph_charge_entry *e) {
     graph_group_put(group);
 }
 
-int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, cuuint64_t capid,
+int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, cuuint64_t capid, int capturing,
                       graph_charge_entry **out) {
     *out = NULL;
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) return CUDA_ERROR_INVALID_DEVICE;
@@ -741,7 +731,7 @@ int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, cuuint64_t capid
     g->size = size;
     g->held = 1;
     g->capid = capid;
-    g->capturing = capid != 0;
+    g->capturing = capturing;
     pthread_mutex_lock(&graph_mutex);
     graph_group *group;
     for (group = graph_groups; group != NULL; group = group->next) {
@@ -767,11 +757,11 @@ int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, cuuint64_t capid
     graph_pending_add(group, dev, size);
     g->next = graph_charges;
     graph_charges = g;
-    graph_refresh();
+    if (!capturing) graph_refresh();
     int ret = graph_rebalance(1);
     if (ret != 0) {
         graph_drop_entry(g);
-        graph_refresh();
+        if (!capturing) graph_refresh();
         graph_rebalance(0);
     } else {
         *out = g;
@@ -786,16 +776,15 @@ void graph_alloc_end(graph_charge_entry *entry, CUdeviceptr ptr, CUresult result
     if (result == CUDA_SUCCESS) {
         entry->ptr = ptr;
     } else {
+        int capturing = entry->capturing;
         graph_drop_entry(entry);
-        graph_refresh();
+        if (!capturing) graph_refresh();
         graph_rebalance(0);
     }
     pthread_mutex_unlock(&graph_mutex);
 }
 
-/* Only the allocating graph's own free node frees the memory when that graph
- * and its execs are gone. A free node in another graph leaves the charge held
- * until the pointer is freed, which can over-count but never under-count. */
+/* Only free nodes owned by the allocating graph release its memory. */
 void graph_mark_free(CUgraph graph, CUdeviceptr ptr) {
     pthread_mutex_lock(&graph_mutex);
     for (graph_charge_entry *g = graph_charges; g != NULL; g = g->next) {
@@ -805,7 +794,7 @@ void graph_mark_free(CUgraph graph, CUdeviceptr ptr) {
             graph_entry_update(g);
         }
     }
-    graph_refresh();
+    /* Recording a free node may run during capture, so defer driver queries. */
     graph_rebalance(0);
     pthread_mutex_unlock(&graph_mutex);
 }
@@ -833,13 +822,12 @@ void graph_ptr_freed(CUdeviceptr ptr) {
     pthread_mutex_unlock(&graph_mutex);
 }
 
-/* A capture's id, remembered per origin stream at its start: an invalidated
- * capture no longer reports its id or graph when it ends, and an allocation
- * on a stream that joined the capture must still be traced back to it. */
+/* Track capture IDs so failed captures release allocations from every joined stream. */
 typedef struct capture_link {
     CUstream stream;
     CUgraph graph;
     cuuint64_t id;
+    uint64_t thread;
     struct capture_link *next;
 } capture_link;
 static capture_link *capture_links;
@@ -869,20 +857,24 @@ void graph_capture_begin(CUstream stream) {
     l->graph = graph;
     l->id = id;
     pthread_mutex_lock(&graph_mutex);
+    l->thread = 0;
+    if (stream == CU_STREAM_PER_THREAD) {
+        if (graph_thread_id == 0) graph_thread_id = ++graph_thread_serial;
+        l->thread = graph_thread_id;
+    }
     l->next = capture_links;
     capture_links = l;
     pthread_mutex_unlock(&graph_mutex);
 }
 
-/* The id of the capture running on stream, 0 if unknown. With take, the
- * association ends with the capture. */
+/* Look up the origin stream capture ID and optionally remove its association. */
 cuuint64_t graph_capture_id(CUstream stream, int take) {
     cuuint64_t id = 0;
     pthread_mutex_lock(&graph_mutex);
     capture_link **pp = &capture_links;
     while (*pp != NULL) {
         capture_link *l = *pp;
-        if (l->stream == stream) {
+        if (l->stream == stream && (stream != CU_STREAM_PER_THREAD || l->thread == graph_thread_id)) {
             id = l->id;
             if (take) {
                 *pp = l->next;
@@ -922,8 +914,7 @@ void graph_ptr_freed_async(CUdeviceptr ptr, CUstream hStream) {
     }
 }
 
-/* Exec metadata is captured once. Completion events are created lazily in the
- * submission stream's context, not the thread's instantiation context. */
+/* Cache allocation metadata once and create events in the submission stream context. */
 int graph_exec_prepare(CUgraph graph, graph_exec_state **out) {
     *out = NULL;
     if (graph == NULL) return 0;
@@ -984,9 +975,7 @@ void graph_exec_commit(graph_exec_state *s, CUgraphExec exec) {
     pthread_mutex_unlock(&graph_mutex);
 }
 
-/* The driver permits destroying an exec with queued GPU work. Its CPU entry
- * references can go, but active temporary bytes stay until completion. A host
- * submission also keeps a reference, so bookkeeping cannot be freed mid-call. */
+/* Keep retired executable graphs alive until host submissions and GPU work finish. */
 static void graph_exec_maybe_free(graph_exec_state *s) {
     if (!s->retired || s->users || s->pending) return;
     if (!s->entries_released) {
@@ -1144,9 +1133,7 @@ static void graph_exec_put_user(graph_exec_state *s) {
     pthread_mutex_unlock(&graph_mutex);
 }
 
-/* The user's reference is acquired before waiting on submit_mutex. Never wait
- * for that mutex while holding graph_mutex: the current submitter needs it to
- * finish. CUDA calls never hold the cross-process accounting lock. */
+/* Acquire an exec reference before waiting on its submission mutex without holding graph_mutex. */
 static int graph_exec_lock_and_reserve(graph_exec_state *s, CUstream stream) {
     pthread_mutex_lock(&s->submit_mutex);
     pthread_mutex_lock(&graph_mutex);
@@ -1182,8 +1169,7 @@ int graph_exec_begin(CUgraphExec exec, CUstream stream, graph_exec_state **out) 
 void graph_exec_end(graph_exec_state *s, CUstream stream, CUresult result) {
     if (s == NULL) return;
     pthread_mutex_lock(&graph_mutex);
-    /* Advance only after the native submission has returned. A submission
-     * pending when synchronization starts must not fall into its snapshot. */
+    /* Count submissions after native return so synchronization snapshots exclude pending calls. */
     if (result == CUDA_SUCCESS) s->submitted = ++graph_submit_serial;
     if (s->first_submission) {
         s->launched = result == CUDA_SUCCESS;
@@ -1200,8 +1186,7 @@ void graph_exec_end(graph_exec_state *s, CUstream stream, CUresult result) {
             CUevent event = s->prepared_event != NULL ? s->prepared_event : s->done;
             CUresult recorded = CUDA_OVERRIDE_CALL(cuda_library_entry, cuEventRecord, event, stream);
             if (s->prepared_event != NULL) {
-                /* A destroyed context can release the old handle before its
-                 * notification reaches us; the new event may reuse it. */
+                /* Avoid destroying an event handle reused by the new context. */
                 if (s->done != NULL && s->done != s->prepared_event)
                     CUDA_OVERRIDE_CALL(cuda_library_entry, cuEventDestroy_v2, s->done);
                 s->done = s->prepared_event;
@@ -1210,7 +1195,7 @@ void graph_exec_end(graph_exec_state *s, CUstream stream, CUresult result) {
                 s->event_ctx_id = s->key.ctx_id;
             }
             s->recorded = recorded == CUDA_SUCCESS;
-            if (!s->recorded) LOG_WARN("Cannot record graph completion; holding charge until synchronization or context destruction");
+            if (!s->recorded) LOG_WARN("Cannot record graph completion; keeping its memory charge");
         } else {
             graph_active_remove(s);
         }
@@ -1233,9 +1218,7 @@ void graph_exec_end(graph_exec_state *s, CUstream stream, CUresult result) {
     graph_exec_put_user(s);
 }
 
-/* Native context destruction has already released its events. Preserve graph
- * metadata, which can be reused in another context, but stop waiting on those
- * invalid handles. Pending CPU submissions retain their own state reference. */
+/* Discard destroyed-context events while preserving graph metadata and pending host references. */
 cuuint64_t graph_context_id(CUcontext ctx) {
     if (CUDA_FIND_ENTRY(cuda_library_entry, cuCtxGetId) == NULL) return 0;
     cuuint64_t id;
@@ -1329,8 +1312,7 @@ void graph_synchronized(CUcontext ctx, CUstream stream, int whole_context,
         target.known = 1;
         int matches = whole_context ? s->key.ctx == ctx && s->key.ctx_id == id
                                     : graph_stream_equal(&target, &key);
-        /* Native synchronization cannot cover submissions completed after
-         * its entry snapshot, even if their host wrappers have returned. */
+        /* Preserve submissions newer than the synchronization snapshot. */
         if (matches && !s->pending && s->submitted <= submitted) graph_active_remove(s);
         graph_exec_maybe_free(s);
     }
@@ -1339,9 +1321,7 @@ void graph_synchronized(CUcontext ctx, CUstream stream, int whole_context,
     pthread_mutex_unlock(&graph_mutex);
 }
 
-/* A failed capture is discarded by the driver without a cuGraphDestroy, so
- * the memory it recorded was never allocated. The capture id covers every
- * stream that joined the capture. */
+/* Release invalidated capture allocations across all participating streams. */
 void graph_capture_end(cuuint64_t capid, CUgraph graph) {
     pthread_mutex_lock(&graph_mutex);
     for (graph_charge_entry *g = graph_charges, *n; g != NULL; g = n) {
@@ -1358,8 +1338,7 @@ void graph_capture_end(cuuint64_t capid, CUgraph graph) {
     pthread_mutex_unlock(&graph_mutex);
 }
 
-/* Memory with a free node is released once the graph and all its execs are
- * gone. Memory without one stays until its pointer is freed. */
+/* Keep persistent graph allocations charged until their pointers are freed. */
 void graph_release(CUgraph graph) {
     pthread_mutex_lock(&graph_mutex);
     for (graph_group *group = graph_groups; group != NULL; group = group->next) {
@@ -1377,8 +1356,7 @@ void graph_release(CUgraph graph) {
     pthread_mutex_unlock(&graph_mutex);
 }
 
-/* Track an allocated async chunk and account it against its pool's high-water
- * limit. Call with mutex held. */
+/* Account asynchronous allocations against their pool high-water mark. */
 static int account_async_chunk(allocated_list_entry *e, size_t size, CUmemoryPool pool) {
     size_t poollimit;
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemPoolGetAttribute, pool,
@@ -1404,8 +1382,7 @@ static int account_async_chunk(allocated_list_entry *e, size_t size, CUmemoryPoo
     return 0;
 }
 
-/* Captured async allocations must be admitted before the driver records the
- * node, just like explicit nodes. Do not query pool attributes during capture. */
+/* Admit captured allocations against cached state without querying the driver. */
 static CUresult allocate_captured(CUdeviceptr *address, size_t size, CUdevice dev,
                                   CUmemoryPool pool, CUstream stream, int from_pool,
                                   int *capturing) {
@@ -1417,7 +1394,7 @@ static CUresult allocate_captured(CUdeviceptr *address, size_t size, CUdevice de
     if (!*capturing) return CUDA_SUCCESS;
     graph_charge_entry *entry = NULL;
     if (graph != NULL) {
-        CUresult res = graph_alloc_begin(graph, dev, size, capid, &entry);
+        CUresult res = graph_alloc_begin(graph, dev, size, capid, 1, &entry);
         if (res != CUDA_SUCCESS) return res;
     }
     CUresult res = from_pool

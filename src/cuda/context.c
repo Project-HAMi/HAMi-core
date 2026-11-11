@@ -6,15 +6,12 @@ extern size_t context_size;
 extern int ctx_activate[16];
 void size_primary_context_lazily(int cudadev);
 
-/* Serialize primary-context creation/destruction and its bookkeeping on each
- * device. A new retain must not replace the remembered context between a last
- * release and the cleanup notification. Graph submissions do not take this lock. */
+/* Serialize primary-context lifetimes with their bookkeeping per device. */
 static pthread_mutex_t primary_context_mutex[CUDA_DEVICE_MAX_COUNT];
 static pthread_once_t primary_context_once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t legacy_context_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-/* Drivers without unique context IDs need lifecycle serialization to prevent
- * a newly created context from reusing a handle before old cleanup finishes. */
+/* Guard context-handle reuse when unique context IDs are unavailable. */
 static pthread_mutex_t *legacy_context_lock(void) {
     if (CUDA_FIND_ENTRY(cuda_library_entry, cuCtxGetId) != NULL) return NULL;
     pthread_mutex_lock(&legacy_context_mutex);
@@ -131,7 +128,7 @@ CUresult cuCtxDestroy_v2 ( CUcontext ctx ){
     pthread_mutex_t *legacy = legacy_context_lock();
     cuuint64_t id = graph_context_id(ctx);
     LOG_DEBUG("into cuCtxDestroy_v2 ctx=%p",ctx);
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxDestroy_v2,ctx);
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxDestroy_v2, ctx);
     if (res == CUDA_SUCCESS) graph_context_destroyed(ctx, id);
     if (legacy != NULL) pthread_mutex_unlock(legacy);
     return res;
