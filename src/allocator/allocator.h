@@ -94,13 +94,12 @@ int oom_check(const int dev,size_t addon);
 int reserve_device_memory(CUdevice dev, size_t size);
 void release_device_memory(CUdevice dev, size_t size);
 
-/* Graph allocation accounting. graph_record() tracks size (already reserved
- * via reserve_device_memory) for the allocation at ptr. Memory with a free
- * node is released once its graph and every exec instantiated from it are
- * destroyed; memory without one stays allocated, as in the driver, until ptr
- * is freed. A graph that never ran allocated nothing, so its charge is
- * dropped on destroy either way. */
-int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr, cuuint64_t capid);
+/* Reserve bookkeeping and quota before adding an allocation node. A failed
+ * driver call cancels the reservation; a successful one commits its pointer. */
+typedef struct graph_charge_entry graph_charge_entry;
+int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, cuuint64_t capid,
+                      graph_charge_entry **out);
+void graph_alloc_end(graph_charge_entry *entry, CUdeviceptr ptr, CUresult result);
 void graph_mark_free(CUgraph graph, CUdeviceptr ptr);
 void graph_ptr_freed(CUdeviceptr ptr);
 void graph_ptr_freed_async(CUdeviceptr ptr, CUstream hStream);
