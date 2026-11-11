@@ -156,6 +156,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxRetain);
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxSetFlags_v2);
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxRelease_v2);
+    DLSYM_HOOK_FUNC(cuDevicePrimaryCtxReset_v2);
     DLSYM_HOOK_FUNC(cuDriverGetVersion);
     DLSYM_HOOK_FUNC(cuDeviceGetTexture1DLinearMaxWidth);
     DLSYM_HOOK_FUNC(cuDeviceSetMemPool);
@@ -367,10 +368,14 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuGraphInstantiate);
     DLSYM_HOOK_FUNC(cuGraphInstantiateWithFlags);
     DLSYM_HOOK_FUNC(cuGraphInstantiateWithParams);
+    DLSYM_HOOK_FUNC(cuGraphInstantiateWithParams_ptsz);
     DLSYM_HOOK_FUNC(cuGraphUpload);
+    DLSYM_HOOK_FUNC(cuGraphUpload_ptsz);
     DLSYM_HOOK_FUNC(cuGraphLaunch);
+    DLSYM_HOOK_FUNC(cuGraphLaunch_ptsz);
     DLSYM_HOOK_FUNC(cuGraphExecDestroy);
     DLSYM_HOOK_FUNC(cuGraphDestroy);
+    DLSYM_HOOK_FUNC(cuDeviceGraphMemTrim);
 #ifdef HOOK_MEMINFO_ENABLE
     DLSYM_HOOK_FUNC(cuMemGetInfo_v2);
 #endif

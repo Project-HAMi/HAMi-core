@@ -250,57 +250,86 @@ CUresult cuGraphDestroyNode(CUgraphNode hNode) {
 	return CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphDestroyNode,hNode);
 }
 
-/* Track the exec so its graph's memory stays charged while it is alive. If
- * tracking fails, give the exec back rather than leave memory uncounted. */
-static CUresult track_exec(CUresult res, CUgraph hGraph, CUgraphExec *phGraphExec, int uploaded) {
-    if (res != CUDA_SUCCESS) {
-        return res;
-    }
-    if (graph_exec_created(hGraph, *phGraphExec) == 0) {
-        /* An upload allocates the graph's memory like a launch. */
-        if (uploaded) graph_exec_launched(*phGraphExec);
-        return res;
-    }
-    CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecDestroy, *phGraphExec);
-    return CUDA_ERROR_OUT_OF_MEMORY;
+static CUresult track_exec(CUresult res, graph_exec_state *state, CUgraphExec *phGraphExec) {
+    if (res == CUDA_SUCCESS) graph_exec_commit(state, *phGraphExec);
+    else graph_exec_discard(state);
+    return res;
 }
 
 CUresult cuGraphInstantiate(CUgraphExec *phGraphExec, CUgraph hGraph, CUgraphNode *phErrorNode,
                             char *logBuffer, size_t bufferSize) {
     LOG_DEBUG("cuGraphInstantiate");
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphInstantiate, phGraphExec, hGraph,
+    graph_exec_state *state;
+    CUresult res = graph_exec_prepare(hGraph, &state);
+    if (res != CUDA_SUCCESS) return res;
+    res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphInstantiate, phGraphExec, hGraph,
                                       phErrorNode, logBuffer, bufferSize);
-    return track_exec(res, hGraph, phGraphExec, 0);
+    return track_exec(res, state, phGraphExec);
 }
 
 CUresult cuGraphInstantiateWithFlags(CUgraphExec *phGraphExec, CUgraph hGraph, unsigned long long flags) {
     LOG_DEBUG("cuGraphInstantiateWithFlags");
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphInstantiateWithFlags, phGraphExec,
+    graph_exec_state *state;
+    CUresult res = graph_exec_prepare(hGraph, &state);
+    if (res != CUDA_SUCCESS) return res;
+    res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphInstantiateWithFlags, phGraphExec,
                                       hGraph, flags);
-    return track_exec(res, hGraph, phGraphExec, 0);
+    return track_exec(res, state, phGraphExec);
 }
 
-CUresult cuGraphInstantiateWithParams(CUgraphExec *phGraphExec, CUgraph hGraph,
-                                      CUDA_GRAPH_INSTANTIATE_PARAMS *instantiateParams) {
-    LOG_DEBUG("cuGraphInstantiateWithParams");
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphInstantiateWithParams, phGraphExec,
-                                      hGraph, instantiateParams);
-    return track_exec(res, hGraph, phGraphExec,
-                      instantiateParams != NULL && (instantiateParams->flags & CUDA_GRAPH_INSTANTIATE_FLAG_UPLOAD));
+static CUresult instantiate_with_params(cuda_sym_t instantiate, CUgraphExec *exec, CUgraph graph,
+                                        CUDA_GRAPH_INSTANTIATE_PARAMS *params, int per_thread) {
+    graph_exec_state *state;
+    CUresult res = graph_exec_prepare(graph, &state);
+    if (res != CUDA_SUCCESS) return res;
+    int upload = params != NULL && (params->flags & CUDA_GRAPH_INSTANTIATE_FLAG_UPLOAD);
+    CUstream stream = upload ? params->hUploadStream : NULL;
+    if (per_thread && stream == NULL) stream = CU_STREAM_PER_THREAD;
+    if (upload && (res = graph_exec_reserve(state, stream)) != CUDA_SUCCESS) {
+        graph_exec_discard(state);
+        return res;
+    }
+    res = instantiate(exec, graph, params);
+    if (upload) graph_exec_end(state, stream, res);
+    return track_exec(res, state, exec);
+}
+
+CUresult cuGraphInstantiateWithParams(CUgraphExec *exec, CUgraph graph,
+                                      CUDA_GRAPH_INSTANTIATE_PARAMS *params) {
+    return instantiate_with_params((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry,
+        cuGraphInstantiateWithParams), exec, graph, params, 0);
+}
+
+CUresult cuGraphInstantiateWithParams_ptsz(CUgraphExec *exec, CUgraph graph,
+                                           CUDA_GRAPH_INSTANTIATE_PARAMS *params) {
+    return instantiate_with_params((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry,
+        cuGraphInstantiateWithParams_ptsz), exec, graph, params, 1);
+}
+
+static CUresult submit_graph(cuda_sym_t submit, CUgraphExec exec, CUstream stream, int per_thread) {
+    graph_exec_state *state;
+    CUstream accounting_stream = per_thread && stream == NULL ? CU_STREAM_PER_THREAD : stream;
+    CUresult res = graph_exec_begin(exec, accounting_stream, &state);
+    if (res != CUDA_SUCCESS) return res;
+    res = submit(exec, stream);
+    graph_exec_end(state, accounting_stream, res);
+    return res;
 }
 
 CUresult cuGraphUpload(CUgraphExec hGraphExec, CUstream hStream) {
-    LOG_DEBUG("cuGraphUpload");
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphUpload, hGraphExec, hStream);
-    if (res == CUDA_SUCCESS) graph_exec_launched(hGraphExec);
-    return res;
+    return submit_graph((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuGraphUpload), hGraphExec, hStream, 0);
+}
+
+CUresult cuGraphUpload_ptsz(CUgraphExec hGraphExec, CUstream hStream) {
+    return submit_graph((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuGraphUpload_ptsz), hGraphExec, hStream, 1);
 }
 
 CUresult cuGraphLaunch(CUgraphExec hGraphExec, CUstream hStream) {
-    LOG_DEBUG("cuGraphLaunch");
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphLaunch, hGraphExec, hStream);
-    if (res == CUDA_SUCCESS) graph_exec_launched(hGraphExec);
-    return res;
+    return submit_graph((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuGraphLaunch), hGraphExec, hStream, 0);
+}
+
+CUresult cuGraphLaunch_ptsz(CUgraphExec hGraphExec, CUstream hStream) {
+    return submit_graph((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuGraphLaunch_ptsz), hGraphExec, hStream, 1);
 }
 
 CUresult cuStreamBeginCapture_v2(CUstream hStream, CUstreamCaptureMode mode) {
@@ -334,5 +363,13 @@ CUresult cuGraphDestroy(CUgraph hGraph) {
     if (res == CUDA_SUCCESS) {
         graph_release(hGraph);
     }
+    return res;
+}
+
+CUresult cuDeviceGraphMemTrim(CUdevice device) {
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuDeviceGraphMemTrim) == NULL)
+        return CUDA_ERROR_NOT_SUPPORTED;
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGraphMemTrim, device);
+    if (res == CUDA_SUCCESS) graph_pool_trimmed();
     return res;
 }

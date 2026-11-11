@@ -36,6 +36,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuDevicePrimaryCtxRetain"},
     {.name = "cuDevicePrimaryCtxSetFlags_v2"},
     {.name = "cuDevicePrimaryCtxRelease_v2"},
+    {.name = "cuDevicePrimaryCtxReset_v2"},
     {.name = "cuCtxGetDevice"},
     {.name = "cuCtxCreate_v2"},
     {.name = "cuCtxCreate_v3"},
@@ -44,6 +45,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuCtxGetApiVersion"},
     {.name = "cuCtxGetCacheConfig"},
     {.name = "cuCtxGetCurrent"},
+    {.name = "cuCtxGetId"},
     {.name = "cuCtxGetFlags"},
     {.name = "cuCtxGetLimit"},
     {.name = "cuCtxGetSharedMemConfig"},
@@ -119,6 +121,12 @@ cuda_entry_t cuda_library_entry[] = {
     /* cuEvent Part */
     {.name = "cuEventCreate"},
     {.name = "cuEventDestroy_v2"},
+    {.name = "cuEventRecord"},
+    {.name = "cuEventQuery"},
+    {.name = "cuDeviceGetGraphMemAttribute"},
+    {.name = "cuDeviceGraphMemTrim"},
+    {.name = "cuStreamGetId"},
+    {.name = "cuStreamGetCtx"},
     {.name = "cuModuleLoad"},
     {.name = "cuModuleLoadData"},
     {.name = "cuModuleLoadDataEx"},
@@ -234,8 +242,11 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuGraphInstantiate"},
     {.name = "cuGraphInstantiateWithFlags"},
     {.name = "cuGraphInstantiateWithParams"},
+    {.name = "cuGraphInstantiateWithParams_ptsz"},
     {.name = "cuGraphUpload"},
+    {.name = "cuGraphUpload_ptsz"},
     {.name = "cuGraphLaunch"},
+    {.name = "cuGraphLaunch_ptsz"},
     {.name = "cuGraphExecDestroy"},
     {.name = "cuGraphDestroy"},
 
@@ -320,9 +331,12 @@ void *find_symbols_in_table(const char *symbol) {
         strcmp(symbol, "cuGraphInstantiate") != 0 &&
         strcmp(symbol, "cuGraphInstantiateWithFlags") != 0 &&
         strcmp(symbol, "cuGraphInstantiateWithParams") != 0 &&
+        strcmp(symbol, "cuGraphInstantiateWithParams_ptsz") != 0 &&
         strcmp(symbol, "cuGraphExecDestroy") != 0 &&
         strcmp(symbol, "cuGraphLaunch") != 0 &&
+        strcmp(symbol, "cuGraphLaunch_ptsz") != 0 &&
         strcmp(symbol, "cuGraphUpload") != 0 &&
+        strcmp(symbol, "cuGraphUpload_ptsz") != 0 &&
         strcmp(symbol, "cuGraphDestroy") != 0) {
         return NULL;
     }
@@ -349,10 +363,22 @@ void *find_symbols_in_table_by_cudaversion(const char *symbol,int  cudaVersion) 
   return pfn;
 }
 
+static void *find_symbols_with_flags(const char *symbol, int cudaVersion, cuuint64_t flags) {
+    if (flags & CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM) {
+        if (strcmp(symbol, "cuGraphLaunch") == 0)
+            return __dlsym_hook_section(NULL, "cuGraphLaunch_ptsz");
+        if (strcmp(symbol, "cuGraphUpload") == 0)
+            return __dlsym_hook_section(NULL, "cuGraphUpload_ptsz");
+        if (strcmp(symbol, "cuGraphInstantiateWithParams") == 0)
+            return __dlsym_hook_section(NULL, "cuGraphInstantiateWithParams_ptsz");
+    }
+    return find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
+}
+
 
 CUresult _cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ) {
     LOG_INFO("into _cuGetProcAddress symbol=%s:%d",symbol,cudaVersion);
-    *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
+    *pfn = find_symbols_with_flags(symbol, cudaVersion, flags);
     if (*pfn==NULL){
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress,symbol,pfn,cudaVersion,flags);
         return res;
@@ -364,7 +390,7 @@ CUresult _cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, c
 
 CUresult cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ) {
     LOG_INFO("into cuGetProcAddress symbol=%s:%d",symbol,cudaVersion);
-    *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
+    *pfn = find_symbols_with_flags(symbol, cudaVersion, flags);
     if (strcmp(symbol,"cuGetProcAddress")==0) {
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress,symbol,pfn,cudaVersion,flags); 
         if (res==CUDA_SUCCESS) {
@@ -383,7 +409,7 @@ CUresult cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cu
 
 CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags, CUdriverProcAddressQueryResult *symbolStatus){
     LOG_INFO("into _cuGetProcAddress_v2 symbol=%s:%d",symbol,cudaVersion);
-    *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
+    *pfn = find_symbols_with_flags(symbol, cudaVersion, flags);
     if (*pfn==NULL){
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress_v2,symbol,pfn,cudaVersion,flags,symbolStatus);
         return res;
@@ -400,7 +426,7 @@ CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, c
 
 CUresult cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags, CUdriverProcAddressQueryResult *symbolStatus){
     LOG_INFO("into cuGetProcAddress_v2 symbol=%s:%d",symbol,cudaVersion);
-    *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
+    *pfn = find_symbols_with_flags(symbol, cudaVersion, flags);
     if (strcmp(symbol,"cuGetProcAddress_v2")==0) {
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress_v2,symbol,pfn,cudaVersion,flags,symbolStatus); 
         if (res==CUDA_SUCCESS) {
