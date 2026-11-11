@@ -120,9 +120,11 @@ uint64_t graph_sync_begin(void);
 void graph_synchronized(CUcontext ctx, CUstream stream, int whole_context,
                         uint64_t submitted);
 void graph_pool_trimmed(void);
-void graph_capture_info(CUstream hStream, CUstreamCaptureStatus *cap, cuuint64_t *id, CUgraph *graph);
-void graph_capture_begin(CUstream stream);
-cuuint64_t graph_capture_id(CUstream stream, int take);
+CUresult graph_capture_info(CUstream hStream, CUstreamCaptureStatus *cap, cuuint64_t *id, CUgraph *graph);
+int graph_capture_prepare(CUstream stream, CUstreamCaptureMode mode, uint64_t *token);
+void graph_capture_begin(uint64_t token, CUresult result);
+uint64_t graph_capture_token(CUstream stream, cuuint64_t *id);
+void graph_capture_finish(uint64_t token);
 cuuint64_t graph_capture_id_of(CUgraph graph);
 void graph_capture_end(cuuint64_t capid, CUgraph graph);
 

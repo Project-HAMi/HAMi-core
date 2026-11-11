@@ -476,6 +476,19 @@ struct graph_exec_state {
     struct graph_exec_state *active_next;
     struct graph_exec_state *next;
 };
+typedef struct capture_link {
+    CUstream stream;
+    CUgraph graph;
+    CUcontext ctx;
+    cuuint64_t ctx_id;
+    cuuint64_t id;
+    uint64_t thread;
+    uint64_t token;
+    CUstreamCaptureMode mode;
+    struct capture_link *next;
+} capture_link;
+static capture_link *capture_links;
+static uint64_t capture_serial;
 static graph_charge_entry *graph_charges;
 static graph_group *graph_groups;
 static graph_exec_state *graph_states;
@@ -581,6 +594,10 @@ static void graph_active_remove(graph_exec_state *s) {
 
 /* Keep temporary allocations charged until their completion event succeeds. */
 static void graph_poll_active(void) {
+    /* GLOBAL capture protects every thread until native capture termination. */
+    for (capture_link *l = capture_links; l != NULL; l = l->next) {
+        if (l->mode == CU_STREAM_CAPTURE_MODE_GLOBAL || l->thread == graph_thread_id) return;
+    }
     for (graph_exec_state *s = graph_active, *next; s != NULL; s = next) {
         next = s->active_next;
         if (s->active && s->recorded && !s->pending &&
@@ -822,70 +839,79 @@ void graph_ptr_freed(CUdeviceptr ptr) {
     pthread_mutex_unlock(&graph_mutex);
 }
 
-/* Track capture IDs so failed captures release allocations from every joined stream. */
-typedef struct capture_link {
-    CUstream stream;
-    CUgraph graph;
-    cuuint64_t id;
-    uint64_t thread;
-    struct capture_link *next;
-} capture_link;
-static capture_link *capture_links;
-
 /* Capture state of a stream. The id is 0 when the driver cannot report it. */
-void graph_capture_info(CUstream hStream, CUstreamCaptureStatus *cap, cuuint64_t *id, CUgraph *graph) {
+CUresult graph_capture_info(CUstream hStream, CUstreamCaptureStatus *cap, cuuint64_t *id, CUgraph *graph) {
     *cap = CU_STREAM_CAPTURE_STATUS_NONE;
     *id = 0;
     *graph = NULL;
     if (CUDA_FIND_ENTRY(cuda_library_entry, cuStreamGetCaptureInfo_v3) != NULL) {
-        CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCaptureInfo_v3, hStream, cap, id, graph,
-                           NULL, NULL, NULL);
-    } else {
-        CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCaptureInfo_v2, hStream, cap, id, graph,
-                           NULL, NULL);
+        return CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCaptureInfo_v3, hStream, cap, id, graph,
+                                   NULL, NULL, NULL);
     }
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCaptureInfo_v2, hStream, cap, id, graph, NULL, NULL);
 }
 
-void graph_capture_begin(CUstream stream) {
-    CUstreamCaptureStatus cap;
-    cuuint64_t id;
-    CUgraph graph;
-    graph_capture_info(stream, &cap, &id, &graph);
-    capture_link *l = id != 0 ? malloc(sizeof(*l)) : NULL;
-    if (l == NULL) return;
+int graph_capture_prepare(CUstream stream, CUstreamCaptureMode mode, uint64_t *token) {
+    capture_link *l = calloc(1, sizeof(*l));
+    if (l == NULL) return CUDA_ERROR_OUT_OF_MEMORY;
     l->stream = stream;
-    l->graph = graph;
-    l->id = id;
+    l->mode = mode;
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuStreamGetCtx) != NULL &&
+        CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCtx, stream, &l->ctx) == CUDA_SUCCESS)
+        l->ctx_id = graph_context_id(l->ctx);
     pthread_mutex_lock(&graph_mutex);
-    l->thread = 0;
-    if (stream == CU_STREAM_PER_THREAD) {
-        if (graph_thread_id == 0) graph_thread_id = ++graph_thread_serial;
-        l->thread = graph_thread_id;
-    }
+    if (graph_thread_id == 0) graph_thread_id = ++graph_thread_serial;
+    l->thread = graph_thread_id;
+    l->token = ++capture_serial;
+    *token = l->token;
     l->next = capture_links;
     capture_links = l;
     pthread_mutex_unlock(&graph_mutex);
+    return CUDA_SUCCESS;
 }
 
-/* Look up the origin stream capture ID and optionally remove its association. */
-cuuint64_t graph_capture_id(CUstream stream, int take) {
-    cuuint64_t id = 0;
+void graph_capture_finish(uint64_t token) {
     pthread_mutex_lock(&graph_mutex);
     capture_link **pp = &capture_links;
     while (*pp != NULL) {
         capture_link *l = *pp;
-        if (l->stream == stream && (stream != CU_STREAM_PER_THREAD || l->thread == graph_thread_id)) {
-            id = l->id;
-            if (take) {
-                *pp = l->next;
-                free(l);
-            }
+        if (l->token == token) {
+            *pp = l->next;
+            free(l);
             break;
         }
         pp = &l->next;
     }
     pthread_mutex_unlock(&graph_mutex);
-    return id;
+}
+
+void graph_capture_begin(uint64_t token, CUresult result) {
+    if (result != CUDA_SUCCESS) {
+        graph_capture_finish(token);
+        return;
+    }
+    pthread_mutex_lock(&graph_mutex);
+    for (capture_link *l = capture_links; l != NULL; l = l->next) {
+        if (l->token != token) continue;
+        CUstreamCaptureStatus cap;
+        graph_capture_info(l->stream, &cap, &l->id, &l->graph);
+        break;
+    }
+    pthread_mutex_unlock(&graph_mutex);
+}
+
+uint64_t graph_capture_token(CUstream stream, cuuint64_t *id) {
+    uint64_t token = 0;
+    *id = 0;
+    pthread_mutex_lock(&graph_mutex);
+    for (capture_link *l = capture_links; l != NULL; l = l->next) {
+        if (l->stream != stream || (stream == CU_STREAM_PER_THREAD && l->thread != graph_thread_id)) continue;
+        token = l->token;
+        *id = l->id;
+        if (l->id != 0) break;
+    }
+    pthread_mutex_unlock(&graph_mutex);
+    return token;
 }
 
 /* The id of the running capture that builds graph, 0 for a standalone graph. */
@@ -1230,6 +1256,15 @@ cuuint64_t graph_context_id(CUcontext ctx) {
 void graph_context_destroyed(CUcontext ctx, cuuint64_t id) {
     if (ctx == NULL) return;
     pthread_mutex_lock(&graph_mutex);
+    for (capture_link **pp = &capture_links; *pp != NULL;) {
+        capture_link *l = *pp;
+        if (l->ctx == ctx && l->ctx_id == id) {
+            *pp = l->next;
+            free(l);
+        } else {
+            pp = &l->next;
+        }
+    }
     for (graph_exec_state *s = graph_states, *next; s != NULL; s = next) {
         next = s->next;
         if (s->event_ctx == ctx && s->event_ctx_id == id) {

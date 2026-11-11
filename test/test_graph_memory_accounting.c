@@ -1,6 +1,7 @@
 // Copyright 2026 The HAMi Authors.
 /* Exercise production accounting with an asynchronous fake driver. */
 #include <stdint.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -23,6 +24,8 @@ static int nodes, submissions, instantiations, gpu_done;
 static CUresult add_result, submit_result, event_result, pool_result, record_result;
 static _Thread_local CUgraph capturing;
 static _Thread_local cuuint64_t capture_id = 123;
+static _Thread_local CUstreamCaptureMode capturing_mode;
+static _Atomic int global_captures;
 static CUcontext current_ctx = (CUcontext)1, pushed_ctx;
 static struct { CUcontext ctx; cuuint64_t ctx_id; int alive; } events[8192];
 static cuuint64_t context_ids[] = {0, 1, 2};
@@ -32,6 +35,8 @@ static pthread_cond_t submit_cond = PTHREAD_COND_INITIALIZER;
 static int block_submit, submit_entered;
 static int block_sync, sync_entered;
 static CUresult capture_end_result;
+static CUresult capture_begin_result;
+static int keep_capture, block_capture_begin, block_capture_end, capture_entered;
 static int capture_ready, capture_finish;
 
 void ensure_initialized(void) {}
@@ -119,7 +124,7 @@ static CUresult driver_event_record(CUevent event, CUstream stream) {
     return record_result;
 }
 static CUresult driver_event_query(CUevent event) {
-    REQUIRE(capturing == NULL);
+    REQUIRE(capturing == NULL && atomic_load(&global_captures) == 0);
     event_queries++;
     REQUIRE((uintptr_t)event < 8192);
     if (!events[(uintptr_t)event].alive) return CUDA_ERROR_INVALID_HANDLE;
@@ -175,16 +180,31 @@ static CUresult driver_alloc_from_pool(CUdeviceptr *ptr, size_t bytes, CUmemoryP
     (void)pool;
     return driver_alloc_async(ptr, bytes, stream);
 }
+static void capture_pause(int *blocked) {
+    pthread_mutex_lock(&submit_gate);
+    capture_entered = 1;
+    pthread_cond_broadcast(&submit_cond);
+    while (*blocked) pthread_cond_wait(&submit_cond, &submit_gate);
+    pthread_mutex_unlock(&submit_gate);
+}
 static CUresult driver_begin_capture(CUstream stream, CUstreamCaptureMode mode) {
-    (void)stream; (void)mode;
+    (void)stream;
+    if (capture_begin_result != CUDA_SUCCESS) return capture_begin_result;
     capturing = (CUgraph)++serial;
     capture_id = (cuuint64_t)(uintptr_t)capturing;
+    capturing_mode = mode;
+    if (mode == CU_STREAM_CAPTURE_MODE_GLOBAL) atomic_fetch_add(&global_captures, 1);
+    capture_pause(&block_capture_begin);
     return CUDA_SUCCESS;
 }
 static CUresult driver_end_capture(CUstream stream, CUgraph *graph) {
     (void)stream;
     *graph = capture_end_result == CUDA_SUCCESS ? capturing : NULL;
-    capturing = NULL;
+    if (!keep_capture) {
+        if (capturing_mode == CU_STREAM_CAPTURE_MODE_GLOBAL) atomic_fetch_sub(&global_captures, 1);
+        capturing = NULL;
+        capture_pause(&block_capture_end);
+    }
     return capture_end_result;
 }
 
@@ -326,9 +346,8 @@ static void test_per_thread_capture(int default_stream, int failed) {
     clean();
 }
 
-static void *capture_thread(void *unused) {
-    (void)unused;
-    REQUIRE(cuStreamBeginCapture_v2_ptsz(NULL, CU_STREAM_CAPTURE_MODE_THREAD_LOCAL) == CUDA_SUCCESS);
+static void *capture_thread(void *mode) {
+    REQUIRE(cuStreamBeginCapture_v2_ptsz(NULL, (CUstreamCaptureMode)(uintptr_t)mode) == CUDA_SUCCESS);
     CUdeviceptr ptr;
     REQUIRE(cuMemAllocAsync(&ptr, 200 * MIB, CU_STREAM_PER_THREAD) == CUDA_SUCCESS);
     pthread_mutex_lock(&submit_gate);
@@ -341,14 +360,18 @@ static void *capture_thread(void *unused) {
     return NULL;
 }
 
-static void test_per_thread_capture_ids(void) {
-    REQUIRE(cuStreamBeginCapture_v2_ptsz(NULL, CU_STREAM_CAPTURE_MODE_THREAD_LOCAL) == CUDA_SUCCESS);
+static void test_per_thread_capture_ids(CUstreamCaptureMode mode) {
+    CUgraph running = make_graph();
+    REQUIRE(add(running, 64, 1, NULL) == CUDA_SUCCESS);
+    CUgraphExec exec = instantiate(running);
+    REQUIRE(cuGraphLaunch(exec, (CUstream)10) == CUDA_SUCCESS);
+    REQUIRE(cuStreamBeginCapture_v2_ptsz(NULL, mode) == CUDA_SUCCESS);
     CUdeviceptr ptr;
     REQUIRE(cuMemAllocAsync(&ptr, 100 * MIB, CU_STREAM_PER_THREAD) == CUDA_SUCCESS);
     capture_end_result = CUDA_ERROR_STREAM_CAPTURE_INVALIDATED;
     capture_ready = 0; capture_finish = 0;
     pthread_t thread;
-    REQUIRE(pthread_create(&thread, NULL, capture_thread, NULL) == 0);
+    REQUIRE(pthread_create(&thread, NULL, capture_thread, (void *)(uintptr_t)mode) == 0);
     pthread_mutex_lock(&submit_gate);
     while (!capture_ready) pthread_cond_wait(&submit_cond, &submit_gate);
     pthread_mutex_unlock(&submit_gate);
@@ -360,9 +383,90 @@ static void test_per_thread_capture_ids(void) {
     pthread_cond_broadcast(&submit_cond);
     pthread_mutex_unlock(&submit_gate);
     REQUIRE(pthread_join(thread, NULL) == 0);
-    REQUIRE(used == 256 * MIB);
+    REQUIRE(used == 320 * MIB);
     capture_end_result = CUDA_SUCCESS;
+    destroy(running, exec);
     clean();
+}
+
+static void *capture_window(void *mode) {
+    CUgraph graph;
+    REQUIRE(cuStreamBeginCapture_v2((CUstream)20, (CUstreamCaptureMode)(uintptr_t)mode) == CUDA_SUCCESS);
+    REQUIRE(cuStreamEndCapture((CUstream)20, &graph) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
+    return NULL;
+}
+
+static void test_capture_window(CUstreamCaptureMode mode, int ending) {
+    CUgraph a = make_graph(), b = make_graph(), mutation = make_graph();
+    REQUIRE(add(a, 64, 1, NULL) == CUDA_SUCCESS);
+    REQUIRE(add(b, 64, 1, NULL) == CUDA_SUCCESS);
+    CUgraphExec x = instantiate(a), y = instantiate(b);
+    REQUIRE(cuGraphLaunch(x, (CUstream)10) == CUDA_SUCCESS);
+    capture_entered = 0;
+    block_capture_begin = !ending; block_capture_end = ending;
+    pthread_t thread;
+    REQUIRE(pthread_create(&thread, NULL, capture_window, (void *)(uintptr_t)mode) == 0);
+    pthread_mutex_lock(&submit_gate);
+    while (!capture_entered) pthread_cond_wait(&submit_cond, &submit_gate);
+    if (ending) {
+        while (atomic_load(&global_captures) != 0) pthread_cond_wait(&submit_cond, &submit_gate);
+    }
+    pthread_mutex_unlock(&submit_gate);
+    int before = event_queries;
+    REQUIRE(cuGraphLaunch(y, (CUstream)30) == CUDA_SUCCESS);
+    REQUIRE(add(mutation, 16, 0, NULL) == CUDA_SUCCESS);
+    REQUIRE(cuDeviceGraphMemTrim(0) == CUDA_SUCCESS);
+    REQUIRE(oom_check(0, 0) == 0);
+    if (mode == CU_STREAM_CAPTURE_MODE_GLOBAL) REQUIRE(event_queries == before);
+    else REQUIRE(event_queries > before);
+    CUgraph reused;
+    if (ending) REQUIRE(cuStreamBeginCapture_v2((CUstream)20, mode) == CUDA_SUCCESS);
+    pthread_mutex_lock(&submit_gate);
+    block_capture_begin = 0; block_capture_end = 0;
+    pthread_cond_broadcast(&submit_cond);
+    pthread_mutex_unlock(&submit_gate);
+    REQUIRE(pthread_join(thread, NULL) == 0);
+    if (ending) {
+        REQUIRE(cuStreamEndCapture((CUstream)20, &reused) == CUDA_SUCCESS);
+        REQUIRE(cuGraphDestroy(reused) == CUDA_SUCCESS);
+    }
+    before = event_queries;
+    REQUIRE(oom_check(0, 0) == 0);
+    REQUIRE(event_queries > before);
+    REQUIRE(cuGraphDestroy(mutation) == CUDA_SUCCESS);
+    destroy(a, x); destroy(b, y); clean();
+}
+
+static void *capture_poll(void *unused) {
+    (void)unused;
+    REQUIRE(oom_check(0, 0) == 0);
+    return NULL;
+}
+
+static void test_capture_failure(void) {
+    CUgraph running = make_graph(), graph;
+    REQUIRE(add(running, 64, 1, NULL) == CUDA_SUCCESS);
+    CUgraphExec exec = instantiate(running);
+    REQUIRE(cuGraphLaunch(exec, (CUstream)10) == CUDA_SUCCESS);
+    capture_begin_result = CUDA_ERROR_INVALID_VALUE;
+    REQUIRE(cuStreamBeginCapture_v2((CUstream)20, CU_STREAM_CAPTURE_MODE_GLOBAL) == capture_begin_result);
+    capture_begin_result = CUDA_SUCCESS;
+    int before = event_queries;
+    REQUIRE(oom_check(0, 0) == 0);
+    REQUIRE(event_queries > before);
+    REQUIRE(cuStreamBeginCapture_v2((CUstream)20, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);
+    capture_end_result = CUDA_ERROR_INVALID_VALUE; keep_capture = 1;
+    REQUIRE(cuStreamEndCapture((CUstream)20, &graph) == capture_end_result);
+    pthread_t thread;
+    before = event_queries;
+    REQUIRE(pthread_create(&thread, NULL, capture_poll, NULL) == 0);
+    REQUIRE(pthread_join(thread, NULL) == 0);
+    REQUIRE(event_queries == before);
+    capture_end_result = CUDA_SUCCESS; keep_capture = 0;
+    REQUIRE(cuStreamEndCapture((CUstream)20, &graph) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
+    destroy(running, exec); clean();
 }
 
 static void test_context_lifetime(void) {
@@ -663,11 +767,18 @@ int main(void) {
     DRIVER(cuMemAllocFromPoolAsync, driver_alloc_from_pool);
     DRIVER(cuStreamBeginCapture_v2_ptsz, driver_begin_capture);
     DRIVER(cuStreamEndCapture_ptsz, driver_end_capture);
+    DRIVER(cuStreamBeginCapture_v2, driver_begin_capture);
+    DRIVER(cuStreamEndCapture, driver_end_capture);
     test_node_failure();
     for (int from_pool = 0; from_pool < 2; from_pool++) test_capture_admission(from_pool);
     for (int default_stream = 0; default_stream < 2; default_stream++)
         for (int failed = 0; failed < 2; failed++) test_per_thread_capture(default_stream, failed);
-    test_per_thread_capture_ids();
+    test_per_thread_capture_ids(CU_STREAM_CAPTURE_MODE_THREAD_LOCAL);
+    test_per_thread_capture_ids(CU_STREAM_CAPTURE_MODE_GLOBAL);
+    test_capture_window(CU_STREAM_CAPTURE_MODE_GLOBAL, 0);
+    test_capture_window(CU_STREAM_CAPTURE_MODE_GLOBAL, 1);
+    test_capture_window(CU_STREAM_CAPTURE_MODE_THREAD_LOCAL, 0);
+    test_capture_failure();
     test_event_failure();
     test_serial_and_overlap();
     for (int mode = 0; mode < 3; mode++) test_persistent(mode);

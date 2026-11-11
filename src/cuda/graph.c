@@ -333,8 +333,12 @@ CUresult cuGraphLaunch_ptsz(CUgraphExec hGraphExec, CUstream hStream) {
 }
 
 static CUresult begin_capture(cuda_sym_t begin, CUstream stream, CUstreamCaptureMode mode, int per_thread) {
-    CUresult res = begin(stream, mode);
-    if (res == CUDA_SUCCESS) graph_capture_begin(per_thread && stream == NULL ? CU_STREAM_PER_THREAD : stream);
+    uint64_t token;
+    CUstream accounting_stream = per_thread && stream == NULL ? CU_STREAM_PER_THREAD : stream;
+    CUresult res = graph_capture_prepare(accounting_stream, mode, &token);
+    if (res != CUDA_SUCCESS) return res;
+    res = begin(stream, mode);
+    graph_capture_begin(token, res);
     return res;
 }
 
@@ -349,9 +353,19 @@ CUresult cuStreamBeginCapture_v2_ptsz(CUstream stream, CUstreamCaptureMode mode)
 
 static CUresult end_capture(cuda_sym_t end, CUstream stream, CUgraph *graph, int per_thread) {
     CUstream accounting_stream = per_thread && stream == NULL ? CU_STREAM_PER_THREAD : stream;
-    cuuint64_t id = graph_capture_id(accounting_stream, 1);
+    cuuint64_t id;
+    uint64_t token = graph_capture_token(accounting_stream, &id);
     CUresult res = end(stream, graph);
-    graph_capture_end(id, res == CUDA_SUCCESS && graph != NULL ? *graph : NULL);
+    CUstreamCaptureStatus cap;
+    cuuint64_t current_id;
+    CUgraph current_graph;
+    int ended = res == CUDA_SUCCESS;
+    if (!ended && graph_capture_info(accounting_stream, &cap, &current_id, &current_graph) == CUDA_SUCCESS)
+        ended = cap == CU_STREAM_CAPTURE_STATUS_NONE || (id != 0 && current_id != 0 && id != current_id);
+    if (ended) {
+        graph_capture_finish(token);
+        graph_capture_end(id, res == CUDA_SUCCESS && graph != NULL ? *graph : NULL);
+    }
     return res;
 }
 
