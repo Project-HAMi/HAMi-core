@@ -909,6 +909,10 @@ void driver_admission_release(int *lease_fd) {
     hostpid_broker_release_driver_admission(lease_fd);
 }
 
+void driver_admission_cleanup(void *lease_fd) {
+    driver_admission_release(lease_fd);
+}
+
 void postInit(){
     allocator_init();
     map_cuda_visible_devices();
@@ -996,8 +1000,10 @@ CUresult cuInit(unsigned int Flags){
     pthread_once(&pre_cuinit_flag,(void(*)(void))preInit);
     ENSURE_INITIALIZED();
     int lease_fd = driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_INIT);
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuInit,Flags);
-    driver_admission_release(&lease_fd);
+    CUresult res;
+    pthread_cleanup_push(driver_admission_cleanup, &lease_fd);
+    res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuInit,Flags);
+    pthread_cleanup_pop(1);
     if (res != CUDA_SUCCESS){
         LOG_ERROR("cuInit failed:%d",res);
         return res;

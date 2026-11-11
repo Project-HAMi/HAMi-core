@@ -56,5 +56,7 @@ void ensure_post_init();
 // Returns a lease fd, or -1 when admission is off or no permit was granted.
 int driver_admission_acquire(hostpid_driver_admission_operation_t operation);
 void driver_admission_release(int *lease_fd);
+// pthread_cleanup handler, so a cancelled driver call still returns its permit.
+void driver_admission_cleanup(void *lease_fd);
 
 #endif  // SRC_INCLUDE_LIBVGPU_H_
