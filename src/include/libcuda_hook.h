@@ -67,6 +67,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuDevicePrimaryCtxRetain),
     CUDA_OVERRIDE_ENUM(cuDevicePrimaryCtxSetFlags_v2),
     CUDA_OVERRIDE_ENUM(cuDevicePrimaryCtxRelease_v2),
+    CUDA_OVERRIDE_ENUM(cuDevicePrimaryCtxReset_v2),
     CUDA_OVERRIDE_ENUM(cuCtxGetDevice),
     CUDA_OVERRIDE_ENUM(cuCtxCreate_v2),
     CUDA_OVERRIDE_ENUM(cuCtxCreate_v3),
@@ -75,6 +76,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuCtxGetApiVersion),
     CUDA_OVERRIDE_ENUM(cuCtxGetCacheConfig),
     CUDA_OVERRIDE_ENUM(cuCtxGetCurrent),
+    CUDA_OVERRIDE_ENUM(cuCtxGetId),
     CUDA_OVERRIDE_ENUM(cuCtxGetFlags),
     CUDA_OVERRIDE_ENUM(cuCtxGetLimit),
     CUDA_OVERRIDE_ENUM(cuCtxGetSharedMemConfig),
@@ -151,6 +153,12 @@ typedef enum {
     /* cuEvent Part */
     CUDA_OVERRIDE_ENUM(cuEventCreate),
     CUDA_OVERRIDE_ENUM(cuEventDestroy_v2),
+    CUDA_OVERRIDE_ENUM(cuEventRecord),
+    CUDA_OVERRIDE_ENUM(cuEventQuery),
+    CUDA_OVERRIDE_ENUM(cuDeviceGetGraphMemAttribute),
+    CUDA_OVERRIDE_ENUM(cuDeviceGraphMemTrim),
+    CUDA_OVERRIDE_ENUM(cuStreamGetId),
+    CUDA_OVERRIDE_ENUM(cuStreamGetCtx),
     CUDA_OVERRIDE_ENUM(cuModuleLoad),
     CUDA_OVERRIDE_ENUM(cuModuleLoadData),
     CUDA_OVERRIDE_ENUM(cuModuleLoadDataEx),
@@ -171,12 +179,17 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuMemCreate),
     CUDA_OVERRIDE_ENUM(cuMemRelease),
     CUDA_OVERRIDE_ENUM(cuMemMap),
+    CUDA_OVERRIDE_ENUM(cuStreamBeginCapture_v2),
+    CUDA_OVERRIDE_ENUM(cuStreamBeginCapture_v2_ptsz),
+    CUDA_OVERRIDE_ENUM(cuStreamEndCapture),
+    CUDA_OVERRIDE_ENUM(cuStreamEndCapture_ptsz),
     CUDA_OVERRIDE_ENUM(cuMemUnmap),
     CUDA_OVERRIDE_ENUM(cuMemRetainAllocationHandle),
     CUDA_OVERRIDE_ENUM(cuMemImportFromShareableHandle),
     CUDA_OVERRIDE_ENUM(cuMemAllocAsync),
     CUDA_OVERRIDE_ENUM(cuMemFreeAsync),
     CUDA_OVERRIDE_ENUM(cuStreamGetCaptureInfo_v2),
+    CUDA_OVERRIDE_ENUM(cuStreamGetCaptureInfo_v3),
     CUDA_OVERRIDE_ENUM(cuGraphAddMemAllocNode),
     CUDA_OVERRIDE_ENUM(cuGraphAddMemFreeNode),
     /* memory APIs */
@@ -264,8 +277,11 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuGraphInstantiate),
     CUDA_OVERRIDE_ENUM(cuGraphInstantiateWithFlags),
     CUDA_OVERRIDE_ENUM(cuGraphInstantiateWithParams),
+    CUDA_OVERRIDE_ENUM(cuGraphInstantiateWithParams_ptsz),
     CUDA_OVERRIDE_ENUM(cuGraphUpload),
+    CUDA_OVERRIDE_ENUM(cuGraphUpload_ptsz),
     CUDA_OVERRIDE_ENUM(cuGraphLaunch),
+    CUDA_OVERRIDE_ENUM(cuGraphLaunch_ptsz),
     CUDA_OVERRIDE_ENUM(cuGraphExecDestroy),
     CUDA_OVERRIDE_ENUM(cuGraphDestroy),
 
@@ -275,6 +291,13 @@ typedef enum {
 }cuda_override_enum_t;
 
 extern cuda_entry_t cuda_library_entry[];
+
+CUresult cuGraphInstantiateWithParams_ptsz(CUgraphExec *exec, CUgraph graph,
+                                           CUDA_GRAPH_INSTANTIATE_PARAMS *params);
+CUresult cuGraphLaunch_ptsz(CUgraphExec exec, CUstream stream);
+CUresult cuGraphUpload_ptsz(CUgraphExec exec, CUstream stream);
+CUresult cuStreamBeginCapture_v2_ptsz(CUstream stream, CUstreamCaptureMode mode);
+CUresult cuStreamEndCapture_ptsz(CUstream stream, CUgraph *graph);
 
 #endif
 

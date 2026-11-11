@@ -3,6 +3,7 @@
 // must not invalidate the capture (cuMemPoolGetAttribute is illegal while
 // capturing). Runs for global, thread-local and relaxed capture modes.
 #include <cuda.h>
+#include <pthread.h>
 #include <stdio.h>
 
 #define CHECK(call)                                                            \
@@ -15,6 +16,19 @@
         }                                                                      \
     } while (0)
 
+static CUcontext thread_ctx;
+static CUstream thread_stream;
+static CUresult thread_result;
+
+static void *end_on_other_thread(void *arg) {
+    CUgraph g;
+    (void)arg;
+    cuCtxSetCurrent(thread_ctx);
+    thread_result = cuStreamEndCapture(thread_stream, &g);
+    return NULL;
+}
+
+/** Check asynchronous allocation capture, quota enforcement, and cleanup through the Driver API. */
 int main(void) {
     CUdevice dev;
     CUcontext ctx;
@@ -38,8 +52,9 @@ int main(void) {
         CHECK(cuGraphDestroy(g));
     }
 
-    // Capture allocations are charged to the graph: with a 1 GiB limit, two
-    // live 768 MiB captures (each with a free node) cannot coexist, and destroying one frees room.
+    // Capture allocations are charged to the graph, and graphs share the
+    // device graph pool (#395): two live 768 MiB captures with free nodes cost
+    // 768 MiB, while two allocations in one capture cost both.
     CUdeviceptr p;
     CUgraph g1, g2;
     CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_RELAXED));
@@ -47,17 +62,71 @@ int main(void) {
     CHECK(cuMemFreeAsync(p, s));
     CHECK(cuStreamEndCapture(s, &g1));
     CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_RELAXED));
-    if (cuMemAllocAsync(&p, 768ull << 20, s) != CUDA_ERROR_OUT_OF_MEMORY) {
-        fprintf(stderr, "FAIL: second 768 MiB capture alloc not rejected\n");
-        return 1;
-    }
-    cuStreamEndCapture(s, &g2);
-    CHECK(cuGraphDestroy(g1));
-    CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_RELAXED));
     CHECK(cuMemAllocAsync(&p, 768ull << 20, s));
     CHECK(cuMemFreeAsync(p, s));
     CHECK(cuStreamEndCapture(s, &g2));
+    CHECK(cuGraphDestroy(g1));
     CHECK(cuGraphDestroy(g2));
+
+    CUdeviceptr p2;
+    CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_RELAXED));
+    CHECK(cuMemAllocAsync(&p, 500ull << 20, s));
+    if (cuMemAllocAsync(&p2, 500ull << 20, s) != CUDA_ERROR_OUT_OF_MEMORY) {
+        fprintf(stderr, "FAIL: second 500 MiB alloc in one capture not rejected\n");
+        return 1;
+    }
+    CHECK(cuStreamEndCapture(s, &g2));
+    CHECK(cuGraphDestroy(g2));
+
+    // A capture that gets invalidated is discarded by the driver without a
+    // cuGraphDestroy; its allocation never happened and must not stay charged (#392).
+    CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_GLOBAL));
+    CHECK(cuMemAllocAsync(&p, 768ull << 20, s));
+    cuStreamQuery(s);  // not allowed while capturing: invalidates the capture
+    if (cuStreamEndCapture(s, &g2) == CUDA_SUCCESS) {
+        fprintf(stderr, "FAIL: capture was not invalidated\n");
+        return 1;
+    }
+    CUdeviceptr q;
+    CHECK(cuMemAlloc(&q, 768ull << 20));
+    CHECK(cuMemFree(q));
+
+    // Same when the allocation happens on a stream that joined the capture:
+    // the capture is terminated on the origin stream.
+    CUstream side;
+    CUevent ev;
+    CHECK(cuStreamCreate(&side, CU_STREAM_NON_BLOCKING));
+    CHECK(cuEventCreate(&ev, CU_EVENT_DISABLE_TIMING));
+    CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_GLOBAL));
+    CHECK(cuEventRecord(ev, s));
+    CHECK(cuStreamWaitEvent(side, ev, 0));
+    CHECK(cuMemAllocAsync(&p, 768ull << 20, side));
+    cuStreamQuery(s);  // invalidates the capture
+    cuEventRecord(ev, side);
+    cuStreamWaitEvent(s, ev, 0);
+    if (cuStreamEndCapture(s, &g2) == CUDA_SUCCESS) {
+        fprintf(stderr, "FAIL: joined-stream capture was not invalidated\n");
+        return 1;
+    }
+    CHECK(cuMemAlloc(&q, 768ull << 20));
+    CHECK(cuMemFree(q));
+
+    // Ending a global capture from another thread is refused and terminates
+    // the capture: its allocation never happened, so the charge must go.
+    pthread_t t;
+    CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_GLOBAL));
+    CHECK(cuMemAllocAsync(&p, 768ull << 20, s));
+    CHECK(cuMemFreeAsync(p, s));
+    thread_ctx = ctx;
+    thread_stream = s;
+    pthread_create(&t, NULL, end_on_other_thread, NULL);
+    pthread_join(t, NULL);
+    if (thread_result != CUDA_ERROR_STREAM_CAPTURE_WRONG_THREAD) {
+        fprintf(stderr, "FAIL: end from another thread -> %d\n", (int)thread_result);
+        return 1;
+    }
+    CHECK(cuMemAlloc(&q, 768ull << 20));
+    CHECK(cuMemFree(q));
     printf("PASS\n");
     return 0;
 }

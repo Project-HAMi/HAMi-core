@@ -17,10 +17,13 @@ DLSYM_FILE = ROOT / "src/libvgpu.c"
 WRAPPER_GLOB = "src/cuda/*.c"
 
 # Symbols intentionally excluded from specific checks.
-# cuStreamGetCaptureInfo_v2 is only called internally. Hooking it would hand
-# its signature to callers that resolve cuStreamGetCaptureInfo (v3 layout).
-OPTIONAL_DLSYM_SYMBOLS = {"cuGetExportTable", "cuStreamGetCaptureInfo_v2"}
-OPTIONAL_WRAPPER_SYMBOLS = {"cuGetExportTable", "cuStreamGetCaptureInfo_v2"}
+# cuStreamGetCaptureInfo_v2/_v3 are only called internally. Hooking them would
+# hand one signature to callers that resolve cuStreamGetCaptureInfo.
+INTERNAL_SYMBOLS = {"cuStreamGetCaptureInfo_v2", "cuStreamGetCaptureInfo_v3",
+                    "cuEventRecord", "cuEventQuery", "cuDeviceGetGraphMemAttribute",
+                    "cuStreamGetId", "cuStreamGetCtx", "cuCtxGetId"}
+OPTIONAL_DLSYM_SYMBOLS = {"cuGetExportTable", *INTERNAL_SYMBOLS}
+OPTIONAL_WRAPPER_SYMBOLS = {"cuGetExportTable", *INTERNAL_SYMBOLS}
 
 
 def strip_c_comments(content: str) -> str:

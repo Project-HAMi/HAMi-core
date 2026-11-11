@@ -102,12 +102,19 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             set_property(TARGET ${TEST_TARGET_NAME} APPEND_STRING PROPERTY
                 LINK_FLAGS " -Wl,--wrap=hostpid_broker_query_trusted,--wrap=hostpid_fallback_lock_acquire_until,--wrap=hostpid_fallback_lock_acquire_shared_until")
         endif()
-    elseif (TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat")
+    elseif (TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_memory_accounting")
         add_executable(${TEST_TARGET_NAME}
             ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/memory.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/allocator/allocator.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        if (TEST_TARGET_NAME STREQUAL "test_graph_memory_accounting")
+            target_sources(${TEST_TARGET_NAME} PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/graph.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/context.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/stream.c)
+        endif()
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
             _GNU_SOURCE HOOK_MEMINFO_ENABLE)
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
@@ -253,7 +260,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures"
             OR TEST_TARGET_NAME STREQUAL "test_utilization_nvml_index"
             OR TEST_TARGET_NAME STREQUAL "test_rate_limiter_recent_kernel"
-            OR TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat")
+            OR TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_memory_accounting")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_sm_limiter_step")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
@@ -413,6 +421,10 @@ add_test(NAME cuda_memory_compat COMMAND test_cuda_memory_compat)
 set_tests_properties(cuda_memory_compat PROPERTIES
     ENVIRONMENT "LIBCUDA_LOG_LEVEL=4"
     TIMEOUT 10)
+
+add_test(NAME graph_memory_accounting COMMAND test_graph_memory_accounting)
+set_tests_properties(graph_memory_accounting PROPERTIES
+    ENVIRONMENT "LIBCUDA_LOG_LEVEL=4" TIMEOUT 10)
 
 # The SM limiter refill step must be the same fraction of the bucket on every
 # device (issue #348).

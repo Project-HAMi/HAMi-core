@@ -16,6 +16,15 @@
         }                                                                      \
     } while (0)
 
+#define EXPECT_OOM(what, call)                                                \
+    do {                                                                       \
+        CUresult _r = (call);                                                  \
+        if (_r != CUDA_ERROR_OUT_OF_MEMORY) {                                  \
+            fprintf(stderr, "FAIL %s:%d: %s -> %d\n", __FILE__, __LINE__, what, (int)_r); \
+            return 1;                                                          \
+        }                                                                      \
+    } while (0)
+
 static CUresult add_node(CUgraph g, size_t bytes, CUdeviceptr *ptr, int with_free) {
     CUDA_MEM_ALLOC_NODE_PARAMS prm;
     CUgraphNode n, f;
@@ -30,6 +39,7 @@ static CUresult add_node(CUgraph g, size_t bytes, CUdeviceptr *ptr, int with_fre
     return with_free ? cuGraphAddMemFreeNode(&f, g, &n, 1, prm.dptr) : CUDA_SUCCESS;
 }
 
+/** Check graph allocation quota rejection, rollback, and output correctness. */
 int main(void) {
     CUdevice dev;
     CUcontext ctx;
@@ -76,19 +86,23 @@ int main(void) {
     }
     CHECK(cuGraphDestroy(g));
 
-    // With a free node, memory is released when the graph is destroyed.
+    // Graphs share the device graph pool: two live graphs with free nodes cost
+    // the larger one, not the sum (#395). 400 + 400 MiB fits in 768 MiB.
     CUgraph g1, g2;
+    CUdeviceptr q;
     CHECK(cuGraphCreate(&g1, 0));
     CHECK(cuGraphCreate(&g2, 0));
-    CHECK(add_node(g1, 768ull << 20, NULL, 1));
-    r = add_node(g2, 768ull << 20, NULL, 1);
-    if (r != CUDA_ERROR_OUT_OF_MEMORY) {
-        fprintf(stderr, "FAIL: second 768 MiB graph -> %d\n", (int)r);
-        return 1;
-    }
+    CHECK(add_node(g1, 400ull << 20, NULL, 1));
+    CHECK(add_node(g2, 400ull << 20, NULL, 1));
+    EXPECT_OOM("alloc over the shared pool", cuMemAlloc(&q, 500ull << 20));
+    CHECK(cuMemAlloc(&q, 300ull << 20));  // 400 pool + 300 fits, 800 + 300 would not
+    CHECK(cuMemFree(q));
+    // ...but one graph is charged for all of its own allocations.
+    EXPECT_OOM("second allocation of one graph", add_node(g1, 400ull << 20, NULL, 1));
     CHECK(cuGraphDestroy(g1));
-    CHECK(add_node(g2, 768ull << 20, NULL, 1));
     CHECK(cuGraphDestroy(g2));
+    CHECK(cuMemAlloc(&q, 700ull << 20));  // the pool charge is gone
+    CHECK(cuMemFree(q));
 
     // A graph exec keeps the memory after the graph is destroyed (PyTorch
     // destroys the graph right after instantiating it), until the exec goes.
@@ -96,7 +110,7 @@ int main(void) {
     CUDA_GRAPH_INSTANTIATE_PARAMS ip;
     for (int with_params = 0; with_params < 2; with_params++) {
         CHECK(cuGraphCreate(&g1, 0));
-        CHECK(add_node(g1, 768ull << 20, NULL, 1));
+        CHECK(add_node(g1, 600ull << 20, NULL, 1));
         if (with_params) {
             memset(&ip, 0, sizeof(ip));
             CHECK(cuGraphInstantiateWithParams(&ex, g1, &ip));
@@ -104,34 +118,54 @@ int main(void) {
             CHECK(cuGraphInstantiateWithFlags(&ex, g1, 0));
         }
         CHECK(cuGraphDestroy(g1));
-        CHECK(cuGraphCreate(&g2, 0));
-        r = add_node(g2, 768ull << 20, NULL, 1);
-        if (r != CUDA_ERROR_OUT_OF_MEMORY) {
-            fprintf(stderr, "FAIL: live exec not charged (params=%d) -> %d\n", with_params, (int)r);
-            return 1;
-        }
+        EXPECT_OOM("alloc while an exec is alive", cuMemAlloc(&q, 300ull << 20));
         CHECK(cuGraphExecDestroy(ex));
-        CHECK(add_node(g2, 768ull << 20, NULL, 1));
-        CHECK(cuGraphDestroy(g2));
+        CHECK(cuMemAlloc(&q, 300ull << 20));
+        CHECK(cuMemFree(q));
     }
 
     // Without a free node the allocation outlives the graph, as in the
     // driver, and is released only when its pointer is freed.
     CHECK(cuGraphCreate(&g1, 0));
-    CHECK(add_node(g1, 768ull << 20, &p, 0));
+    CHECK(add_node(g1, 700ull << 20, &p, 0));
     CHECK(cuGraphInstantiateWithFlags(&ex, g1, 0));
     CHECK(cuGraphLaunch(ex, st));
     CHECK(cuStreamSynchronize(st));
     CHECK(cuGraphExecDestroy(ex));
     CHECK(cuGraphDestroy(g1));
-    CHECK(cuGraphCreate(&g2, 0));
-    r = add_node(g2, 768ull << 20, NULL, 1);
-    if (r != CUDA_ERROR_OUT_OF_MEMORY) {
-        fprintf(stderr, "FAIL: leaked graph alloc not charged -> %d\n", (int)r);
-        return 1;
-    }
+    EXPECT_OOM("alloc while a launched graph alloc is leaked", cuMemAlloc(&q, 300ull << 20));
     CHECK(cuMemFree(p));
-    CHECK(add_node(g2, 768ull << 20, NULL, 1));
+    CHECK(cuMemAlloc(&q, 300ull << 20));
+    CHECK(cuMemFree(q));
+
+    // A graph that never ran allocated nothing: destroying it frees the charge
+    // even without a free node (#392), also after an exec was made but not run.
+    for (int with_exec = 0; with_exec < 2; with_exec++) {
+        CHECK(cuGraphCreate(&g1, 0));
+        CHECK(add_node(g1, 700ull << 20, NULL, 0));
+        if (with_exec) {
+            CHECK(cuGraphInstantiateWithFlags(&ex, g1, 0));
+            CHECK(cuGraphExecDestroy(ex));
+        }
+        EXPECT_OOM("alloc while an unrun graph is alive", cuMemAlloc(&q, 300ull << 20));
+        CHECK(cuGraphDestroy(g1));
+        CHECK(cuMemAlloc(&q, 700ull << 20));
+        CHECK(cuMemFree(q));
+    }
+
+    // Instantiating with an upload allocates like a launch: still charged
+    // after the graph and exec are gone (the driver keeps the memory, and it
+    // cannot be freed with cuMemFree before a launch), so keep this last.
+    CHECK(cuGraphCreate(&g1, 0));
+    CHECK(add_node(g1, 700ull << 20, &p, 0));
+    memset(&ip, 0, sizeof(ip));
+    ip.flags = CUDA_GRAPH_INSTANTIATE_FLAG_UPLOAD;
+    ip.hUploadStream = st;
+    CHECK(cuGraphInstantiateWithParams(&ex, g1, &ip));
+    CHECK(cuStreamSynchronize(st));
+    CHECK(cuGraphExecDestroy(ex));
+    CHECK(cuGraphDestroy(g1));
+    EXPECT_OOM("alloc after an uploaded graph", cuMemAlloc(&q, 300ull << 20));
     printf("PASS\n");
     return 0;
 }
