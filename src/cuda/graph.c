@@ -359,7 +359,8 @@ static CUresult end_capture(cuda_sym_t end, CUstream stream, CUgraph *graph, int
     CUstreamCaptureStatus cap;
     cuuint64_t current_id;
     CUgraph current_graph;
-    int ended = res == CUDA_SUCCESS;
+    /* An invalidated capture terminates even if its follow-up status query fails. */
+    int ended = res == CUDA_SUCCESS || res == CUDA_ERROR_STREAM_CAPTURE_INVALIDATED;
     if (!ended && graph_capture_info(accounting_stream, &cap, &current_id, &current_graph) == CUDA_SUCCESS)
         ended = cap == CU_STREAM_CAPTURE_STATUS_NONE || (id != 0 && current_id != 0 && id != current_id);
     if (ended) {
