@@ -694,11 +694,12 @@ void hostpid_broker_release_driver_admission(int *lease_fd) {
             break;
         }
     }
-    pthread_mutex_unlock(&admission_leases_lock);
     if (lease != NULL) {
+        // Close before unlocking so a fork cannot copy an untracked fd.
         close(lease->fd);
-        free(lease);
     }
+    pthread_mutex_unlock(&admission_leases_lock);
+    free(lease);
     *lease_fd = -1;
 }
 
