@@ -116,12 +116,14 @@ static cuuint64_t stream_proc_flags;
 static const char *stream_proc_name;
 static void native_marker(void) {}
 
+/** Return the configured native lookup result and record the request. */
 static CUresult stream_get_proc(const char *symbol, void **pfn, int version, cuuint64_t flags) {
     stream_proc_name = symbol; stream_proc_version = version; stream_proc_flags = flags;
     *pfn = stream_proc_result == CUDA_SUCCESS && stream_proc_pointer ? (void *)native_marker : NULL;
     return stream_proc_result;
 }
 
+/** Return the configured native lookup result and v2 symbol status. */
 static CUresult stream_get_proc_v2(const char *symbol, void **pfn, int version, cuuint64_t flags,
                                    CUdriverProcAddressQueryResult *status) {
     CUresult result = stream_get_proc(symbol, pfn, version, flags);
@@ -130,6 +132,7 @@ static CUresult stream_get_proc_v2(const char *symbol, void **pfn, int version, 
     return result;
 }
 
+/** Check stream hook selection and native lookup outcomes across both APIs. */
 static int check_stream_procs(void) {
     static const char *const names[][2] = {
         {"cuMemAllocAsync", "cuMemAllocAsync_ptsz"},
@@ -171,6 +174,7 @@ static int check_stream_procs(void) {
     return failures;
 }
 
+/** Run CUDA version mapping and stream lookup regressions. */
 int main(void) {
     /* Boundaries from cudaTypedefs.h: cuCtxCreate _v2 / _v3 from 11040 / _v4
        from 12050, cuMemAdvise and cuMemPrefetchAsync _v2 from 12020. A CUDA

@@ -131,6 +131,7 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
 }
 #endif
 
+/** Return the HAMi hook matching the requested symbol, when available. */
 void* __dlsym_hook_section(void* handle, const char* symbol) {
     int it;
     for (it=0;it<CUDA_ENTRY_END;it++){

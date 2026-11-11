@@ -349,6 +349,7 @@ void *find_symbols_in_table_by_cudaversion(const char *symbol,int  cudaVersion) 
 }
 
 
+/** Resolve known stream hooks while preserving native availability and stream semantics. */
 static int resolve_stream_proc(const char *symbol, void **pfn, int version, cuuint64_t flags,
                                 CUdriverProcAddressQueryResult *status, int v2, CUresult *result) {
     static const struct { const char *base; const char *per_thread; } hooks[] = {
@@ -375,6 +376,7 @@ static int resolve_stream_proc(const char *symbol, void **pfn, int version, cuui
     return 0;
 }
 
+/** Resolve an indirect CUDA lookup with the requested stream semantics. */
 CUresult _cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ) {
     LOG_INFO("into _cuGetProcAddress symbol=%s:%d",symbol,cudaVersion);
     CUresult result;
@@ -389,6 +391,7 @@ CUresult _cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, c
     }
 }
 
+/** Resolve a CUDA entry point with the requested stream semantics. */
 CUresult cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ) {
     LOG_INFO("into cuGetProcAddress symbol=%s:%d",symbol,cudaVersion);
     CUresult result;
@@ -410,6 +413,7 @@ CUresult cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cu
     }
 }
 
+/** Resolve an indirect CUDA lookup and preserve its native symbol-version status. */
 CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags, CUdriverProcAddressQueryResult *symbolStatus){
     LOG_INFO("into _cuGetProcAddress_v2 symbol=%s:%d",symbol,cudaVersion);
     CUresult result;
@@ -429,6 +433,7 @@ CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, c
     }
 }
 
+/** Resolve a CUDA entry point and preserve its native symbol-version status. */
 CUresult cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags, CUdriverProcAddressQueryResult *symbolStatus){
     LOG_INFO("into cuGetProcAddress_v2 symbol=%s:%d",symbol,cudaVersion);
     CUresult result;
