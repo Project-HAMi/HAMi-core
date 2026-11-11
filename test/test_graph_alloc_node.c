@@ -39,6 +39,7 @@ static CUresult add_node(CUgraph g, size_t bytes, CUdeviceptr *ptr, int with_fre
     return with_free ? cuGraphAddMemFreeNode(&f, g, &n, 1, prm.dptr) : CUDA_SUCCESS;
 }
 
+/** Check graph allocation quota rejection, rollback, and output correctness. */
 int main(void) {
     CUdevice dev;
     CUcontext ctx;

@@ -250,12 +250,14 @@ CUresult cuGraphDestroyNode(CUgraphNode hNode) {
 	return CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphDestroyNode,hNode);
 }
 
+/** Commit executable-graph tracking on success or discard it after native failure. */
 static CUresult track_exec(CUresult res, graph_exec_state *state, CUgraphExec *phGraphExec) {
     if (res == CUDA_SUCCESS) graph_exec_commit(state, *phGraphExec);
     else graph_exec_discard(state);
     return res;
 }
 
+/** Prepare graph-accounting state before native graph instantiation. */
 CUresult cuGraphInstantiate(CUgraphExec *phGraphExec, CUgraph hGraph, CUgraphNode *phErrorNode,
                             char *logBuffer, size_t bufferSize) {
     LOG_DEBUG("cuGraphInstantiate");
@@ -267,6 +269,7 @@ CUresult cuGraphInstantiate(CUgraphExec *phGraphExec, CUgraph hGraph, CUgraphNod
     return track_exec(res, state, phGraphExec);
 }
 
+/** Prepare graph-accounting state before instantiating a graph with flags. */
 CUresult cuGraphInstantiateWithFlags(CUgraphExec *phGraphExec, CUgraph hGraph, unsigned long long flags) {
     LOG_DEBUG("cuGraphInstantiateWithFlags");
     graph_exec_state *state;
@@ -277,6 +280,7 @@ CUresult cuGraphInstantiateWithFlags(CUgraphExec *phGraphExec, CUgraph hGraph, u
     return track_exec(res, state, phGraphExec);
 }
 
+/** Instantiate a graph with parameters and reserve quota for any requested upload. */
 static CUresult instantiate_with_params(cuda_sym_t instantiate, CUgraphExec *exec, CUgraph graph,
                                         CUDA_GRAPH_INSTANTIATE_PARAMS *params, int per_thread) {
     graph_exec_state *state;
@@ -306,6 +310,7 @@ CUresult cuGraphInstantiateWithParams_ptsz(CUgraphExec *exec, CUgraph graph,
         cuGraphInstantiateWithParams_ptsz), exec, graph, params, 1);
 }
 
+/** Reserve graph quota before native launch or upload and finalize the submission. */
 static CUresult submit_graph(cuda_sym_t submit, CUgraphExec exec, CUstream stream, int per_thread) {
     graph_exec_state *state;
     CUstream accounting_stream = per_thread && stream == NULL ? CU_STREAM_PER_THREAD : stream;
@@ -332,6 +337,7 @@ CUresult cuGraphLaunch_ptsz(CUgraphExec hGraphExec, CUstream hStream) {
     return submit_graph((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuGraphLaunch_ptsz), hGraphExec, hStream, 1);
 }
 
+/** Register capture protection before starting the native stream capture. */
 static CUresult begin_capture(cuda_sym_t begin, CUstream stream, CUstreamCaptureMode mode, int per_thread) {
     uint64_t token;
     CUstream accounting_stream = per_thread && stream == NULL ? CU_STREAM_PER_THREAD : stream;
@@ -351,6 +357,7 @@ CUresult cuStreamBeginCapture_v2_ptsz(CUstream stream, CUstreamCaptureMode mode)
                          stream, mode, 1);
 }
 
+/** Release capture protection and finalize charges once native capture terminates. */
 static CUresult end_capture(cuda_sym_t end, CUstream stream, CUgraph *graph, int per_thread) {
     CUstream accounting_stream = per_thread && stream == NULL ? CU_STREAM_PER_THREAD : stream;
     cuuint64_t id;
@@ -394,6 +401,7 @@ CUresult cuGraphDestroy(CUgraph hGraph) {
     return res;
 }
 
+/** Trim supported native graph pools and refresh retained-pool accounting on success. */
 CUresult cuDeviceGraphMemTrim(CUdevice device) {
     if (CUDA_FIND_ENTRY(cuda_library_entry, cuDeviceGraphMemTrim) == NULL)
         return CUDA_ERROR_NOT_SUPPORTED;

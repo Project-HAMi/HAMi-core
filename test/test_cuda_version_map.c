@@ -75,12 +75,14 @@ static CUresult lookup_result;
 static CUdriverProcAddressQueryResult lookup_status;
 static void *lookup_pointer = (void *)"native";
 
+/** Return the configured native procedure lookup pointer and result. */
 static CUresult stub_get_proc_address(const char *symbol, void **pfn, int version, cuuint64_t flags) {
     (void)symbol; (void)version; (void)flags;
     if (pfn != NULL) *pfn = lookup_pointer;
     return lookup_result;
 }
 
+/** Return the configured native procedure lookup pointer, result, and version status. */
 static CUresult stub_get_proc_address_v2(const char *symbol, void **pfn,
                                          int cudaVersion, cuuint64_t flags,
                                          CUdriverProcAddressQueryResult *status) {
@@ -118,6 +120,7 @@ static int check_symbol_status(void) {
     return 0;
 }
 
+/** Check per-thread graph and capture hooks across procedure lookup entry points. */
 static int check_graph_stream_flags(void) {
     const char *names[] = {"cuGraphLaunch", "cuGraphUpload", "cuGraphInstantiateWithParams",
                            "cuStreamBeginCapture", "cuStreamEndCapture"};
@@ -152,6 +155,7 @@ static int check_graph_stream_flags(void) {
     return 0;
 }
 
+/** Check that graph hook lookup preserves native failures, NULL results, and version status. */
 static int check_graph_lookup_failures(void) {
     const char *names[] = {"cuGraphLaunch", "cuGraphUpload", "cuGraphInstantiateWithParams",
                            "cuStreamBeginCapture", "cuStreamEndCapture"};
@@ -197,6 +201,7 @@ static int check_graph_lookup_failures(void) {
     return 0;
 }
 
+/** Run CUDA version mapping and graph procedure lookup regressions. */
 int main(void) {
     /* Boundaries from cudaTypedefs.h: cuCtxCreate _v2 / _v3 from 11040 / _v4
        from 12050, cuMemAdvise and cuMemPrefetchAsync _v2 from 12020. A CUDA

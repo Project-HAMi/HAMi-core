@@ -28,6 +28,7 @@ static void *end_on_other_thread(void *arg) {
     return NULL;
 }
 
+/** Check asynchronous allocation capture, quota enforcement, and cleanup through the Driver API. */
 int main(void) {
     CUdevice dev;
     CUcontext ctx;

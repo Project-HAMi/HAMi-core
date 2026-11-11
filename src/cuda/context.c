@@ -18,11 +18,13 @@ static pthread_mutex_t *legacy_context_lock(void) {
     return &legacy_context_mutex;
 }
 
+/** Initialize the per-device primary-context lifetime mutexes. */
 static void primary_context_locks_init(void) {
     for (int dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++)
         pthread_mutex_init(&primary_context_mutex[dev], NULL);
 }
 
+/** Lock a valid device's primary-context lifetime bookkeeping. */
 static pthread_mutex_t *primary_context_lock(CUdevice dev) {
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) return NULL;
     pthread_once(&primary_context_once, primary_context_locks_init);
@@ -36,6 +38,7 @@ CUresult cuDevicePrimaryCtxGetState( CUdevice dev, unsigned int* flags, int* act
     return res;
 }
 
+/** Retain a primary context and register its lifetime for graph accounting. */
 CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
     pthread_mutex_t *legacy = legacy_context_lock();
     pthread_mutex_t *guard = primary_context_lock(dev);
@@ -63,6 +66,7 @@ CUresult cuDevicePrimaryCtxSetFlags_v2( CUdevice dev, unsigned int  flags ){
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxSetFlags_v2,dev,flags);
 }
 
+/** Release a primary context and retire graph accounting once it becomes inactive. */
 CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
     pthread_mutex_t *legacy = legacy_context_lock();
     pthread_mutex_t *guard = primary_context_lock(dev);
@@ -83,6 +87,7 @@ CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
     return res;
 }
 
+/** Reset a primary context and retire its previous graph-accounting generation. */
 CUresult cuDevicePrimaryCtxReset_v2(CUdevice dev) {
     pthread_mutex_t *legacy = legacy_context_lock();
     pthread_mutex_t *guard = primary_context_lock(dev);
@@ -99,6 +104,7 @@ CUresult cuCtxGetDevice(CUdevice* device) {
 }
 
 #if CUDA_VERSION < 13000
+/** Create a context while serializing handle reuse on drivers without context IDs. */
 CUresult cuCtxCreate_v2 ( CUcontext* pctx, unsigned int  flags, CUdevice dev ){
     pthread_mutex_t *legacy = legacy_context_lock();
     LOG_DEBUG("into cuCtxCreate pctx=%p flags=%d dev=%d",pctx,flags,dev);
@@ -107,6 +113,7 @@ CUresult cuCtxCreate_v2 ( CUcontext* pctx, unsigned int  flags, CUdevice dev ){
     return res;
 }
 
+/** Create a context with affinity parameters while guarding legacy handle reuse. */
 CUresult cuCtxCreate_v3 ( CUcontext* pctx, CUexecAffinityParam* paramsArray, int  numParams, unsigned int  flags, CUdevice dev ){
     pthread_mutex_t *legacy = legacy_context_lock();
     LOG_DEBUG("into cuCtxCreate_v3 pctx=%p paramsArray=%p numParams=%d flags=%d dev=%d",pctx,paramsArray,numParams,flags,dev);
@@ -116,6 +123,7 @@ CUresult cuCtxCreate_v3 ( CUcontext* pctx, CUexecAffinityParam* paramsArray, int
 }
 #endif
 
+/** Create a context with creation parameters while guarding legacy handle reuse. */
 CUresult cuCtxCreate_v4(CUcontext* pctx, CUctxCreateParams* ctxCreateParams, unsigned int flags, CUdevice dev) {
     pthread_mutex_t *legacy = legacy_context_lock();
     LOG_DEBUG("into cuCtxCreate_v4 pctx=%p ctxCreateParams=%p flags=%d dev=%d", pctx, ctxCreateParams, flags, dev);
@@ -124,6 +132,7 @@ CUresult cuCtxCreate_v4(CUcontext* pctx, CUctxCreateParams* ctxCreateParams, uns
     return res;
 }
 
+/** Destroy a context and retire graph charges for its recorded generation. */
 CUresult cuCtxDestroy_v2 ( CUcontext ctx ){
     pthread_mutex_t *legacy = legacy_context_lock();
     cuuint64_t id = graph_context_id(ctx);
@@ -209,6 +218,7 @@ CUresult cuCtxSetSharedMemConfig ( CUsharedconfig config ){
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxSetSharedMemConfig,config);
 }
 
+/** Synchronize the current context and release charges covered by the submission snapshot. */
 CUresult cuCtxSynchronize ( void ){
     LOG_DEBUG("INTO CtxSync");
     uint64_t submitted = graph_sync_begin();

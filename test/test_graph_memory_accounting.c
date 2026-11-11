@@ -50,11 +50,13 @@ int clear_proc_slot_nolock(int force) { (void)force; return 0; }
 int add_gpu_device_memory_usage(int32_t pid, int dev, size_t bytes, int type) {
     (void)pid; (void)type; REQUIRE(dev == 0); used += bytes; return 0;
 }
+/** Subtract a simulated device charge after validating the device and available usage. */
 int rm_gpu_device_memory_usage(int32_t pid, int dev, size_t bytes, int type) {
     (void)pid; (void)type; REQUIRE(dev == 0 && used >= bytes); used -= bytes; return 0;
 }
 static CUresult driver_device(CUdevice *dev) { *dev = 0; return CUDA_SUCCESS; }
 
+/** Simulate graph allocation node creation or an injected native failure. */
 static CUresult driver_add(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
                             size_t ndeps, CUDA_MEM_ALLOC_NODE_PARAMS *params) {
     (void)graph; (void)deps; (void)ndeps;
@@ -79,6 +81,7 @@ static CUresult driver_params(CUgraphExec *exec, CUgraph graph, CUDA_GRAPH_INSTA
     (void)params;
     return driver_instantiate(exec, graph, 0);
 }
+/** Simulate a graph submission with optional blocking for concurrency tests. */
 static CUresult driver_submit(CUgraphExec exec, CUstream stream) {
     (void)exec; (void)stream; submissions++;
     if (block_submit) {
@@ -90,6 +93,7 @@ static CUresult driver_submit(CUgraphExec exec, CUstream stream) {
     }
     return submit_result;
 }
+/** Block simulated context synchronization until the test releases it. */
 static CUresult driver_context_sync(void) {
     pthread_mutex_lock(&submit_gate);
     sync_entered = 1;
@@ -103,6 +107,7 @@ static CUresult driver_stream_sync(CUstream stream) {
     return driver_context_sync();
 }
 static CUresult driver_destroy(void *handle) { (void)handle; return CUDA_SUCCESS; }
+/** Create a simulated completion event bound to the current context generation. */
 static CUresult driver_event_create(CUevent *event, unsigned int flags) {
     REQUIRE(flags == CU_EVENT_DISABLE_TIMING);
     if (event_result != CUDA_SUCCESS) return event_result;
@@ -114,16 +119,19 @@ static CUresult driver_event_create(CUevent *event, unsigned int flags) {
     events_created++;
     return CUDA_SUCCESS;
 }
+/** Resolve the simulated context for an explicit or default stream. */
 static CUcontext stream_ctx(CUstream stream) {
     if (stream == NULL || stream == CU_STREAM_LEGACY || stream == CU_STREAM_PER_THREAD) return current_ctx;
     return stream == (CUstream)30 ? (CUcontext)2 : (CUcontext)1;
 }
+/** Validate the event's context and return the configured recording result. */
 static CUresult driver_event_record(CUevent event, CUstream stream) {
     REQUIRE((uintptr_t)event < 8192);
     if (!events[(uintptr_t)event].alive || events[(uintptr_t)event].ctx != stream_ctx(stream))
         return CUDA_ERROR_INVALID_HANDLE;
     return record_result;
 }
+/** Report simulated GPU completion while rejecting event queries during capture. */
 static CUresult driver_event_query(CUevent event) {
     REQUIRE(capturing == NULL && atomic_load(&global_captures) == 0);
     event_queries++;
@@ -131,6 +139,7 @@ static CUresult driver_event_query(CUevent event) {
     if (!events[(uintptr_t)event].alive) return CUDA_ERROR_INVALID_HANDLE;
     return gpu_done ? CUDA_SUCCESS : CUDA_ERROR_NOT_READY;
 }
+/** Retire a simulated completion event after validating its lifetime. */
 static CUresult driver_event_destroy(CUevent event) {
     REQUIRE((uintptr_t)event < 8192 && events[(uintptr_t)event].alive);
     events[(uintptr_t)event].alive = 0;
@@ -153,6 +162,7 @@ static CUresult driver_pop(CUcontext *ctx) {
 static CUresult driver_stream_id(CUstream stream, cuuint64_t *id) {
     *id = (uintptr_t)stream + 100; return CUDA_SUCCESS;
 }
+/** Return simulated graph-pool backing or the configured native query failure. */
 static CUresult driver_reserved(CUdevice dev, CUgraphMem_attribute attr, void *value) {
     REQUIRE(capturing == NULL);
     pool_queries++;
@@ -160,12 +170,14 @@ static CUresult driver_reserved(CUdevice dev, CUgraphMem_attribute attr, void *v
     if (pool_result != CUDA_SUCCESS) return pool_result;
     *(cuuint64_t *)value = reserved; return CUDA_SUCCESS;
 }
+/** Release simulated graph-pool backing after GPU completion. */
 static CUresult driver_trim(CUdevice dev) {
     REQUIRE(capturing == NULL);
     REQUIRE(dev == 0);
     if (gpu_done) reserved = 0;
     return CUDA_SUCCESS;
 }
+/** Return the simulated capture state or an injected capture-info failure. */
 static CUresult driver_capture(CUstream stream, CUstreamCaptureStatus *status, cuuint64_t *id,
                                 CUgraph *graph, const CUgraphNode **deps,
                                 const CUgraphEdgeData **data, size_t *ndeps) {
@@ -182,6 +194,7 @@ static CUresult driver_alloc_from_pool(CUdeviceptr *ptr, size_t bytes, CUmemoryP
     (void)pool;
     return driver_alloc_async(ptr, bytes, stream);
 }
+/** Pause native capture entry or exit at a test-controlled synchronization point. */
 static void capture_pause(int *blocked) {
     pthread_mutex_lock(&submit_gate);
     capture_entered = 1;
@@ -189,6 +202,7 @@ static void capture_pause(int *blocked) {
     while (*blocked) pthread_cond_wait(&submit_cond, &submit_gate);
     pthread_mutex_unlock(&submit_gate);
 }
+/** Begin a simulated capture and pause at the configured entry boundary. */
 static CUresult driver_begin_capture(CUstream stream, CUstreamCaptureMode mode) {
     (void)stream;
     if (capture_begin_result != CUDA_SUCCESS) return capture_begin_result;
@@ -199,6 +213,7 @@ static CUresult driver_begin_capture(CUstream stream, CUstreamCaptureMode mode) 
     capture_pause(&block_capture_begin);
     return CUDA_SUCCESS;
 }
+/** End or preserve a simulated capture according to the configured native result. */
 static CUresult driver_end_capture(CUstream stream, CUgraph *graph) {
     (void)stream;
     *graph = capture_end_result == CUDA_SUCCESS ? capturing : NULL;
@@ -211,6 +226,7 @@ static CUresult driver_end_capture(CUstream stream, CUgraph *graph) {
 }
 
 static CUgraph make_graph(void) { return (CUgraph)++serial; }
+/** Add a test graph allocation and optionally add its matching free node. */
 static CUresult add(CUgraph graph, size_t mib, int with_free, CUdeviceptr *ptr) {
     CUDA_MEM_ALLOC_NODE_PARAMS params = {0};
     params.poolProps.allocType = CU_MEM_ALLOCATION_TYPE_PINNED;
@@ -286,6 +302,7 @@ static void test_serial_and_overlap(void) {
     clean();
 }
 
+/** Verify captured allocations enforce quota and roll back native failures. */
 static void test_capture_admission(int from_pool) {
     CUgraph running = make_graph();
     REQUIRE(add(running, 64, 1, NULL) == CUDA_SUCCESS);
@@ -331,6 +348,7 @@ static void test_event_failure(void) {
     clean();
 }
 
+/** Verify per-thread capture charges are reclaimed after capture failure or graph destruction. */
 static void test_per_thread_capture(int default_stream, int failed) {
     CUstream stream = default_stream ? NULL : (CUstream)10;
     REQUIRE(cuStreamBeginCapture_v2_ptsz(stream, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);
@@ -348,6 +366,7 @@ static void test_per_thread_capture(int default_stream, int failed) {
     clean();
 }
 
+/** Run a capture on a second host thread for polling-isolation tests. */
 static void *capture_thread(void *mode) {
     REQUIRE(cuStreamBeginCapture_v2_ptsz(NULL, (CUstreamCaptureMode)(uintptr_t)mode) == CUDA_SUCCESS);
     CUdeviceptr ptr;
@@ -362,6 +381,7 @@ static void *capture_thread(void *mode) {
     return NULL;
 }
 
+/** Verify per-thread captures on different host threads retain independent identities. */
 static void test_per_thread_capture_ids(CUstreamCaptureMode mode) {
     CUgraph running = make_graph();
     REQUIRE(add(running, 64, 1, NULL) == CUDA_SUCCESS);
@@ -399,6 +419,7 @@ static void *capture_window(void *mode) {
     return NULL;
 }
 
+/** Verify event polling remains suppressed across native capture entry and exit boundaries. */
 static void test_capture_window(CUstreamCaptureMode mode, int ending) {
     CUgraph a = make_graph(), b = make_graph(), mutation = make_graph();
     REQUIRE(add(a, 64, 1, NULL) == CUDA_SUCCESS);
@@ -473,6 +494,7 @@ static void test_capture_failure(void) {
     destroy(running, exec); clean();
 }
 
+/** Verify invalidated captures release protection and quota when capture-info queries fail. */
 static void test_invalidated_capture_info_failure(void) {
     CUgraph running = make_graph(), graph;
     REQUIRE(add(running, 64, 1, NULL) == CUDA_SUCCESS);
@@ -492,6 +514,7 @@ static void test_invalidated_capture_info_failure(void) {
     destroy(running, exec); clean();
 }
 
+/** Verify context release and reset reclaim only the appropriate graph charges. */
 static void test_context_lifetime(void) {
     CUgraphExec exec;
     /* Instantiate in context 2, submit on context 1's stream. */
@@ -522,6 +545,7 @@ static void test_context_lifetime(void) {
     clean();
 }
 
+/** Verify recycled context handles do not retain charges from an earlier generation. */
 static void test_reused_context_handle(void) {
     CUgraph old = make_graph(); CUgraphExec old_exec;
     REQUIRE(add(old, 300, 1, NULL) == CUDA_SUCCESS); old_exec = instantiate(old);
@@ -558,6 +582,7 @@ static void test_record_failure_sync(void) {
     clean();
 }
 
+/** Verify missing stream IDs preserve conservative accounting across stream handle reuse. */
 static void test_stream_fallback(void) {
     void *native_id = cuda_library_entry[CUDA_OVERRIDE_ENUM(cuStreamGetId)].fn_ptr;
     cuda_library_entry[CUDA_OVERRIDE_ENUM(cuStreamGetId)].fn_ptr = NULL;
@@ -580,6 +605,7 @@ static void test_stream_fallback(void) {
     clean();
 }
 
+/** Verify repeated graph replay uses cached accounting instead of scanning every live graph. */
 static void test_cached_replay(void) {
     CUgraph graphs[128]; CUgraphExec execs[128];
     int before = events_created;
@@ -599,6 +625,7 @@ static void test_cached_replay(void) {
     clean();
 }
 
+/** Replay an executable graph repeatedly to exercise concurrent cached accounting. */
 static void *replay_thread(void *exec) {
     for (int i = 0; i < 50; i++) REQUIRE(cuGraphLaunch(exec, (CUstream)10) == CUDA_SUCCESS);
     return NULL;
@@ -607,12 +634,14 @@ static void *submit_once(void *exec) {
     REQUIRE(cuGraphLaunch(exec, (CUstream)10) == CUDA_SUCCESS);
     return NULL;
 }
+/** Perform one stream or context synchronization in a test thread. */
 static void *sync_once(void *whole_context) {
     if (whole_context != NULL) REQUIRE(cuCtxSynchronize() == CUDA_SUCCESS);
     else REQUIRE(cuStreamSynchronize((CUstream)10) == CUDA_SUCCESS);
     return NULL;
 }
 
+/** Verify synchronization preserves newer and still-pending graph submissions. */
 static void test_sync_submission_race(int whole_context, int already_pending) {
     CUgraph a = make_graph(), b = make_graph();
     REQUIRE(add(a, 400, 1, NULL) == CUDA_SUCCESS);
@@ -651,6 +680,7 @@ static void test_sync_submission_race(int whole_context, int already_pending) {
     gpu_done = 1;
     destroy(a, x); destroy(b, y); clean();
 }
+/** Verify executable destruction and context cleanup respect in-flight host submissions. */
 static void test_host_submission_lifetime(void) {
     CUgraph graph = make_graph();
     REQUIRE(add(graph, 600, 1, NULL) == CUDA_SUCCESS);
@@ -681,6 +711,7 @@ static void test_host_submission_lifetime(void) {
     clean();
 }
 
+/** Verify persistent graph allocations are charged before launch, upload, or instantiation upload. */
 static void test_persistent(int mode) {
     CUgraph a = make_graph(), b = make_graph();
     CUdeviceptr p, q;
@@ -760,6 +791,7 @@ static void test_destroy_inflight(void) {
     clean(); /* Completion and trim release even the retired exec's charge. */
 }
 
+/** Run graph quota, capture, lifecycle, pool-reuse, and synchronization regressions. */
 int main(void) {
 #define DRIVER(name, fn) cuda_library_entry[CUDA_OVERRIDE_ENUM(name)].fn_ptr = (void *)(fn)
     DRIVER(cuGraphAddMemAllocNode, driver_add);

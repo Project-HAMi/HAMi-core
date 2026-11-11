@@ -322,6 +322,7 @@ const char* get_real_func_name(const char* base_name,int cuda_version) {
   return NULL; // if not found
 }
 
+/** Select a registered CUDA hook while leaving untracked graph APIs to the driver. */
 void *find_symbols_in_table(const char *symbol) {
     char symbol_v[500];
     void *pfn;
@@ -365,6 +366,7 @@ void *find_symbols_in_table_by_cudaversion(const char *symbol,int  cudaVersion) 
   return pfn;
 }
 
+/** Select graph and capture hooks according to CUDA version and stream flags. */
 static void *find_symbols_with_flags(const char *symbol, int cudaVersion, cuuint64_t flags) {
     if (strcmp(symbol, "cuStreamBeginCapture") == 0 && cudaVersion < 10010) return NULL;
     if (flags & CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM) {
@@ -382,6 +384,7 @@ static void *find_symbols_with_flags(const char *symbol, int cudaVersion, cuuint
     return find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
 }
 
+/** Resolve graph and capture hooks only when the native driver supports the requested entry point. */
 static int resolve_graph_proc(const char *symbol, void **pfn, int version, cuuint64_t flags,
                               CUdriverProcAddressQueryResult *status, int v2, CUresult *result) {
     if (strncmp(symbol, "cuGraph", 7) != 0 && strcmp(symbol, "cuStreamBeginCapture") != 0 &&
@@ -398,6 +401,7 @@ static int resolve_graph_proc(const char *symbol, void **pfn, int version, cuuin
 }
 
 
+/** Resolve an indirect CUDA lookup while preserving graph and capture stream semantics. */
 CUresult _cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ) {
     LOG_INFO("into _cuGetProcAddress symbol=%s:%d",symbol,cudaVersion);
     CUresult result;
@@ -412,6 +416,7 @@ CUresult _cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, c
     }
 }
 
+/** Resolve a CUDA entry point while preserving graph and capture stream semantics. */
 CUresult cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ) {
     LOG_INFO("into cuGetProcAddress symbol=%s:%d",symbol,cudaVersion);
     CUresult result;
@@ -433,6 +438,7 @@ CUresult cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cu
     }
 }
 
+/** Resolve an indirect CUDA lookup and preserve its native symbol-version status. */
 CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags, CUdriverProcAddressQueryResult *symbolStatus){
     LOG_INFO("into _cuGetProcAddress_v2 symbol=%s:%d",symbol,cudaVersion);
     CUresult result;
@@ -452,6 +458,7 @@ CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, c
     }
 }
 
+/** Resolve a CUDA entry point and preserve its native symbol-version status. */
 CUresult cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags, CUdriverProcAddressQueryResult *symbolStatus){
     LOG_INFO("into cuGetProcAddress_v2 symbol=%s:%d",symbol,cudaVersion);
     CUresult result;
