@@ -274,7 +274,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_memory_index_map"
             OR TEST_TARGET_NAME STREQUAL "test_meminfo_null_out"
-            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_mapping")
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_mapping"
+            OR TEST_TARGET_NAME STREQUAL "test_driver_admission_cancel")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread -ldl)
     elseif (TEST_TARGET_NAME STREQUAL "test_cuda_version_map")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread -ldl)
