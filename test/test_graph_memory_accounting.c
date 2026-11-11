@@ -1,0 +1,581 @@
+// Copyright 2026 The HAMi Authors.
+/* GPU-free contract tests: real wrappers/accounting, fake asynchronous driver.
+ * The driver never synchronizes implicitly, and refuses no allocations itself. */
+#include "allocator/allocator.h"
+#include "include/libcuda_hook.h"
+#include "multiprocess/multiprocess_memory_limit.h"
+
+#define MIB (1ull << 20)
+#define CHECK(x) do { if (!(x)) { \
+    fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #x); exit(1); \
+} } while (0)
+
+cuda_entry_t cuda_library_entry[CUDA_ENTRY_END];
+static size_t used = 256 * MIB, reserved;
+static uintptr_t serial = 10;
+static int nodes, submissions, instantiations, gpu_done;
+static CUresult add_result, submit_result, event_result, pool_result, record_result;
+static CUgraph capturing;
+static CUcontext current_ctx = (CUcontext)1, pushed_ctx;
+static struct { CUcontext ctx; cuuint64_t ctx_id; int alive; } events[8192];
+static cuuint64_t context_ids[] = {0,1,2};
+static int event_queries, pool_queries, events_created;
+static pthread_mutex_t submit_gate = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t submit_cond = PTHREAD_COND_INITIALIZER;
+static int block_submit, submit_entered;
+static int block_sync, sync_entered;
+
+void ensure_initialized(void) {}
+void lock_shrreg(void) {}
+void unlock_shrreg(void) {}
+unsigned int cuda_to_nvml_map(unsigned int dev) { return dev; }
+uint64_t get_current_device_memory_limit(const int dev) { CHECK(dev == 0); return 1024 * MIB; }
+size_t get_gpu_memory_usage(const int dev) { CHECK(dev == 0); return used; }
+int clear_proc_slot_nolock(int force) { (void)force; return 0; }
+int add_gpu_device_memory_usage(int32_t pid, int dev, size_t bytes, int type) {
+    (void)pid; (void)type; CHECK(dev == 0); used += bytes; return 0;
+}
+int rm_gpu_device_memory_usage(int32_t pid, int dev, size_t bytes, int type) {
+    (void)pid; (void)type; CHECK(dev == 0 && used >= bytes); used -= bytes; return 0;
+}
+static CUresult driver_device(CUdevice *dev) { *dev = 0; return CUDA_SUCCESS; }
+
+static CUresult driver_add(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
+                            size_t ndeps, CUDA_MEM_ALLOC_NODE_PARAMS *params) {
+    (void)graph; (void)deps; (void)ndeps;
+    if (add_result != CUDA_SUCCESS) return add_result;
+    nodes++;
+    *node = (CUgraphNode)++serial;
+    params->dptr = ++serial * MIB;
+    return CUDA_SUCCESS;
+}
+static CUresult driver_free_node(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
+                                  size_t ndeps, CUdeviceptr ptr) {
+    (void)graph; (void)deps; (void)ndeps; (void)ptr;
+    *node = (CUgraphNode)++serial;
+    return CUDA_SUCCESS;
+}
+static CUresult driver_instantiate(CUgraphExec *exec, CUgraph graph, unsigned long long flags) {
+    (void)graph; (void)flags; instantiations++;
+    *exec = (CUgraphExec)++serial;
+    return CUDA_SUCCESS;
+}
+static CUresult driver_params(CUgraphExec *exec, CUgraph graph, CUDA_GRAPH_INSTANTIATE_PARAMS *params) {
+    (void)params;
+    return driver_instantiate(exec, graph, 0);
+}
+static CUresult driver_submit(CUgraphExec exec, CUstream stream) {
+    (void)exec; (void)stream; submissions++;
+    if (block_submit) {
+        pthread_mutex_lock(&submit_gate);
+        submit_entered = 1;
+        pthread_cond_broadcast(&submit_cond);
+        while (block_submit) pthread_cond_wait(&submit_cond, &submit_gate);
+        pthread_mutex_unlock(&submit_gate);
+    }
+    return submit_result;
+}
+static CUresult driver_context_sync(void) {
+    pthread_mutex_lock(&submit_gate);
+    sync_entered = 1;
+    pthread_cond_broadcast(&submit_cond);
+    while (block_sync) pthread_cond_wait(&submit_cond, &submit_gate);
+    pthread_mutex_unlock(&submit_gate);
+    return CUDA_SUCCESS;
+}
+static CUresult driver_stream_sync(CUstream stream) {
+    (void)stream;
+    return driver_context_sync();
+}
+static CUresult driver_destroy(void *handle) { (void)handle; return CUDA_SUCCESS; }
+static CUresult driver_event_create(CUevent *event, unsigned int flags) {
+    CHECK(flags == CU_EVENT_DISABLE_TIMING);
+    if (event_result != CUDA_SUCCESS) return event_result;
+    CHECK(current_ctx != NULL && serial + 1 < 8192);
+    *event = (CUevent)++serial;
+    events[serial].ctx = current_ctx;
+    events[serial].ctx_id = context_ids[(uintptr_t)current_ctx];
+    events[serial].alive = 1;
+    events_created++;
+    return CUDA_SUCCESS;
+}
+static CUcontext stream_ctx(CUstream stream) {
+    if (stream == NULL || stream == CU_STREAM_LEGACY || stream == CU_STREAM_PER_THREAD) return current_ctx;
+    return stream == (CUstream)30 ? (CUcontext)2 : (CUcontext)1;
+}
+static CUresult driver_event_record(CUevent event, CUstream stream) {
+    CHECK((uintptr_t)event < 8192);
+    if (!events[(uintptr_t)event].alive || events[(uintptr_t)event].ctx != stream_ctx(stream))
+        return CUDA_ERROR_INVALID_HANDLE;
+    return record_result;
+}
+static CUresult driver_event_query(CUevent event) {
+    event_queries++;
+    CHECK((uintptr_t)event < 8192);
+    if (!events[(uintptr_t)event].alive) return CUDA_ERROR_INVALID_HANDLE;
+    return gpu_done ? CUDA_SUCCESS : CUDA_ERROR_NOT_READY;
+}
+static CUresult driver_event_destroy(CUevent event) {
+    CHECK((uintptr_t)event < 8192 && events[(uintptr_t)event].alive);
+    events[(uintptr_t)event].alive = 0;
+    return CUDA_SUCCESS;
+}
+static CUresult driver_stream_ctx(CUstream stream, CUcontext *ctx) {
+    *ctx = stream_ctx(stream); return CUDA_SUCCESS;
+}
+static CUresult driver_current(CUcontext *ctx) { *ctx = current_ctx; return CUDA_SUCCESS; }
+static CUresult driver_context_id(CUcontext ctx, cuuint64_t *id) {
+    CHECK((uintptr_t)ctx < 3);
+    *id = context_ids[(uintptr_t)ctx]; return CUDA_SUCCESS;
+}
+static CUresult driver_push(CUcontext ctx) {
+    pushed_ctx = current_ctx; current_ctx = ctx; return CUDA_SUCCESS;
+}
+static CUresult driver_pop(CUcontext *ctx) {
+    *ctx = current_ctx; current_ctx = pushed_ctx; return CUDA_SUCCESS;
+}
+static CUresult driver_stream_id(CUstream stream, cuuint64_t *id) {
+    *id = (uintptr_t)stream + 100; return CUDA_SUCCESS;
+}
+static CUresult driver_reserved(CUdevice dev, CUgraphMem_attribute attr, void *value) {
+    pool_queries++;
+    CHECK(dev == 0 && attr == CU_GRAPH_MEM_ATTR_RESERVED_MEM_CURRENT);
+    if (pool_result != CUDA_SUCCESS) return pool_result;
+    *(cuuint64_t *)value = reserved; return CUDA_SUCCESS;
+}
+static CUresult driver_trim(CUdevice dev) {
+    CHECK(dev == 0); if (gpu_done) reserved = 0; return CUDA_SUCCESS;
+}
+static CUresult driver_capture(CUstream stream, CUstreamCaptureStatus *status, cuuint64_t *id,
+                                CUgraph *graph, const CUgraphNode **deps,
+                                const CUgraphEdgeData **data, size_t *ndeps) {
+    (void)stream; (void)deps; (void)data; (void)ndeps;
+    *status = capturing != NULL ? CU_STREAM_CAPTURE_STATUS_ACTIVE : CU_STREAM_CAPTURE_STATUS_NONE;
+    *graph = capturing; *id = capturing != NULL ? 123 : 0;
+    return CUDA_SUCCESS;
+}
+static CUresult driver_alloc_async(CUdeviceptr *ptr, size_t bytes, CUstream stream) {
+    (void)bytes; (void)stream; nodes++; *ptr = ++serial * MIB; return add_result;
+}
+
+static CUgraph make_graph(void) { return (CUgraph)++serial; }
+static CUresult add(CUgraph graph, size_t mib, int with_free, CUdeviceptr *ptr) {
+    CUDA_MEM_ALLOC_NODE_PARAMS params = {0};
+    params.poolProps.allocType = CU_MEM_ALLOCATION_TYPE_PINNED;
+    params.poolProps.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+    params.bytesize = mib * MIB;
+    CUgraphNode node, free_node;
+    CUresult result = cuGraphAddMemAllocNode(&node, graph, NULL, 0, &params);
+    if (result != CUDA_SUCCESS) return result;
+    if (ptr != NULL) *ptr = params.dptr;
+    return with_free ? cuGraphAddMemFreeNode(&free_node, graph, &node, 1, params.dptr) : CUDA_SUCCESS;
+}
+static CUgraphExec instantiate(CUgraph graph) {
+    CUgraphExec exec;
+    CHECK(cuGraphInstantiateWithFlags(&exec, graph, 0) == CUDA_SUCCESS);
+    return exec;
+}
+static void destroy(CUgraph graph, CUgraphExec exec) {
+    CHECK(cuGraphDestroy(graph) == CUDA_SUCCESS);
+    CHECK(cuGraphExecDestroy(exec) == CUDA_SUCCESS);
+}
+static void clean(void) {
+    gpu_done = 1;
+    CHECK(oom_check(0, 0) == 0);
+    CHECK(used == 256 * MIB);
+    gpu_done = 0;
+}
+
+static void test_node_failure(void) {
+    CUgraph graph = make_graph();
+    int before = nodes;
+    CHECK(add(graph, 400, 0, NULL) == CUDA_SUCCESS);
+    CHECK(add(graph, 400, 0, NULL) == CUDA_ERROR_OUT_OF_MEMORY);
+    CHECK(nodes == before + 1); /* Refused nodes never reach the driver. */
+    CHECK(used == 656 * MIB);
+    CHECK(cuGraphDestroy(graph) == CUDA_SUCCESS);
+    clean();
+    graph = make_graph();
+    add_result = CUDA_ERROR_INVALID_VALUE;
+    CHECK(add(graph, 600, 0, NULL) == add_result);
+    CHECK(used == 256 * MIB); /* Native failure refunds the reservation. */
+    add_result = CUDA_SUCCESS;
+    CHECK(cuGraphDestroy(graph) == CUDA_SUCCESS);
+}
+
+static void test_serial_and_overlap(void) {
+    CUgraph a = make_graph(), b = make_graph();
+    CHECK(add(a, 300, 1, NULL) == CUDA_SUCCESS);
+    CHECK(add(b, 300, 1, NULL) == CUDA_SUCCESS);
+    CUgraphExec x = instantiate(a), y = instantiate(b);
+    CHECK(cuGraphLaunch(x, (CUstream)10) == CUDA_SUCCESS);
+    CHECK(cuGraphLaunch(y, (CUstream)10) == CUDA_SUCCESS);
+    CHECK(used == 556 * MIB); /* Same stream, neither event complete. */
+    CHECK(reserve_device_memory(0, 300 * MIB) == 0);
+    release_device_memory(0, 300 * MIB);
+    gpu_done = 1;
+    CHECK(oom_check(0, 0) == 0);
+    gpu_done = 0;
+    CHECK(cuGraphLaunch(x, (CUstream)10) == CUDA_SUCCESS);
+    CHECK(cuGraphLaunch(y, (CUstream)20) == CUDA_SUCCESS);
+    CHECK(used == 856 * MIB); /* Separate streams need both allocations. */
+    CHECK(cuGraphLaunch(x, (CUstream)20) == CUDA_SUCCESS);
+    CHECK(used == 856 * MIB); /* x's previous launch can still overlap y. */
+    pool_result = CUDA_ERROR_INVALID_VALUE;
+    gpu_done = 1;
+    CHECK(reserve_device_memory(0, 300 * MIB) == CUDA_ERROR_OUT_OF_MEMORY);
+    CHECK(used == 856 * MIB); /* A failed pool query cannot justify a refund. */
+    pool_result = CUDA_SUCCESS;
+    reserved = 640 * MIB;
+    gpu_done = 1;
+    CHECK(reserve_device_memory(0, 300 * MIB) == CUDA_ERROR_OUT_OF_MEMORY);
+    CHECK(used == 896 * MIB); /* Completion does not free cached backing. */
+    destroy(a, x); destroy(b, y);
+    clean();
+}
+
+static void test_capture_admission(void) {
+    capturing = make_graph();
+    int before = nodes;
+    CUdeviceptr p;
+    CHECK(cuMemAllocAsync(&p, 400 * MIB, NULL) == CUDA_SUCCESS);
+    CHECK(cuMemAllocAsync(&p, 400 * MIB, NULL) == CUDA_ERROR_OUT_OF_MEMORY);
+    CHECK(nodes == before + 1);
+    graph_capture_end(123, capturing);
+    CHECK(cuGraphDestroy(capturing) == CUDA_SUCCESS);
+    capturing = NULL;
+    clean();
+}
+
+static void test_event_failure(void) {
+    CUgraph graph = make_graph();
+    CHECK(add(graph, 600, 1, NULL) == CUDA_SUCCESS);
+    CUgraphExec exec;
+    int before = submissions;
+    exec = instantiate(graph); /* Instantiation needs no completion event. */
+    event_result = CUDA_ERROR_INVALID_CONTEXT;
+    CHECK(cuGraphLaunch(exec, NULL) == event_result);
+    CHECK(submissions == before);
+    event_result = CUDA_SUCCESS;
+    CHECK(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    destroy(graph, exec);
+    clean();
+}
+
+static void test_context_lifetime(void) {
+    CUgraphExec exec;
+    /* Instantiate in context 2, submit on context 1's stream. */
+    CUgraph graph = make_graph();
+    CHECK(add(graph, 300, 1, NULL) == CUDA_SUCCESS);
+    current_ctx = (CUcontext)2;
+    exec = instantiate(graph);
+    current_ctx = (CUcontext)1;
+    CHECK(cuGraphLaunch(exec, (CUstream)10) == CUDA_SUCCESS);
+    /* Switch to another context while keeping the caller's context intact. */
+    CHECK(cuGraphLaunch(exec, (CUstream)30) == CUDA_SUCCESS);
+    CHECK(current_ctx == (CUcontext)1);
+    gpu_done = 1;
+    destroy(graph, exec);
+    clean();
+
+    graph = make_graph();
+    CHECK(add(graph, 300, 1, NULL) == CUDA_SUCCESS);
+    exec = instantiate(graph);
+    CHECK(cuGraphLaunch(exec, (CUstream)30) == CUDA_SUCCESS);
+    destroy(graph, exec); /* Retired, with GPU work still in flight. */
+    CHECK(used == 556 * MIB);
+    for (int i = 0; i < 8192; i++) {
+        if (events[i].ctx == (CUcontext)2) events[i].alive = 0;
+    }
+    graph_context_destroyed((CUcontext)2, 2);
+    CHECK(used == 256 * MIB); /* Never query an already destroyed event again. */
+    clean();
+}
+
+static void test_reused_context_handle(void) {
+    CUgraph old = make_graph(); CUgraphExec old_exec;
+    CHECK(add(old, 300, 1, NULL) == CUDA_SUCCESS); old_exec = instantiate(old);
+    CHECK(cuGraphLaunch(old_exec, (CUstream)30) == CUDA_SUCCESS);
+    destroy(old, old_exec);
+    /* Native destruction finished, but its hook has not yet notified us. */
+    for (int i = 0; i < 8192; i++) {
+        if (events[i].ctx_id == 2) events[i].alive = 0;
+    }
+    context_ids[2] = 22; /* The same raw context handle now names a new context. */
+    CUgraph graph = make_graph(), other = make_graph();
+    CHECK(add(graph, 400, 1, NULL) == CUDA_SUCCESS);
+    CHECK(add(other, 400, 1, NULL) == CUDA_SUCCESS);
+    CUgraphExec exec = instantiate(graph), next = instantiate(other);
+    CHECK(cuGraphLaunch(exec, (CUstream)30) == CUDA_SUCCESS);
+    graph_context_destroyed((CUcontext)2, 2); /* Late cleanup of the OLD context. */
+    CHECK(used == 656 * MIB);
+    CHECK(cuGraphLaunch(next, (CUstream)20) == CUDA_ERROR_OUT_OF_MEMORY);
+    gpu_done = 1; destroy(graph, exec); destroy(other, next); clean();
+    context_ids[2] = 2;
+}
+
+static void test_record_failure_sync(void) {
+    CUgraph graph = make_graph();
+    CHECK(add(graph, 600, 1, NULL) == CUDA_SUCCESS);
+    CUgraphExec exec = instantiate(graph);
+    record_result = CUDA_ERROR_INVALID_VALUE;
+    CHECK(cuGraphLaunch(exec, (CUstream)10) == CUDA_SUCCESS);
+    record_result = CUDA_SUCCESS;
+    destroy(graph, exec);
+    CHECK(reserve_device_memory(0, 300 * MIB) == CUDA_ERROR_OUT_OF_MEMORY);
+    gpu_done = 1;
+    graph_synchronized(NULL, (CUstream)10, 0, graph_sync_begin());
+    clean();
+}
+
+static void test_stream_fallback(void) {
+    void *native_id = cuda_library_entry[CUDA_OVERRIDE_ENUM(cuStreamGetId)].fn_ptr;
+    cuda_library_entry[CUDA_OVERRIDE_ENUM(cuStreamGetId)].fn_ptr = NULL;
+    CUgraph graphs[3]; CUgraphExec execs[3];
+    for (int i = 0; i < 3; i++) {
+        graphs[i] = make_graph();
+        CHECK(add(graphs[i], 400, 1, NULL) == CUDA_SUCCESS);
+        execs[i] = instantiate(graphs[i]);
+    }
+    CHECK(cuGraphLaunch(execs[0], (CUstream)10) == CUDA_SUCCESS);
+    CHECK(cuGraphLaunch(execs[1], (CUstream)10) == CUDA_SUCCESS);
+    CHECK(used == 656 * MIB);
+    graph_stream_destroyed((CUstream)10);
+    /* A new stream reusing the same raw handle must not alias queued work. */
+    CHECK(cuGraphLaunch(execs[2], (CUstream)10) == CUDA_ERROR_OUT_OF_MEMORY);
+    gpu_done = 1;
+    CHECK(cuGraphLaunch(execs[2], (CUstream)10) == CUDA_SUCCESS);
+    for (int i = 0; i < 3; i++) destroy(graphs[i], execs[i]);
+    cuda_library_entry[CUDA_OVERRIDE_ENUM(cuStreamGetId)].fn_ptr = native_id;
+    clean();
+}
+
+static void test_cached_replay(void) {
+    CUgraph graphs[128]; CUgraphExec execs[128];
+    int before = events_created;
+    for (int i = 0; i < 128; i++) {
+        graphs[i] = make_graph();
+        CHECK(add(graphs[i], 1, 1, NULL) == CUDA_SUCCESS);
+        execs[i] = instantiate(graphs[i]);
+    }
+    CHECK(events_created == before);
+    CHECK(cuGraphLaunch(execs[0], (CUstream)10) == CUDA_SUCCESS);
+    int queries = event_queries, pools = pool_queries;
+    for (int i = 0; i < 1000; i++) CHECK(cuGraphLaunch(execs[0], (CUstream)10) == CUDA_SUCCESS);
+    CHECK(event_queries == queries && pool_queries == pools);
+    CHECK(events_created == before + 1);
+    gpu_done = 1;
+    for (int i = 0; i < 128; i++) destroy(graphs[i], execs[i]);
+    clean();
+}
+
+static void *replay_thread(void *exec) {
+    for (int i = 0; i < 50; i++) CHECK(cuGraphLaunch(exec, (CUstream)10) == CUDA_SUCCESS);
+    return NULL;
+}
+static void *submit_once(void *exec) {
+    CHECK(cuGraphLaunch(exec, (CUstream)10) == CUDA_SUCCESS);
+    return NULL;
+}
+static void *sync_once(void *whole_context) {
+    if (whole_context != NULL) CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+    else CHECK(cuStreamSynchronize((CUstream)10) == CUDA_SUCCESS);
+    return NULL;
+}
+
+static void test_sync_submission_race(int whole_context, int already_pending) {
+    CUgraph a = make_graph(), b = make_graph();
+    CHECK(add(a, 400, 1, NULL) == CUDA_SUCCESS);
+    CHECK(add(b, 400, 1, NULL) == CUDA_SUCCESS);
+    CUgraphExec x = instantiate(a), y = instantiate(b);
+    pthread_t syncing, submitting;
+    block_sync = 1; sync_entered = 0;
+    if (already_pending) {
+        block_submit = 1; submit_entered = 0;
+        CHECK(pthread_create(&submitting, NULL, submit_once, x) == 0);
+        pthread_mutex_lock(&submit_gate);
+        while (!submit_entered) pthread_cond_wait(&submit_cond, &submit_gate);
+        pthread_mutex_unlock(&submit_gate);
+    }
+    CHECK(pthread_create(&syncing, NULL, sync_once,
+                         whole_context ? (void *)1 : NULL) == 0);
+    pthread_mutex_lock(&submit_gate);
+    while (!sync_entered) pthread_cond_wait(&submit_cond, &submit_gate);
+    pthread_mutex_unlock(&submit_gate);
+    /* The native sync completed on an empty queue. Finish a new submission
+     * before its success reaches HAMi. Both a new call and a call already
+     * pending at sync entry must remain active until GPU completion. */
+    if (already_pending) {
+        pthread_mutex_lock(&submit_gate);
+        block_submit = 0;
+        pthread_cond_broadcast(&submit_cond);
+        pthread_mutex_unlock(&submit_gate);
+        CHECK(pthread_join(submitting, NULL) == 0);
+    } else {
+        CHECK(cuGraphLaunch(x, (CUstream)10) == CUDA_SUCCESS);
+    }
+    pthread_mutex_lock(&submit_gate);
+    block_sync = 0;
+    pthread_cond_broadcast(&submit_cond);
+    pthread_mutex_unlock(&submit_gate);
+    CHECK(pthread_join(syncing, NULL) == 0);
+    CHECK(cuGraphLaunch(y, (CUstream)20) == CUDA_ERROR_OUT_OF_MEMORY);
+    gpu_done = 1;
+    destroy(a, x); destroy(b, y); clean();
+}
+static void test_host_submission_lifetime(void) {
+    CUgraph graph = make_graph();
+    CHECK(add(graph, 600, 1, NULL) == CUDA_SUCCESS);
+    CUgraphExec exec = instantiate(graph);
+    pthread_t threads[4];
+    for (int i = 0; i < 4; i++) CHECK(pthread_create(&threads[i], NULL, replay_thread, exec) == 0);
+    for (int i = 0; i < 4; i++) CHECK(pthread_join(threads[i], NULL) == 0);
+    gpu_done = 1;
+    destroy(graph, exec);
+    clean();
+
+    graph = make_graph();
+    CHECK(add(graph, 600, 1, NULL) == CUDA_SUCCESS);
+    exec = instantiate(graph);
+    block_submit = 1; submit_entered = 0;
+    CHECK(pthread_create(&threads[0], NULL, submit_once, exec) == 0);
+    pthread_mutex_lock(&submit_gate);
+    while (!submit_entered) pthread_cond_wait(&submit_cond, &submit_gate);
+    pthread_mutex_unlock(&submit_gate);
+    /* Native destroy can finish before our launch wrapper has returned. */
+    destroy(graph, exec);
+    CHECK(reserve_device_memory(0, 300 * MIB) == CUDA_ERROR_OUT_OF_MEMORY);
+    pthread_mutex_lock(&submit_gate);
+    block_submit = 0;
+    pthread_cond_broadcast(&submit_cond);
+    pthread_mutex_unlock(&submit_gate);
+    CHECK(pthread_join(threads[0], NULL) == 0);
+    clean();
+}
+
+static void test_persistent(int mode) {
+    CUgraph a = make_graph(), b = make_graph();
+    CUdeviceptr p, q;
+    CHECK(add(a, 512, 0, &p) == CUDA_SUCCESS);
+    CHECK(add(b, 512, 0, &q) == CUDA_SUCCESS);
+    CUgraphExec x, y;
+    if (mode == 2) {
+        CUDA_GRAPH_INSTANTIATE_PARAMS params = {0};
+        params.flags = CUDA_GRAPH_INSTANTIATE_FLAG_UPLOAD;
+        CHECK(cuGraphInstantiateWithParams(&x, a, &params) == CUDA_SUCCESS);
+        int before = instantiations;
+        CHECK(cuGraphInstantiateWithParams(&y, b, &params) == CUDA_ERROR_OUT_OF_MEMORY);
+        CHECK(instantiations == before);
+        CHECK(cuGraphDestroy(b) == CUDA_SUCCESS);
+    } else {
+        x = instantiate(a); y = instantiate(b);
+        CUresult (*submit)(CUgraphExec, CUstream) = mode == 1 ? cuGraphUpload : cuGraphLaunch;
+        CHECK(submit(x, NULL) == CUDA_SUCCESS);
+        int before = submissions;
+        CHECK(submit(y, NULL) == CUDA_ERROR_OUT_OF_MEMORY);
+        CHECK(submissions == before); /* Reject before submitting GPU work. */
+        destroy(b, y);
+    }
+    CHECK(used == 768 * MIB);
+    destroy(a, x);
+    graph_ptr_freed(p); graph_ptr_freed(q);
+    clean();
+}
+
+static void test_submission_failure(void) {
+    CUgraph a = make_graph(), b = make_graph();
+    CUdeviceptr p, q;
+    CHECK(add(a, 400, 0, &p) == CUDA_SUCCESS);
+    CHECK(add(b, 300, 0, &q) == CUDA_SUCCESS);
+    CUgraphExec x = instantiate(a), y = instantiate(b);
+    CHECK(cuGraphLaunch(x, NULL) == CUDA_SUCCESS);
+    submit_result = CUDA_ERROR_INVALID_VALUE;
+    CHECK(cuGraphLaunch(y, NULL) == submit_result);
+    submit_result = CUDA_SUCCESS;
+    CHECK(used == 656 * MIB);
+    destroy(a, x); destroy(b, y);
+    graph_ptr_freed(p); graph_ptr_freed(q);
+    clean();
+}
+
+static void test_persistent_replay_after_free(void) {
+    CUgraph graph = make_graph(); CUdeviceptr ptr;
+    CHECK(add(graph, 512, 0, &ptr) == CUDA_SUCCESS);
+    CUgraphExec exec = instantiate(graph);
+    CHECK(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    CHECK(used == 768 * MIB);
+    reserved = 512 * MIB;
+    graph_ptr_freed(ptr); /* Preserve metadata, release the live allocation. */
+    CHECK(used == 768 * MIB); /* The driver still retains the physical pool. */
+    gpu_done = 1;
+    CHECK(cuDeviceGraphMemTrim(0) == CUDA_SUCCESS);
+    CHECK(used == 256 * MIB);
+    CHECK(reserve_device_memory(0, 600 * MIB) == 0);
+    int before = submissions;
+    CHECK(cuGraphLaunch(exec, NULL) == CUDA_ERROR_OUT_OF_MEMORY);
+    CHECK(submissions == before);
+    release_device_memory(0, 600 * MIB);
+    CHECK(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    CHECK(used == 768 * MIB);
+    destroy(graph, exec); graph_ptr_freed(ptr);
+    clean();
+}
+
+static void test_destroy_inflight(void) {
+    CUgraph graph = make_graph();
+    CHECK(add(graph, 600, 1, NULL) == CUDA_SUCCESS);
+    CUgraphExec exec = instantiate(graph);
+    CHECK(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    reserved = 640 * MIB;
+    destroy(graph, exec);
+    CHECK(reserve_device_memory(0, 300 * MIB) == CUDA_ERROR_OUT_OF_MEMORY);
+    clean(); /* Completion and trim release even the retired exec's charge. */
+}
+
+int main(void) {
+#define DRIVER(name, fn) cuda_library_entry[CUDA_OVERRIDE_ENUM(name)].fn_ptr = (void *)(fn)
+    DRIVER(cuGraphAddMemAllocNode, driver_add);
+    DRIVER(cuGraphAddMemFreeNode, driver_free_node);
+    DRIVER(cuGraphInstantiateWithFlags, driver_instantiate);
+    DRIVER(cuGraphInstantiateWithParams, driver_params);
+    DRIVER(cuGraphLaunch, driver_submit);
+    DRIVER(cuGraphUpload, driver_submit);
+    DRIVER(cuGraphDestroy, driver_destroy);
+    DRIVER(cuGraphExecDestroy, driver_destroy);
+    DRIVER(cuEventCreate, driver_event_create);
+    DRIVER(cuEventRecord, driver_event_record);
+    DRIVER(cuEventQuery, driver_event_query);
+    DRIVER(cuEventDestroy_v2, driver_event_destroy);
+    DRIVER(cuDeviceGetGraphMemAttribute, driver_reserved);
+    DRIVER(cuDeviceGraphMemTrim, driver_trim);
+    DRIVER(cuStreamGetId, driver_stream_id);
+    DRIVER(cuStreamGetCtx, driver_stream_ctx);
+    DRIVER(cuCtxGetCurrent, driver_current);
+    DRIVER(cuCtxGetDevice, driver_device);
+    DRIVER(cuCtxSynchronize, driver_context_sync);
+    DRIVER(cuStreamSynchronize, driver_stream_sync);
+    DRIVER(cuCtxGetId, driver_context_id);
+    DRIVER(cuCtxPushCurrent_v2, driver_push);
+    DRIVER(cuCtxPopCurrent_v2, driver_pop);
+    DRIVER(cuStreamGetCaptureInfo_v3, driver_capture);
+    DRIVER(cuMemAllocAsync, driver_alloc_async);
+    test_node_failure();
+    test_capture_admission();
+    test_event_failure();
+    test_serial_and_overlap();
+    for (int mode = 0; mode < 3; mode++) test_persistent(mode);
+    test_submission_failure();
+    test_persistent_replay_after_free();
+    test_destroy_inflight();
+    test_context_lifetime();
+    test_reused_context_handle();
+    test_record_failure_sync();
+    test_stream_fallback();
+    test_cached_replay();
+    test_host_submission_lifetime();
+    for (int context = 0; context < 2; context++)
+        for (int pending = 0; pending < 2; pending++)
+            test_sync_submission_race(context, pending);
+    puts("PASS graph memory admission, overlap, retained pool and failure rollback");
+    return 0;
+}

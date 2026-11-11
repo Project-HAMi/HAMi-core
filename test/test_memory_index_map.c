@@ -15,7 +15,10 @@
 #include <unistd.h>
 
 #include "allocator/allocator.h"
+#include "include/libcuda_hook.h"
 #include "multiprocess/multiprocess_memory_limit.h"
+
+cuda_entry_t cuda_library_entry[CUDA_ENTRY_END];
 
 /* CUDA_VISIBLE_DEVICES=2,3 */
 static const unsigned int kNvmlOf[] = {2, 3};

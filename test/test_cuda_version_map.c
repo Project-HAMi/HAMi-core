@@ -15,6 +15,7 @@ void *find_symbols_in_table_by_cudaversion(const char *symbol, int cudaVersion);
 CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion,
                               cuuint64_t flags,
                               CUdriverProcAddressQueryResult *symbolStatus);
+CUresult _cuGetProcAddress(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags);
 
 /* Referenced by load_cuda_libraries(), which this test never calls. */
 typedef void *(*fp_dlsym)(void *, const char *);
@@ -108,6 +109,35 @@ static int check_symbol_status(void) {
     return 0;
 }
 
+static int check_graph_stream_flags(void) {
+    const char *names[] = {"cuGraphLaunch", "cuGraphUpload", "cuGraphInstantiateWithParams"};
+    const char *ptsz[] = {"cuGraphLaunch_ptsz", "cuGraphUpload_ptsz", "cuGraphInstantiateWithParams_ptsz"};
+    for (int i = 0; i < 3; i++) {
+        g_present[0] = names[i]; g_present[1] = ptsz[i]; g_present[2] = NULL;
+        for (int per_thread = 0; per_thread < 2; per_thread++) {
+            cuuint64_t flags = per_thread ? CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM
+                                          : CU_GET_PROC_ADDRESS_LEGACY_STREAM;
+            const char *expected = per_thread ? ptsz[i] : names[i];
+            for (int entry = 0; entry < 4; entry++) {
+                void *pfn = NULL;
+                CUdriverProcAddressQueryResult status = STATUS_POISON;
+                CUresult res;
+                if (entry == 0) res = cuGetProcAddress(names[i], &pfn, 13000, flags);
+                else if (entry == 1) res = _cuGetProcAddress(names[i], &pfn, 13000, flags);
+                else if (entry == 2) res = cuGetProcAddress_v2(names[i], &pfn, 13000, flags, &status);
+                else res = _cuGetProcAddress_v2(names[i], &pfn, 13000, flags, &status);
+                if (res != CUDA_SUCCESS || pfn == NULL || strcmp(pfn, expected) != 0 ||
+                    (entry >= 2 && status != CU_GET_PROC_ADDRESS_SUCCESS)) {
+                    printf("FAIL stream flags: %s flags=%llu entry=%d\n", names[i], (unsigned long long)flags, entry);
+                    return 1;
+                }
+            }
+        }
+    }
+    puts("ok   graph stream flags: legacy and per-thread lookup paths");
+    return 0;
+}
+
 int main(void) {
     /* Boundaries from cudaTypedefs.h: cuCtxCreate _v2 / _v3 from 11040 / _v4
        from 12050, cuMemAdvise and cuMemPrefetchAsync _v2 from 12020. A CUDA
@@ -154,6 +184,7 @@ int main(void) {
     failures += check_cases("cuMemPrefetchAsync", prefetch13, "cuda13 build",
                             prefetch_on13, 3);
     failures += check_symbol_status();
+    failures += check_graph_stream_flags();
 
     if (failures) {
         printf("%d version map check(s) failed\n", failures);
