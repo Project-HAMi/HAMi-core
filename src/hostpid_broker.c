@@ -681,10 +681,13 @@ int hostpid_broker_acquire_driver_admission_trusted(
 void hostpid_broker_release_driver_admission(int *lease_fd) {
     admission_lease_t **cursor;
     admission_lease_t *lease = NULL;
+    int cancel_state;
 
     if (lease_fd == NULL || *lease_fd < 0) {
         return;
     }
+    // close() is a cancellation point; the lease is already off the list.
+    pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cancel_state);
     pthread_mutex_lock(&admission_leases_lock);
     for (cursor = &admission_leases; *cursor != NULL;
          cursor = &(*cursor)->next) {
@@ -699,6 +702,7 @@ void hostpid_broker_release_driver_admission(int *lease_fd) {
         close(lease->fd);
     }
     pthread_mutex_unlock(&admission_leases_lock);
+    pthread_setcancelstate(cancel_state, NULL);
     free(lease);
     *lease_fd = -1;
 }

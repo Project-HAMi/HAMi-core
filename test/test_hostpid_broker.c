@@ -522,6 +522,57 @@ static void test_cancelled_admission_wait_closes_socket(void) {
     puts("cancelled driver admission wait closes its socket");
 }
 
+static atomic_int release_finished;
+
+static void *release_with_pending_cancel(void *argument) {
+    int lease_fd = -1;
+
+    assert(hostpid_broker_acquire_driver_admission(
+               argument, HOSTPID_DRIVER_ADMISSION_INIT, &lease_fd) == 0);
+    assert(pthread_cancel(pthread_self()) == 0);
+    hostpid_broker_release_driver_admission(&lease_fd);
+    atomic_store(&release_finished, lease_fd == -1);
+    pthread_testcancel();
+    return NULL;
+}
+
+// A pending cancel must not stop release at close(), or the lease stays open.
+static void test_release_with_pending_cancel(void) {
+    char directory[PATH_MAX];
+    char socket_path[PATH_MAX];
+    pthread_t thread;
+    void *result;
+    int status;
+    int listener = make_listener(socket_path, sizeof(socket_path),
+                                 directory, sizeof(directory));
+    pid_t server;
+
+    admission_command = 2;
+    admission_status = 0;
+    server = fork();
+    assert(server >= 0);
+    if (server == 0) {
+        alarm(5);
+        int connection = accept(listener, NULL, NULL);
+        assert(connection >= 0);
+        serve_admission(connection);
+        _exit(0);
+    }
+    close(listener);
+
+    atomic_store(&release_finished, 0);
+    assert(pthread_create(&thread, NULL, release_with_pending_cancel,
+                          socket_path) == 0);
+    assert(pthread_join(thread, &result) == 0);
+    assert(result == PTHREAD_CANCELED);
+    assert(atomic_load(&release_finished) == 1);
+    assert(waitpid(server, &status, 0) == server);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    assert(unlink(socket_path) == 0);
+    assert(rmdir(directory) == 0);
+    puts("pending cancel does not stop a lease release");
+}
+
 static void *query_in_thread(void *argument) {
     pid_t host_pid = 99;
     hostpid_broker_query(argument, &host_pid);
@@ -882,6 +933,7 @@ int main(void) {
     test_driver_admission_protocol();
     test_driver_admission_fork_closes_child_lease();
     test_cancelled_admission_wait_closes_socket();
+    test_release_with_pending_cancel();
     test_absolute_timeout();
     test_missing_socket();
     test_enable_gate();
