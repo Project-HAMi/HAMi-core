@@ -15,6 +15,7 @@ void *find_symbols_in_table_by_cudaversion(const char *symbol, int cudaVersion);
 CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion,
                               cuuint64_t flags,
                               CUdriverProcAddressQueryResult *symbolStatus);
+CUresult _cuGetProcAddress(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags);
 
 /* Referenced by load_cuda_libraries(), which this test never calls. */
 typedef void *(*fp_dlsym)(void *, const char *);
@@ -108,6 +109,72 @@ static int check_symbol_status(void) {
     return 0;
 }
 
+static CUresult stream_proc_result;
+static CUdriverProcAddressQueryResult stream_proc_status;
+static int stream_proc_pointer, stream_proc_version;
+static cuuint64_t stream_proc_flags;
+static const char *stream_proc_name;
+static void native_marker(void) {}
+
+/** Return the configured native lookup result and record the request. */
+static CUresult stream_get_proc(const char *symbol, void **pfn, int version, cuuint64_t flags) {
+    stream_proc_name = symbol; stream_proc_version = version; stream_proc_flags = flags;
+    *pfn = stream_proc_result == CUDA_SUCCESS && stream_proc_pointer ? (void *)native_marker : NULL;
+    return stream_proc_result;
+}
+
+/** Return the configured native lookup result and v2 symbol status. */
+static CUresult stream_get_proc_v2(const char *symbol, void **pfn, int version, cuuint64_t flags,
+                                   CUdriverProcAddressQueryResult *status) {
+    CUresult result = stream_get_proc(symbol, pfn, version, flags);
+    if (status != NULL) *status = stream_proc_status;
+    if (stream_proc_status != CU_GET_PROC_ADDRESS_SUCCESS) *pfn = NULL;
+    return result;
+}
+
+/** Check stream hook selection and native lookup outcomes across both APIs. */
+static int check_stream_procs(void) {
+    static const char *const names[][2] = {
+        {"cuMemAllocAsync", "cuMemAllocAsync_ptsz"},
+        {"cuMemAllocFromPoolAsync", "cuMemAllocFromPoolAsync_ptsz"},
+        {"cuMemFreeAsync", "cuMemFreeAsync_ptsz"},
+        {"cuStreamSynchronize", "cuStreamSynchronize_ptsz"}
+    };
+    static const cuuint64_t flags[] = {CU_GET_PROC_ADDRESS_DEFAULT, CU_GET_PROC_ADDRESS_LEGACY_STREAM,
+                                      CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM};
+    cuda_library_entry[CUDA_OVERRIDE_ENUM(cuGetProcAddress)].fn_ptr = (void *)stream_get_proc;
+    cuda_library_entry[CUDA_OVERRIDE_ENUM(cuGetProcAddress_v2)].fn_ptr = (void *)stream_get_proc_v2;
+    int failures = 0;
+    for (int n = 0; n < 4; n++) for (int explicit_pt = 0; explicit_pt < 2; explicit_pt++)
+        for (int api = 0; api < 4; api++) for (int f = 0; f < 3; f++) for (int state = 0; state < 4; state++) {
+            g_present[0] = names[n][0]; g_present[1] = names[n][1]; g_present[2] = NULL;
+            stream_proc_result = state == 1 ? CUDA_ERROR_NOT_FOUND : CUDA_SUCCESS;
+            stream_proc_pointer = state != 2;
+            stream_proc_status = state == 3 ? CU_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT : CU_GET_PROC_ADDRESS_SUCCESS;
+            stream_proc_name = NULL;
+            void *pfn = NULL;
+            CUdriverProcAddressQueryResult status = STATUS_POISON;
+            const char *symbol = names[n][explicit_pt];
+            CUresult result;
+            if (api == 0) result = cuGetProcAddress(symbol, &pfn, 13030, flags[f]);
+            else if (api == 1) result = _cuGetProcAddress(symbol, &pfn, 13030, flags[f]);
+            else if (api == 2) result = cuGetProcAddress_v2(symbol, &pfn, 13030, flags[f], &status);
+            else result = _cuGetProcAddress_v2(symbol, &pfn, 13030, flags[f], &status);
+            int available = stream_proc_result == CUDA_SUCCESS && stream_proc_pointer && (api < 2 || state != 3);
+            int per_thread = explicit_pt || f == 2;
+            void *expected = available ? (void *)names[n][per_thread] : NULL;
+            if (result != stream_proc_result || pfn != expected || stream_proc_name != symbol ||
+                stream_proc_flags != flags[f] || stream_proc_version != 13030 ||
+                (api >= 2 && status != stream_proc_status)) {
+                printf("FAIL stream lookup %s api=%d flags=%u state=%d\n", symbol, api,
+                       (unsigned int)flags[f], state);
+                failures++;
+            }
+        }
+    return failures;
+}
+
+/** Run CUDA version mapping and stream lookup regressions. */
 int main(void) {
     /* Boundaries from cudaTypedefs.h: cuCtxCreate _v2 / _v3 from 11040 / _v4
        from 12050, cuMemAdvise and cuMemPrefetchAsync _v2 from 12020. A CUDA
@@ -154,6 +221,7 @@ int main(void) {
     failures += check_cases("cuMemPrefetchAsync", prefetch13, "cuda13 build",
                             prefetch_on13, 3);
     failures += check_symbol_status();
+    failures += check_stream_procs();
 
     if (failures) {
         printf("%d version map check(s) failed\n", failures);

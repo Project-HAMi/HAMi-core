@@ -607,6 +607,11 @@ CUresult cuMemAllocAsync(CUdeviceptr *dptr, size_t bytesize, CUstream hStream) {
     return allocate_async_raw(dptr,bytesize,hStream);
 }
 
+/** Allocate asynchronously with per-thread semantics for a NULL stream. */
+CUresult cuMemAllocAsync_ptsz(CUdeviceptr *dptr, size_t bytesize, CUstream stream) {
+    return cuMemAllocAsync(dptr, bytesize, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
 CUresult cuMemFreeAsync(CUdeviceptr dptr, CUstream hStream) {
     LOG_DEBUG("cuMemFreeAsync dptr=%llx",dptr);
     if (dptr == 0) {  // NULL
@@ -616,6 +621,11 @@ CUresult cuMemFreeAsync(CUdeviceptr dptr, CUstream hStream) {
     if (res == CUDA_SUCCESS) graph_ptr_freed_async(dptr, hStream);
     LOG_DEBUG("after free_raw_async dptr=%p res=%d",(void *)dptr,res);
     return res;
+}
+
+/** Free asynchronously with per-thread semantics for a NULL stream. */
+CUresult cuMemFreeAsync_ptsz(CUdeviceptr dptr, CUstream stream) {
+    return cuMemFreeAsync(dptr, stream == NULL ? CU_STREAM_PER_THREAD : stream);
 }
 
 /* Graph memory is charged at node creation. See graph_record() for when it is
@@ -705,6 +715,11 @@ CUresult cuMemPoolDestroy(CUmemoryPool pool) {
 CUresult cuMemAllocFromPoolAsync(CUdeviceptr *dptr, size_t bytesize, CUmemoryPool pool, CUstream hStream) {
     LOG_DEBUG("cuMemAllocFromPoolAsync:%ld", bytesize);
     return allocate_from_pool_async_raw(dptr, bytesize, pool, hStream);
+}
+
+/** Allocate from a pool with per-thread semantics for a NULL stream. */
+CUresult cuMemAllocFromPoolAsync_ptsz(CUdeviceptr *dptr, size_t bytesize, CUmemoryPool pool, CUstream stream) {
+    return cuMemAllocFromPoolAsync(dptr, bytesize, pool, stream == NULL ? CU_STREAM_PER_THREAD : stream);
 }
 
 CUresult cuMemPoolExportToShareableHandle(void *handle_out, CUmemoryPool pool, CUmemAllocationHandleType handleType, unsigned long long flags) {
