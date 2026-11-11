@@ -192,6 +192,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuStreamCreate);
     DLSYM_HOOK_FUNC(cuStreamDestroy_v2);
     DLSYM_HOOK_FUNC(cuStreamSynchronize);
+    DLSYM_HOOK_FUNC(cuStreamSynchronize_ptsz);
     DLSYM_HOOK_FUNC(cuDeviceGet);
     DLSYM_HOOK_FUNC(cuCtxGetDevice);
     DLSYM_HOOK_FUNC(cuDeviceGetAttribute);
@@ -274,7 +275,9 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemRetainAllocationHandle);
     DLSYM_HOOK_FUNC(cuMemImportFromShareableHandle);
     DLSYM_HOOK_FUNC(cuMemAllocAsync);
+    DLSYM_HOOK_FUNC(cuMemAllocAsync_ptsz);
     DLSYM_HOOK_FUNC(cuMemFreeAsync);
+    DLSYM_HOOK_FUNC(cuMemFreeAsync_ptsz);
     DLSYM_HOOK_FUNC(cuGraphAddMemAllocNode);
     DLSYM_HOOK_FUNC(cuGraphAddMemFreeNode);
     // memory ops
@@ -288,6 +291,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemPoolCreate);
     DLSYM_HOOK_FUNC(cuMemPoolDestroy);
     DLSYM_HOOK_FUNC(cuMemAllocFromPoolAsync);
+    DLSYM_HOOK_FUNC(cuMemAllocFromPoolAsync_ptsz);
     DLSYM_HOOK_FUNC(cuMemPoolExportToShareableHandle);
     DLSYM_HOOK_FUNC(cuMemPoolImportFromShareableHandle);
     DLSYM_HOOK_FUNC(cuMemPoolExportPointer);

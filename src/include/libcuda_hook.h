@@ -92,6 +92,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuStreamCreate),
     CUDA_OVERRIDE_ENUM(cuStreamDestroy_v2),
     CUDA_OVERRIDE_ENUM(cuStreamSynchronize),
+    CUDA_OVERRIDE_ENUM(cuStreamSynchronize_ptsz),
     /* cuMemory Part */
     CUDA_OVERRIDE_ENUM(cuArray3DCreate_v2),
     CUDA_OVERRIDE_ENUM(cuArrayCreate_v2),
@@ -175,7 +176,9 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuMemRetainAllocationHandle),
     CUDA_OVERRIDE_ENUM(cuMemImportFromShareableHandle),
     CUDA_OVERRIDE_ENUM(cuMemAllocAsync),
+    CUDA_OVERRIDE_ENUM(cuMemAllocAsync_ptsz),
     CUDA_OVERRIDE_ENUM(cuMemFreeAsync),
+    CUDA_OVERRIDE_ENUM(cuMemFreeAsync_ptsz),
     CUDA_OVERRIDE_ENUM(cuStreamGetCaptureInfo_v2),
     CUDA_OVERRIDE_ENUM(cuGraphAddMemAllocNode),
     CUDA_OVERRIDE_ENUM(cuGraphAddMemFreeNode),
@@ -190,6 +193,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuMemPoolCreate),
     CUDA_OVERRIDE_ENUM(cuMemPoolDestroy),
     CUDA_OVERRIDE_ENUM(cuMemAllocFromPoolAsync),
+    CUDA_OVERRIDE_ENUM(cuMemAllocFromPoolAsync_ptsz),
     CUDA_OVERRIDE_ENUM(cuMemPoolExportToShareableHandle),
     CUDA_OVERRIDE_ENUM(cuMemPoolImportFromShareableHandle),
     CUDA_OVERRIDE_ENUM(cuMemPoolExportPointer),
@@ -275,6 +279,11 @@ typedef enum {
 }cuda_override_enum_t;
 
 extern cuda_entry_t cuda_library_entry[];
+
+CUresult cuMemAllocAsync_ptsz(CUdeviceptr *dptr, size_t bytesize, CUstream stream);
+CUresult cuMemAllocFromPoolAsync_ptsz(CUdeviceptr *dptr, size_t bytesize, CUmemoryPool pool, CUstream stream);
+CUresult cuMemFreeAsync_ptsz(CUdeviceptr dptr, CUstream stream);
+CUresult cuStreamSynchronize_ptsz(CUstream stream);
 
 #endif
 
