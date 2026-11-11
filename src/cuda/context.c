@@ -42,12 +42,12 @@ CUresult cuDevicePrimaryCtxSetFlags_v2( CUdevice dev, unsigned int  flags ){
 CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
     // Wait for the permit first so the usage is not undercounted meanwhile.
     int lease_fd = driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_RELEASE);
+    CUresult res;
+    pthread_cleanup_push(driver_admission_cleanup, &lease_fd);
     if (ctx_activate[dev] == 1) {
         rm_gpu_device_memory_usage(getpid(),dev,context_size,0);
     }
     ctx_activate[dev] = 0;
-    CUresult res;
-    pthread_cleanup_push(driver_admission_cleanup, &lease_fd);
     res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRelease_v2,dev);
     pthread_cleanup_pop(1);
     return res;

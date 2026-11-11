@@ -43,8 +43,23 @@ int add_gpu_device_memory_usage(int32_t pid, int dev, size_t usage,
     (void)pid; (void)dev; (void)usage; (void)type;
     return 0;
 }
+static sem_t driver_entered;
+static volatile int driver_blocks;
+static volatile int accounting_blocks;
+
+/* Blocks like the fake driver, so a cancel can land in the usage update. */
+static void block_here(void) {
+    sem_post(&driver_entered);
+    for (;;) {
+        pause();
+    }
+}
+
 int rm_gpu_device_memory_usage(int32_t pid, int dev, size_t usage, int type) {
     (void)pid; (void)dev; (void)usage; (void)type;
+    if (accounting_blocks) {
+        block_here();
+    }
     return 0;
 }
 
@@ -79,15 +94,9 @@ int __wrap_hostpid_broker_acquire_driver_admission_trusted(
                                                    lease_fd);
 }
 
-static sem_t driver_entered;
-static volatile int driver_blocks;
-
 static CUresult fake_driver(void) {
     if (driver_blocks) {
-        sem_post(&driver_entered);
-        for (;;) {
-            pause();
-        }
+        block_here();
     }
     return CUDA_SUCCESS;
 }
@@ -181,12 +190,14 @@ static void finish_broker(pid_t broker) {
     assert(rmdir(directory) == 0);
 }
 
-static void run_case(int operation, int cancel) {
+static void run_case(int operation, int cancel, int in_accounting) {
     pid_t broker = start_broker((unsigned char)(operation + 2));
     pthread_t thread;
     void *result;
 
-    driver_blocks = cancel;
+    ctx_activate[0] = 1;
+    driver_blocks = cancel && !in_accounting;
+    accounting_blocks = cancel && in_accounting;
     assert(pthread_create(&thread, NULL, call_hook, &operation) == 0);
     if (cancel) {
         while (sem_wait(&driver_entered) != 0) {
@@ -224,9 +235,13 @@ int main(void) {
         // Retain/release run the normal path first, so the cancel case also
         // proves the normal release is not repeated by a cleanup handler.
         if (operation != HOSTPID_DRIVER_ADMISSION_INIT) {
-            run_case(operation, 0);
+            run_case(operation, 0, 0);
         }
-        run_case(operation, 1);
+        run_case(operation, 1, 0);
+        if (operation == HOSTPID_DRIVER_ADMISSION_RELEASE) {
+            // Release holds its permit across the usage update too.
+            run_case(operation, 1, 1);
+        }
         printf("%s: cancelled call returns its lease\n", names[operation]);
     }
     puts("driver admission cancel tests passed");
