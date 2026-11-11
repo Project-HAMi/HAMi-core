@@ -102,6 +102,21 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             set_property(TARGET ${TEST_TARGET_NAME} APPEND_STRING PROPERTY
                 LINK_FLAGS " -Wl,--wrap=hostpid_broker_query_trusted,--wrap=hostpid_fallback_lock_acquire_until,--wrap=hostpid_fallback_lock_acquire_shared_until")
         endif()
+    elseif (TEST_TARGET_NAME STREQUAL "test_driver_admission_cancel")
+        # Links the production cuInit and primary context hooks and the
+        # broker client with its own driver table, so it needs no GPU.
+        add_executable(${TEST_TARGET_NAME}
+            ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/libvgpu.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/context.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_broker.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections,--wrap=hostpid_broker_acquire_driver_admission_trusted")
     elseif (TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat")
         add_executable(${TEST_TARGET_NAME}
             ${TEST_SCRIPT}
@@ -259,7 +274,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_memory_index_map"
             OR TEST_TARGET_NAME STREQUAL "test_meminfo_null_out"
-            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_mapping")
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_mapping"
+            OR TEST_TARGET_NAME STREQUAL "test_driver_admission_cancel")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread -ldl)
     elseif (TEST_TARGET_NAME STREQUAL "test_cuda_version_map")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread -ldl)
@@ -355,6 +371,11 @@ set_tests_properties(hostpid_broker_mapping_cold hostpid_broker_mapping_warm
 add_test(NAME hostpid_broker
     COMMAND test_hostpid_broker)
 set_tests_properties(hostpid_broker PROPERTIES TIMEOUT 20)
+
+# A thread cancelled inside a driver call must still return its permit.
+add_test(NAME driver_admission_cancel
+    COMMAND test_driver_admission_cancel)
+set_tests_properties(driver_admission_cancel PROPERTIES TIMEOUT 30)
 
 add_test(NAME hostpid_fallback_lock
     COMMAND test_hostpid_fallback_lock)

@@ -19,6 +19,31 @@ int hostpid_broker_query(const char *socket_path, pid_t *host_pid);
  * those checks pass. Peer credentials are currently supported only on Linux.
  */
 int hostpid_broker_query_trusted(const char *socket_path, pid_t *host_pid);
+
+typedef enum {
+    HOSTPID_DRIVER_ADMISSION_INIT = 0,
+    HOSTPID_DRIVER_ADMISSION_RETAIN = 1,
+    HOSTPID_DRIVER_ADMISSION_RELEASE = 2,
+} hostpid_driver_admission_operation_t;
+
+/* Waits in the broker queue for one driver admission permit. On success
+ * *lease_fd holds the permit until hostpid_broker_release_driver_admission
+ * closes it. Returns -1 with errno and *lease_fd set to -1 on failure; EAGAIN
+ * means the broker has admission off or no free handler. Only connect and
+ * the request write are bounded by the 500 ms deadline.
+ */
+int hostpid_broker_acquire_driver_admission(
+    const char *socket_path, hostpid_driver_admission_operation_t operation,
+    int *lease_fd);
+/* The same request with the trust checks of hostpid_broker_query_trusted. */
+int hostpid_broker_acquire_driver_admission_trusted(
+    hostpid_driver_admission_operation_t operation, int *lease_fd);
+void hostpid_broker_release_driver_admission(int *lease_fd);
+/* pthread_atfork handlers: a child closes its copies of open leases. */
+void hostpid_broker_admission_fork_prepare(void);
+void hostpid_broker_admission_fork_parent(void);
+void hostpid_broker_admission_fork_child(void);
+
 int hostpid_broker_validate_trust(const char *socket_path,
                                   uid_t trusted_uid,
                                   int require_readonly);
