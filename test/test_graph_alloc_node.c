@@ -132,6 +132,41 @@ int main(void) {
     }
     CHECK(cuMemFree(p));
     CHECK(add_node(g2, 768ull << 20, NULL, 1));
+    CHECK(cuGraphDestroy(g2));
+
+    // A graph that never ran allocated nothing: destroying it frees the charge
+    // even without a free node (#392), also after an exec was made but not run.
+    for (int with_exec = 0; with_exec < 2; with_exec++) {
+        CHECK(cuGraphCreate(&g1, 0));
+        CHECK(add_node(g1, 768ull << 20, NULL, 0));
+        if (with_exec) {
+            CHECK(cuGraphInstantiateWithFlags(&ex, g1, 0));
+            CHECK(cuGraphExecDestroy(ex));
+        }
+        CHECK(cuGraphDestroy(g1));
+        CHECK(cuGraphCreate(&g2, 0));
+        CHECK(add_node(g2, 768ull << 20, NULL, 1));
+        CHECK(cuGraphDestroy(g2));
+    }
+    // Instantiating with an upload allocates like a launch: still charged
+    // after the graph and exec are gone (the driver keeps the memory, and it
+    // cannot be freed with cuMemFree before a launch), so keep this last.
+    CHECK(cuGraphCreate(&g1, 0));
+    CHECK(add_node(g1, 768ull << 20, &p, 0));
+    memset(&ip, 0, sizeof(ip));
+    ip.flags = CUDA_GRAPH_INSTANTIATE_FLAG_UPLOAD;
+    ip.hUploadStream = st;
+    CHECK(cuGraphInstantiateWithParams(&ex, g1, &ip));
+    CHECK(cuStreamSynchronize(st));
+    CHECK(cuGraphExecDestroy(ex));
+    CHECK(cuGraphDestroy(g1));
+    CHECK(cuGraphCreate(&g2, 0));
+    r = add_node(g2, 768ull << 20, NULL, 1);
+    if (r != CUDA_ERROR_OUT_OF_MEMORY) {
+        fprintf(stderr, "FAIL: uploaded graph alloc not charged -> %d\n", (int)r);
+        return 1;
+    }
+    CHECK(cuGraphDestroy(g2));
     printf("PASS\n");
     return 0;
 }
