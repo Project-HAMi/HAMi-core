@@ -37,6 +37,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
+            OR TEST_TARGET_NAME STREQUAL "test_fork_reinit_leak"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
             OR TEST_TARGET_NAME STREQUAL "test_shrreg_debug"
             OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
@@ -236,6 +237,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     if (TEST_SCRIPT MATCHES "test_shared_region_concurrency.c"
             OR TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
+            OR TEST_TARGET_NAME STREQUAL "test_fork_reinit_leak"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_fallback_lock"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
             OR TEST_TARGET_NAME STREQUAL "test_shrreg_debug"
@@ -316,6 +318,10 @@ set_tests_properties(meminfo_null_out PROPERTIES TIMEOUT 20)
 add_test(NAME fork_child_exit_cleanup
     COMMAND test_fork_child_exit_cleanup)
 set_tests_properties(fork_child_exit_cleanup PROPERTIES TIMEOUT 20)
+
+add_test(NAME fork_reinit_leak
+    COMMAND test_fork_reinit_leak)
+set_tests_properties(fork_reinit_leak PROPERTIES TIMEOUT 20)
 
 add_test(NAME dlsym_rtld_next
     COMMAND test_dlsym_rtld_next)
