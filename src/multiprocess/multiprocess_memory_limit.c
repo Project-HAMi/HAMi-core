@@ -1225,8 +1225,23 @@ void try_create_shrreg() {
         }
     }
 
+    /* A forked child re-enters here still holding the parent's fd and mapping.
+       Drop them before locking the new fd, since closing any fd on the file
+       releases this process's lockf locks. */
+    if (region_info.shared_region != NULL) {
+        munmap(region_info.shared_region, SHARED_REGION_SIZE_MAGIC);
+        region_info.shared_region = NULL;
+    }
+    if (region_info.fd != -1) {
+        close(region_info.fd);
+    }
+
     env_utilization_switch = set_env_utilization_switch();
-    pthread_atfork(NULL, NULL, child_reinit_flag);
+    static int atfork_registered;
+    if (!atfork_registered) {
+        pthread_atfork(NULL, NULL, child_reinit_flag);
+        atfork_registered = 1;
+    }
 
     region_info.pid = getpid();
     region_info.fd = -1;
