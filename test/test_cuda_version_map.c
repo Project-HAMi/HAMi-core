@@ -108,6 +108,9 @@ static int check_symbol_status(void) {
     return 0;
 }
 
+#include "test/graph_node_proc_fixture.h"
+
+/** Run version selection and generic-node procedure lookup regressions. */
 int main(void) {
     /* Boundaries from cudaTypedefs.h: cuCtxCreate _v2 / _v3 from 11040 / _v4
        from 12050, cuMemAdvise and cuMemPrefetchAsync _v2 from 12020. A CUDA
@@ -154,6 +157,7 @@ int main(void) {
     failures += check_cases("cuMemPrefetchAsync", prefetch13, "cuda13 build",
                             prefetch_on13, 3);
     failures += check_symbol_status();
+    failures += check_graph_node_procs();
 
     if (failures) {
         printf("%d version map check(s) failed\n", failures);

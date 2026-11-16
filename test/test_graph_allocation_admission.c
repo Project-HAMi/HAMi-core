@@ -71,6 +71,29 @@ static CUresult native_add(CUgraphNode *node, CUgraph graph, const CUgraphNode *
     return result;
 }
 
+
+/** Forward generic allocation parameters without translating the native structure. */
+static CUresult native_generic(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
+                                size_t count, CUgraphNodeParams *params) {
+    (void)graph; (void)deps; (void)count;
+    if (params == NULL) return CUDA_ERROR_INVALID_VALUE;
+    if (params->type == CU_GRAPH_NODE_TYPE_MEM_ALLOC) {
+        CUresult result = native_allocate(&params->alloc.dptr, params->alloc.bytesize, NULL);
+        if (result != CUDA_SUCCESS) return result;
+    } else {
+        native_calls++; nodes++;
+    }
+    *node = (CUgraphNode)++serial;
+    return CUDA_SUCCESS;
+}
+
+/** Verify that the edge-data ABI forwards its caller's dependency data. */
+static CUresult native_generic_v2(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
+                                   const CUgraphEdgeData *data, size_t count, CUgraphNodeParams *params) {
+    REQUIRE(data == NULL);
+    return native_generic(node, graph, deps, count, params);
+}
+
 static CUresult native_undo(CUgraphNode node) {
     (void)node; undo_calls++; return CUDA_ERROR_NOT_SUPPORTED;
 }
@@ -109,14 +132,26 @@ static CUresult allocate(int kind, size_t size, CUdeviceptr *ptr) {
     params.poolProps.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     params.poolProps.location.id = 0;
     params.bytesize = size;
-    CUresult result = cuGraphAddMemAllocNode(&node, (CUgraph)2, NULL, 0, &params);
+    CUresult result;
+    if (kind >= 3) {
+        CUgraphNodeParams generic = {0};
+        generic.type = CU_GRAPH_NODE_TYPE_MEM_ALLOC;
+        generic.alloc.poolProps = params.poolProps;
+        generic.alloc.bytesize = size;
+        result = kind == 3 ? cuGraphAddNode(&node, (CUgraph)2, NULL, 0, &generic)
+                           : cuGraphAddNode_v2(&node, (CUgraph)2, NULL, NULL, 0, &generic);
+        params.dptr = generic.alloc.dptr;
+    } else {
+        result = cuGraphAddMemAllocNode(&node, (CUgraph)2, NULL, 0, &params);
+    }
     if (result == CUDA_SUCCESS) *ptr = params.dptr;
     return result;
 }
 
 /** Check quota rejection, native failure, heap failure, and concurrent admission. */
 static void check_admission(int kind) {
-    if (kind != 0) REQUIRE(cuStreamBeginCapture_v2((CUstream)3, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);
+    if (kind == 1 || kind == 2)
+        REQUIRE(cuStreamBeginCapture_v2((CUstream)3, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);
     CUdeviceptr ptr = 99;
     native_calls = nodes = undo_calls = 0;
     REQUIRE(allocate(kind, 900 * MIB, &ptr) == CUDA_ERROR_OUT_OF_MEMORY);
@@ -136,7 +171,12 @@ static void check_admission(int kind) {
     REQUIRE(competing_result == CUDA_ERROR_OUT_OF_MEMORY);
     REQUIRE(nodes == 1 && used == 756 * MIB);
     compete = 0;
-    if (kind == 0) {
+    if (kind >= 3) {
+        CUgraphNodeParams params = {0}; CUgraphNode node;
+        params.type = CU_GRAPH_NODE_TYPE_MEM_FREE; params.free.dptr = ptr;
+        REQUIRE((kind == 3 ? cuGraphAddNode(&node, (CUgraph)2, NULL, 0, &params)
+                           : cuGraphAddNode_v2(&node, (CUgraph)2, NULL, NULL, 0, &params)) == CUDA_SUCCESS);
+    } else if (kind == 0) {
         graph_mark_free((CUgraph)2, ptr);
     } else {
         REQUIRE(cuMemFreeAsync(ptr, (CUstream)3) == CUDA_SUCCESS);
@@ -153,13 +193,20 @@ int main(void) {
     device_allocasync = &async_list;
     cuda_library_entry[OVERRIDE_cuGraphAddMemAllocNode].fn_ptr = native_add;
     cuda_library_entry[OVERRIDE_cuGraphDestroyNode].fn_ptr = native_undo;
+    cuda_library_entry[OVERRIDE_cuGraphAddNode].fn_ptr = native_generic;
+    cuda_library_entry[OVERRIDE_cuGraphAddNode_v2].fn_ptr = native_generic_v2;
     cuda_library_entry[OVERRIDE_cuStreamGetCaptureInfo_v2].fn_ptr = native_capture;
     cuda_library_entry[OVERRIDE_cuStreamBeginCapture_v2].fn_ptr = native_begin;
     cuda_library_entry[OVERRIDE_cuStreamEndCapture].fn_ptr = native_end;
     cuda_library_entry[OVERRIDE_cuMemAllocAsync].fn_ptr = native_allocate;
     cuda_library_entry[OVERRIDE_cuMemAllocFromPoolAsync].fn_ptr = native_pool_allocate;
     cuda_library_entry[OVERRIDE_cuMemFreeAsync].fn_ptr = native_free;
-    for (int kind = 0; kind < 3; kind++) check_admission(kind);
+    for (int kind = 0; kind < 5; kind++) check_admission(kind);
+    CUgraphNode node;
+    REQUIRE(cuGraphAddNode(&node, (CUgraph)2, NULL, 0, NULL) == CUDA_ERROR_INVALID_VALUE);
+    CUgraphNodeParams empty = {0}; empty.type = CU_GRAPH_NODE_TYPE_EMPTY;
+    REQUIRE(cuGraphAddNode_v2(&node, (CUgraph)2, NULL, NULL, 0, &empty) == CUDA_SUCCESS);
+    REQUIRE(used == 256 * MIB);
     CUdeviceptr ptr;
     CUgraph graph;
     REQUIRE(cuStreamBeginCapture_v2((CUstream)3, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);
