@@ -285,6 +285,8 @@ static int check_stream_procs(void) {
     return failures;
 }
 
+#include "test/graph_node_proc_fixture.h"
+
 /** Run CUDA version mapping and graph procedure lookup regressions. */
 int main(void) {
     /* Boundaries from cudaTypedefs.h: cuCtxCreate _v2 / _v3 from 11040 / _v4
@@ -335,6 +337,7 @@ int main(void) {
     failures += check_graph_stream_flags();
     failures += check_graph_lookup_failures();
     failures += check_stream_procs();
+    failures += check_graph_node_procs();
 
     if (failures) {
         printf("%d version map check(s) failed\n", failures);

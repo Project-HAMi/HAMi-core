@@ -636,6 +636,41 @@ CUresult cuGraphAddMemAllocNode(CUgraphNode *phGraphNode, CUgraph hGraph,
     return res;
 }
 
+
+/** Reserve allocation demand and preserve native generic-node parameters and edge data. */
+static CUresult graph_add_node(cuda_sym_t add, int edges, CUgraphNode *node, CUgraph graph,
+                                const CUgraphNode *deps, const CUgraphEdgeData *data,
+                                size_t count, CUgraphNodeParams *params) {
+    if (add == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    int charge = params != NULL && params->type == CU_GRAPH_NODE_TYPE_MEM_ALLOC &&
+        params->alloc.poolProps.location.type == CU_MEM_LOCATION_TYPE_DEVICE;
+    graph_charge_entry *entry = NULL;
+    if (charge) {
+        cuuint64_t id = graph_capture_id_of(graph);
+        CUresult res = graph_alloc_begin(graph, params->alloc.poolProps.location.id,
+            params->alloc.bytesize, id, id != 0, &entry);
+        if (res != CUDA_SUCCESS) return res;
+    }
+    CUresult res = edges ? add(node, graph, deps, data, count, params)
+                         : add(node, graph, deps, count, params);
+    graph_alloc_end(entry, res == CUDA_SUCCESS && charge ? params->alloc.dptr : 0, res);
+    if (res == CUDA_SUCCESS && params != NULL && params->type == CU_GRAPH_NODE_TYPE_MEM_FREE)
+        graph_mark_free(graph, params->free.dptr);
+    return res;
+}
+
+CUresult cuGraphAddNode(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
+                        size_t count, CUgraphNodeParams *params) {
+    return graph_add_node((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuGraphAddNode),
+        0, node, graph, deps, NULL, count, params);
+}
+
+CUresult cuGraphAddNode_v2(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
+                           const CUgraphEdgeData *data, size_t count, CUgraphNodeParams *params) {
+    return graph_add_node((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuGraphAddNode_v2),
+        1, node, graph, deps, data, count, params);
+}
+
 CUresult cuGraphAddMemFreeNode(CUgraphNode *phGraphNode, CUgraph hGraph,
         const CUgraphNode *dependencies, size_t numDependencies, CUdeviceptr dptr) {
     LOG_DEBUG("cuGraphAddMemFreeNode");
