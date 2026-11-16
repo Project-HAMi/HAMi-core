@@ -243,12 +243,25 @@ static CUresult stream_get_proc_v2(const char *symbol, void **pfn, int version, 
 
 /** Check stream hook selection and native lookup outcomes across both APIs. */
 static int check_stream_procs(void) {
-    static const char *const names[][2] = {
+    static const char *const names[][3] = {
         {"cuMemAllocAsync", "cuMemAllocAsync_ptsz"},
         {"cuMemAllocFromPoolAsync", "cuMemAllocFromPoolAsync_ptsz"},
         {"cuMemFreeAsync", "cuMemFreeAsync_ptsz"},
         {"cuMemcpyAsync", "cuMemcpyAsync_ptsz"},
-        {"cuStreamSynchronize", "cuStreamSynchronize_ptsz"}
+        {"cuStreamSynchronize", "cuStreamSynchronize_ptsz"},
+        {"cuMemcpyHtoDAsync", "cuMemcpyHtoDAsync_v2_ptsz", "cuMemcpyHtoDAsync_v2"},
+        {"cuMemcpyDtoHAsync", "cuMemcpyDtoHAsync_v2_ptsz", "cuMemcpyDtoHAsync_v2"},
+        {"cuMemcpyDtoDAsync", "cuMemcpyDtoDAsync_v2_ptsz", "cuMemcpyDtoDAsync_v2"},
+        {"cuMemcpyHtoDAsync_v2", "cuMemcpyHtoDAsync_v2_ptsz", "cuMemcpyHtoDAsync_v2"},
+        {"cuMemcpyDtoHAsync_v2", "cuMemcpyDtoHAsync_v2_ptsz", "cuMemcpyDtoHAsync_v2"},
+        {"cuMemcpyDtoDAsync_v2", "cuMemcpyDtoDAsync_v2_ptsz", "cuMemcpyDtoDAsync_v2"},
+        {"cuMemsetD8Async", "cuMemsetD8Async_ptsz", "cuMemsetD8Async"},
+        {"cuMemsetD2D8Async", "cuMemsetD2D8Async_ptsz", "cuMemsetD2D8Async"},
+        {"cuMemsetD16Async", "cuMemsetD16Async_ptsz", "cuMemsetD16Async"},
+        {"cuMemsetD2D16Async", "cuMemsetD2D16Async_ptsz", "cuMemsetD2D16Async"},
+        {"cuMemsetD32Async", "cuMemsetD32Async_ptsz", "cuMemsetD32Async"},
+        {"cuMemsetD2D32Async", "cuMemsetD2D32Async_ptsz", "cuMemsetD2D32Async"},
+        {"cuLaunchKernel", "cuLaunchKernel_ptsz", "cuLaunchKernel"}
     };
     static const cuuint64_t flags[] = {CU_GET_PROC_ADDRESS_DEFAULT, CU_GET_PROC_ADDRESS_LEGACY_STREAM,
                                       CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM};
@@ -258,7 +271,8 @@ static int check_stream_procs(void) {
     size_t count = sizeof(names) / sizeof(names[0]);
     for (size_t n = 0; n < count; n++) for (int explicit_pt = 0; explicit_pt < 2; explicit_pt++)
         for (int api = 0; api < 4; api++) for (int f = 0; f < 3; f++) for (int state = 0; state < 4; state++) {
-            g_present[0] = names[n][0]; g_present[1] = names[n][1]; g_present[2] = NULL;
+            g_present[0] = names[n][2] != NULL ? names[n][2] : names[n][0];
+            g_present[1] = names[n][1]; g_present[2] = NULL;
             stream_proc_result = state == 1 ? CUDA_ERROR_NOT_FOUND : CUDA_SUCCESS;
             stream_proc_pointer = state != 2;
             stream_proc_status = state == 3 ? CU_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT : CU_GET_PROC_ADDRESS_SUCCESS;
@@ -273,7 +287,7 @@ static int check_stream_procs(void) {
             else result = _cuGetProcAddress_v2(symbol, &pfn, 13030, flags[f], &status);
             int available = stream_proc_result == CUDA_SUCCESS && stream_proc_pointer && (api < 2 || state != 3);
             int per_thread = explicit_pt || f == 2;
-            void *expected = available ? (void *)names[n][per_thread] : NULL;
+            void *expected = available ? (void *)g_present[per_thread] : NULL;
             if (result != stream_proc_result || pfn != expected || stream_proc_name != symbol ||
                 stream_proc_flags != flags[f] || stream_proc_version != 13030 ||
                 (api >= 2 && status != stream_proc_status)) {
@@ -286,6 +300,21 @@ static int check_stream_procs(void) {
 }
 
 #include "test/graph_node_proc_fixture.h"
+/** Preserve the original copy ABI when the requested CUDA version predates size_t counts. */
+static int check_legacy_copy_abi(void) {
+    const char *names[] = {"cuMemcpyHtoDAsync", "cuMemcpyDtoHAsync", "cuMemcpyDtoDAsync"};
+    g_present[0] = "cuMemcpyHtoDAsync_v2"; g_present[1] = "cuMemcpyHtoDAsync_v2_ptsz";
+    g_present[2] = NULL;
+    lookup_result = CUDA_SUCCESS; lookup_status = CU_GET_PROC_ADDRESS_SUCCESS;
+    lookup_pointer = (void *)"native";
+    cuda_library_entry[OVERRIDE_cuGetProcAddress].fn_ptr = stub_get_proc_address;
+    cuda_library_entry[OVERRIDE_cuGetProcAddress_v2].fn_ptr = stub_get_proc_address_v2;
+    for (int n = 0; n < 3; n++) {
+        void *pfn = NULL;
+        if (cuGetProcAddress(names[n], &pfn, 3000, 0) != CUDA_SUCCESS || pfn != lookup_pointer) return 1;
+    }
+    return 0;
+}
 
 /** Run CUDA version mapping and graph procedure lookup regressions. */
 int main(void) {
@@ -337,6 +366,7 @@ int main(void) {
     failures += check_graph_stream_flags();
     failures += check_graph_lookup_failures();
     failures += check_stream_procs();
+    failures += check_legacy_copy_abi();
     failures += check_graph_node_procs();
 
     if (failures) {
