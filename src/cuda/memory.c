@@ -615,6 +615,7 @@ CUresult cuMemFreeAsync(CUdeviceptr dptr, CUstream hStream) {
     return res;
 }
 
+/* cuGraphClone remains untracked. */
 /** Reserve graph bookkeeping and quota before recording an allocation node. */
 CUresult cuGraphAddMemAllocNode(CUgraphNode *phGraphNode, CUgraph hGraph,
         const CUgraphNode *dependencies, size_t numDependencies,

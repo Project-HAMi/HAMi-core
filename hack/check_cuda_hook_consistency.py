@@ -25,6 +25,9 @@ OPTIONAL_WRAPPER_SYMBOLS = {"cuCtxFromGreenCtx", "cuEventCreate", "cuEventRecord
 OPTIONAL_DLSYM_SYMBOLS.add("cuThreadExchangeStreamCaptureMode")
 OPTIONAL_WRAPPER_SYMBOLS.add("cuThreadExchangeStreamCaptureMode")
 
+OPTIONAL_DLSYM_SYMBOLS.add("cuThreadExchangeStreamCaptureMode")
+OPTIONAL_WRAPPER_SYMBOLS.add("cuThreadExchangeStreamCaptureMode")
+
 
 def strip_c_comments(content: str) -> str:
     content = re.sub(r"/\*.*?\*/", "", content, flags=re.S)
