@@ -40,6 +40,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuCtxCreate_v2"},
     {.name = "cuCtxCreate_v3"},
     {.name = "cuCtxCreate_v4"},
+    {.name = "cuGreenCtxCreate"},
     {.name = "cuCtxDestroy_v2"},
     {.name = "cuCtxGetApiVersion"},
     {.name = "cuCtxGetCacheConfig"},
@@ -138,12 +139,15 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemCreate"},
     {.name = "cuMemRelease"},
     {.name = "cuMemMap"},
+    {.name = "cuStreamBeginCapture_v2"},
+    {.name = "cuStreamEndCapture"},
     {.name = "cuMemUnmap"},
     {.name = "cuMemRetainAllocationHandle"},
     {.name = "cuMemImportFromShareableHandle"},
     {.name = "cuMemAllocAsync"},
     {.name = "cuMemFreeAsync"},
     {.name = "cuStreamGetCaptureInfo_v2"},
+    {.name = "cuStreamGetCaptureInfo_v3"},
     {.name = "cuGraphAddMemAllocNode"},
     {.name = "cuGraphAddMemFreeNode"},
     /* memory APIs */
@@ -318,6 +322,8 @@ void *find_symbols_in_table(const char *symbol) {
         strcmp(symbol, "cuGraphInstantiateWithFlags") != 0 &&
         strcmp(symbol, "cuGraphInstantiateWithParams") != 0 &&
         strcmp(symbol, "cuGraphExecDestroy") != 0 &&
+        strcmp(symbol, "cuGraphLaunch") != 0 &&
+        strcmp(symbol, "cuGraphUpload") != 0 &&
         strcmp(symbol, "cuGraphDestroy") != 0) {
         return NULL;
     }

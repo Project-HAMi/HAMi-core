@@ -98,13 +98,19 @@ void release_device_memory(CUdevice dev, size_t size);
 typedef struct graph_charge_entry graph_charge_entry;
 int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, graph_charge_entry **out);
 void graph_alloc_end(graph_charge_entry *entry, CUdeviceptr ptr, CUresult result);
-int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr);
+int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr, cuuint64_t capid);
 void graph_mark_free(CUgraph graph, CUdeviceptr ptr);
 void graph_ptr_freed(CUdeviceptr ptr);
 void graph_ptr_freed_async(CUdeviceptr ptr, CUstream hStream);
 void graph_release(CUgraph graph);
 int graph_exec_created(CUgraph graph, CUgraphExec exec);
 void graph_exec_destroyed(CUgraphExec exec);
+void graph_exec_launched(CUgraphExec exec);
+void graph_capture_info(CUstream hStream, CUstreamCaptureStatus *cap, cuuint64_t *id, CUgraph *graph);
+void graph_capture_begin(CUstream stream);
+cuuint64_t graph_capture_id(CUstream stream, int take);
+cuuint64_t graph_capture_id_of(CUgraph graph);
+void graph_capture_end(cuuint64_t capid, CUgraph graph);
 
 // Allocate and free device memory
 int allocate_raw(CUdeviceptr *dptr, size_t size);

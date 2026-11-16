@@ -34,6 +34,7 @@ void *__wrap_calloc(size_t count, size_t size) {
 }
 
 void ensure_initialized(void) {}
+void ensure_hostpid(void) {}
 void lock_shrreg(void) {}
 void unlock_shrreg(void) {}
 unsigned int cuda_to_nvml_map(unsigned int dev) { return dev; }
@@ -69,6 +70,13 @@ static CUresult native_add(CUgraphNode *node, CUgraph graph, const CUgraphNode *
 
 static CUresult native_undo(CUgraphNode node) {
     (void)node; undo_calls++; return CUDA_ERROR_NOT_SUPPORTED;
+}
+
+static CUresult native_capture(CUstream stream, CUstreamCaptureStatus *status, cuuint64_t *id,
+                                CUgraph *graph, const CUgraphNode **deps, size_t *count) {
+    (void)stream; (void)deps; (void)count;
+    *status = CU_STREAM_CAPTURE_STATUS_ACTIVE; *id = 123; *graph = (CUgraph)2;
+    return CUDA_SUCCESS;
 }
 
 /** Add an allocation node through the production hook. */
@@ -108,6 +116,13 @@ static void check_admission(void) {
     graph_mark_free((CUgraph)2, ptr);
     graph_release((CUgraph)2);
     REQUIRE(used == 256 * MIB && undo_calls == 0);
+
+    graph_capture_begin((CUstream)3);
+    REQUIRE(allocate(400 * MIB, &ptr) == CUDA_SUCCESS && used == 656 * MIB);
+    cuuint64_t id = graph_capture_id((CUstream)3, 1);
+    REQUIRE(id == 123);
+    graph_capture_end(id, NULL);
+    REQUIRE(used == 256 * MIB);
 }
 
 /** Run admission regressions for explicit allocation nodes. */
@@ -115,6 +130,7 @@ int main(void) {
     log_utils_init();
     cuda_library_entry[OVERRIDE_cuGraphAddMemAllocNode].fn_ptr = native_add;
     cuda_library_entry[OVERRIDE_cuGraphDestroyNode].fn_ptr = native_undo;
+    cuda_library_entry[OVERRIDE_cuStreamGetCaptureInfo_v2].fn_ptr = native_capture;
     check_admission();
     puts("PASS: graph allocation admission, rollback, and concurrent reservation");
     return 0;

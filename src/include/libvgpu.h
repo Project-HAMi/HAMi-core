@@ -52,5 +52,6 @@ void size_primary_context_lazily(int cudadev);
 void reset_lazy_context_sizing(void);
 int map_cuda_visible_devices();
 void ensure_post_init();
+void ensure_hostpid();
 
 #endif  // SRC_INCLUDE_LIBVGPU_H_

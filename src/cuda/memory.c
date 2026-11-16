@@ -415,6 +415,7 @@ CUresult cuMemGetInfo_v2(size_t* free, size_t* total) {
     size_t drv_free = 0, drv_total = 0, out_free, out_total;
     LOG_DEBUG("cuMemGetInfo_v2");
     ENSURE_INITIALIZED();
+    ensure_hostpid();
     CHECK_DRV_API(cuCtxGetDevice(&dev));
     size_t usage = get_current_device_memory_usage(cuda_to_nvml_map(dev));
     size_t limit = get_current_device_memory_limit(dev);
@@ -477,7 +478,6 @@ CUresult cuMipmappedArrayDestroy(CUmipmappedArray hMipmappedArray) {
 
 CUresult cuLaunchKernel ( CUfunction f, unsigned int  gridDimX, unsigned int  gridDimY, unsigned int  gridDimZ, unsigned int  blockDimX, unsigned int  blockDimY, unsigned int  blockDimZ, unsigned int  sharedMemBytes, CUstream hStream, void** kernelParams, void** extra ){
     ENSURE_RUNNING();
-    ensure_post_init();
     pre_launch_kernel();
     if (pidfound==1){ 
         rate_limiter((int64_t)gridDimX * gridDimY * gridDimZ,
@@ -489,7 +489,6 @@ CUresult cuLaunchKernel ( CUfunction f, unsigned int  gridDimX, unsigned int  gr
 
 CUresult cuLaunchKernelEx(const CUlaunchConfig *config, CUfunction f, void **kernelParams, void **extra) {
     ENSURE_RUNNING();
-    ensure_post_init();
     pre_launch_kernel();
     if (pidfound==1){
         rate_limiter((int64_t)config->gridDimX * config->gridDimY * config->gridDimZ,
@@ -501,7 +500,6 @@ CUresult cuLaunchKernelEx(const CUlaunchConfig *config, CUfunction f, void **ker
 
 CUresult cuLaunchCooperativeKernel ( CUfunction f, unsigned int  gridDimX, unsigned int  gridDimY, unsigned int  gridDimZ, unsigned int  blockDimX, unsigned int  blockDimY, unsigned int  blockDimZ, unsigned int  sharedMemBytes, CUstream hStream, void** kernelParams ){
     ENSURE_RUNNING();
-    ensure_post_init();
     pre_launch_kernel();
     if (pidfound==1){
         rate_limiter((int64_t)gridDimX * gridDimY * gridDimZ,

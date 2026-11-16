@@ -23,6 +23,7 @@ static int deducted_dev;
 void ensure_initialized(void) {}
 void lock_shrreg(void) {}
 void unlock_shrreg(void) {}
+void ensure_hostpid(void) {}
 unsigned int cuda_to_nvml_map(unsigned int dev) {
     EXPECT(dev == 0); return 3;
 }
