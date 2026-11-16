@@ -377,7 +377,7 @@ static int resolve_graph_add_proc(const char *symbol, void **pfn, int version, c
     if (strcmp(symbol, "cuGraphAddNode") == 0 && version > 13050) return 1;
     if (*result == CUDA_SUCCESS && *pfn != NULL &&
         (!v2 || status == NULL || *status == CU_GET_PROC_ADDRESS_SUCCESS)) {
-        const char *name = trim ? symbol : (latest || (!current && version >= 13040) ? "cuGraphAddNode_v3"
+        const char *name = trim ? symbol : (latest ? "cuGraphAddNode_v3"
             : (current || version >= 12030 ? "cuGraphAddNode_v2" : "cuGraphAddNode"));
         void *hook = __dlsym_hook_section(NULL, name);
         if (hook != NULL) *pfn = hook;
