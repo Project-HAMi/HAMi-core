@@ -71,6 +71,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuCtxCreate_v2),
     CUDA_OVERRIDE_ENUM(cuCtxCreate_v3),
     CUDA_OVERRIDE_ENUM(cuCtxCreate_v4),
+    CUDA_OVERRIDE_ENUM(cuGreenCtxCreate),
     CUDA_OVERRIDE_ENUM(cuCtxDestroy_v2),
     CUDA_OVERRIDE_ENUM(cuCtxGetApiVersion),
     CUDA_OVERRIDE_ENUM(cuCtxGetCacheConfig),
@@ -171,12 +172,18 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuMemCreate),
     CUDA_OVERRIDE_ENUM(cuMemRelease),
     CUDA_OVERRIDE_ENUM(cuMemMap),
+    CUDA_OVERRIDE_ENUM(cuStreamBeginCapture),
+    CUDA_OVERRIDE_ENUM(cuStreamBeginCapture_ptsz),
+    CUDA_OVERRIDE_ENUM(cuStreamBeginCapture_v2),
+    CUDA_OVERRIDE_ENUM(cuStreamEndCapture),
+    CUDA_OVERRIDE_ENUM(cuStreamEndCapture_ptsz),
     CUDA_OVERRIDE_ENUM(cuMemUnmap),
     CUDA_OVERRIDE_ENUM(cuMemRetainAllocationHandle),
     CUDA_OVERRIDE_ENUM(cuMemImportFromShareableHandle),
     CUDA_OVERRIDE_ENUM(cuMemAllocAsync),
     CUDA_OVERRIDE_ENUM(cuMemFreeAsync),
     CUDA_OVERRIDE_ENUM(cuStreamGetCaptureInfo_v2),
+    CUDA_OVERRIDE_ENUM(cuStreamGetCaptureInfo_v3),
     CUDA_OVERRIDE_ENUM(cuGraphAddMemAllocNode),
     CUDA_OVERRIDE_ENUM(cuGraphAddMemFreeNode),
     /* memory APIs */
@@ -278,8 +285,19 @@ extern cuda_entry_t cuda_library_entry[];
 
 #endif
 
+/* CUDA 13 headers no longer declare these, but drivers and applications still
+ * resolve them, so they stay hooked. Older headers declare them identically. */
+CUresult cuCtxCreate_v2(CUcontext *pctx, unsigned int flags, CUdevice dev);
+CUresult cuCtxCreate_v3(CUcontext *pctx, CUexecAffinityParam *paramsArray, int numParams,
+                        unsigned int flags, CUdevice dev);
+
 #undef cuGetProcAddress
 CUresult cuGetProcAddress( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags );
 #undef cuGraphInstantiate
 CUresult cuGraphInstantiate(CUgraphExec *phGraphExec, CUgraph hGraph, CUgraphNode *phErrorNode, char *logBuffer, size_t bufferSize);
 
+
+#undef cuStreamBeginCapture
+CUresult cuStreamBeginCapture(CUstream stream);
+CUresult cuStreamBeginCapture_ptsz(CUstream stream);
+CUresult cuStreamEndCapture_ptsz(CUstream stream, CUgraph *graph);

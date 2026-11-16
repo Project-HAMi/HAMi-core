@@ -131,6 +131,25 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         # pull in unrelated driver/accounting dependencies.
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle")
+        add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/allocator/allocator.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/graph.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE _GNU_SOURCE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_device_total_mem")
+        add_executable(${TEST_TARGET_NAME}
+            ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/device.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE _GNU_SOURCE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_memory_index_map")
         # Links the production oom_check and shared region, stubs the driver
         # bits it needs, so it needs no driver and no GPU.
@@ -268,7 +287,9 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     elseif (TEST_TARGET_NAME STREQUAL "test_nvml_v2_signatures"
             OR TEST_TARGET_NAME STREQUAL "test_utilization_nvml_index"
             OR TEST_TARGET_NAME STREQUAL "test_rate_limiter_recent_kernel"
-            OR TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat")
+            OR TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat"
+            OR TEST_TARGET_NAME STREQUAL "test_device_total_mem"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_sm_limiter_step")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
@@ -403,6 +424,14 @@ if (TARGET vgpu)
     set_tests_properties(dlsym_rtld_next_preloaded PROPERTIES
         ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:vgpu>"
         TIMEOUT 10)
+    # Needs a GPU: skips (77) when cuInit fails.
+    foreach(LAZY_MODE primary v2 v3 v4 green)
+        add_test(NAME lazy_hostpid_${LAZY_MODE} COMMAND test_lazy_hostpid ${LAZY_MODE})
+        set_tests_properties(lazy_hostpid_${LAZY_MODE} PROPERTIES
+            ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:vgpu>;CUDA_DEVICE_MEMORY_LIMIT=4g"
+            SKIP_RETURN_CODE 77
+            TIMEOUT 30)
+    endforeach()
 endif()
 
 # GPU + LD_PRELOAD regression for cross-process cuMemAlloc TOCTOU (#273).
@@ -430,6 +459,7 @@ set_tests_properties(hostpid_race PROPERTIES
 add_custom_target(python_test ALL
     COMMAND cp -r ${CMAKE_CURRENT_SOURCE_DIR}/python ${CMAKE_CURRENT_BINARY_DIR})
 
+add_test(NAME device_total_mem COMMAND test_device_total_mem)
 add_test(NAME cuda_memory_compat COMMAND test_cuda_memory_compat)
 set_tests_properties(cuda_memory_compat PROPERTIES
     ENVIRONMENT "LIBCUDA_LOG_LEVEL=4"
@@ -440,3 +470,6 @@ set_tests_properties(cuda_memory_compat PROPERTIES
 add_test(NAME sm_limiter_step
     COMMAND test_sm_limiter_step)
 set_tests_properties(sm_limiter_step PROPERTIES TIMEOUT 10)
+
+add_test(NAME graph_capture_lifecycle COMMAND test_graph_capture_lifecycle)
+set_tests_properties(graph_capture_lifecycle PROPERTIES TIMEOUT 15)

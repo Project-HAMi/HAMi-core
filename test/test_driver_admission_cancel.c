@@ -67,7 +67,7 @@ int rm_gpu_device_memory_usage(int32_t pid, int dev, size_t usage, int type) {
     return 0;
 }
 
-/* postInit dependencies; a cancelled cuInit never reaches them. */
+/* postInit and host PID dependencies (cuInit and ensure_hostpid reach them). */
 void allocator_init(void) {}
 void print_all(void) {}
 int map_cuda_visible_devices(void) { return 0; }

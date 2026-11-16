@@ -23,6 +23,7 @@ static int primary_context_active(CUdevice dev) {
 
 CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
     LOG_INFO("dev=%d context_size=%ld",dev,context_size);
+    ensure_hostpid();
     //for Initialization only
     int lease_fd = -1;
     // Retaining an active context only takes a reference; skip the permit.
@@ -72,22 +73,31 @@ CUresult cuCtxGetDevice(CUdevice* device) {
     return res;
 }
 
-#if CUDA_VERSION < 13000
 CUresult cuCtxCreate_v2 ( CUcontext* pctx, unsigned int  flags, CUdevice dev ){
     LOG_DEBUG("into cuCtxCreate pctx=%p flags=%d dev=%d",pctx,flags,dev);
+    ensure_hostpid();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxCreate_v2,pctx,flags,dev);
     return res;
 }
 
 CUresult cuCtxCreate_v3 ( CUcontext* pctx, CUexecAffinityParam* paramsArray, int  numParams, unsigned int  flags, CUdevice dev ){
     LOG_DEBUG("into cuCtxCreate_v3 pctx=%p paramsArray=%p numParams=%d flags=%d dev=%d",pctx,paramsArray,numParams,flags,dev);
+    ensure_hostpid();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxCreate_v3,pctx,paramsArray,numParams,flags,dev);
     return res;
+}
+
+#if CUDA_VERSION >= 12040
+CUresult cuGreenCtxCreate(CUgreenCtx *phCtx, CUdevResourceDesc desc, CUdevice dev, unsigned int flags) {
+    LOG_DEBUG("into cuGreenCtxCreate dev=%d flags=%u", dev, flags);
+    ensure_hostpid();
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuGreenCtxCreate, phCtx, desc, dev, flags);
 }
 #endif
 
 CUresult cuCtxCreate_v4(CUcontext* pctx, CUctxCreateParams* ctxCreateParams, unsigned int flags, CUdevice dev) {
     LOG_DEBUG("into cuCtxCreate_v4 pctx=%p ctxCreateParams=%p flags=%d dev=%d", pctx, ctxCreateParams, flags, dev);
+    ensure_hostpid();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxCreate_v4, pctx, ctxCreateParams, flags, dev);
     return res;
 }

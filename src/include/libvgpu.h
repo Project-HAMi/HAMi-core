@@ -53,6 +53,7 @@ void size_primary_context_lazily(int cudadev);
 void reset_lazy_context_sizing(void);
 int map_cuda_visible_devices();
 void ensure_post_init();
+void ensure_hostpid();
 int driver_admission_enabled(void);
 // Returns a lease fd, or -1 when admission is off or no permit was granted.
 int driver_admission_acquire(hostpid_driver_admission_operation_t operation);
