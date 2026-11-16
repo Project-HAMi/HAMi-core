@@ -396,7 +396,7 @@ int free_raw_async(CUdeviceptr dptr, CUstream hStream) {
     return tmp;
 }
 
-typedef struct graph_charge_entry {
+struct graph_charge_entry {
     CUgraph graph;       /* NULL once the graph is destroyed */
     CUdevice dev;
     size_t size;
@@ -404,7 +404,7 @@ typedef struct graph_charge_entry {
     int has_free;
     int nexec;           /* live execs instantiated from the graph */
     struct graph_charge_entry *next;
-} graph_charge_entry;
+};
 typedef struct graph_exec_link {
     CUgraphExec exec;
     graph_charge_entry *entry;
@@ -414,15 +414,24 @@ static graph_charge_entry *graph_charges;
 static graph_exec_link *graph_execs;
 static pthread_mutex_t graph_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr) {
+/** Reserve quota and tracking before the driver records an allocation. */
+int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, graph_charge_entry **out) {
+    *out = NULL;
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) return CUDA_ERROR_INVALID_DEVICE;
     graph_charge_entry *g = calloc(1, sizeof(*g));
     if (g == NULL) return CUDA_ERROR_OUT_OF_MEMORY;
-    g->graph = graph; g->dev = dev; g->size = size; g->ptr = ptr;
+    int ret = reserve_device_memory(dev, size);
+    if (ret != 0) {
+        free(g);
+        return ret;
+    }
+    g->graph = graph; g->dev = dev; g->size = size;
     pthread_mutex_lock(&graph_mutex);
     g->next = graph_charges;
     graph_charges = g;
     pthread_mutex_unlock(&graph_mutex);
-    return 0;
+    *out = g;
+    return CUDA_SUCCESS;
 }
 
 /* Release the charge and forget the entry. Call with graph_mutex held. */
@@ -442,6 +451,15 @@ static void graph_drop_entry(graph_charge_entry *e) {
     *pp = e->next;
     release_device_memory(e->dev, e->size);
     free(e);
+}
+
+/** Commit the returned pointer or refund a failed native allocation. */
+void graph_alloc_end(graph_charge_entry *entry, CUdeviceptr ptr, CUresult result) {
+    if (entry == NULL) return;
+    pthread_mutex_lock(&graph_mutex);
+    if (result == CUDA_SUCCESS) entry->ptr = ptr;
+    else graph_drop_entry(entry);
+    pthread_mutex_unlock(&graph_mutex);
 }
 
 /* Only the allocating graph's own free node frees the memory when that graph
@@ -545,35 +563,9 @@ void graph_release(CUgraph graph) {
 
 /* Track an allocated async chunk and account it against its pool's high-water
  * limit. Call with mutex held. */
-static int account_async_chunk(allocated_list_entry *e, size_t size, CUmemoryPool pool, CUstream hStream) {
+/** Account a noncaptured allocation against its pool high-water mark. */
+static int account_async_chunk(allocated_list_entry *e, size_t size, CUmemoryPool pool) {
     size_t poollimit;
-    /* cuMemPoolGetAttribute is illegal while the stream is capturing and
-     * invalidates the capture. The graph owns the memory: charge it to the
-     * graph. The pointer is not kept in device_allocasync: its free is passed
-     * through untracked, and graph_* releases the charge. */
-    CUstreamCaptureStatus cap = CU_STREAM_CAPTURE_STATUS_NONE;
-    cuuint64_t capid;
-    CUgraph capgraph = NULL;
-    CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCaptureInfo_v2, hStream, &cap, &capid,
-                       &capgraph, NULL, NULL);
-    if (cap != CU_STREAM_CAPTURE_STATUS_NONE) {
-        if (capgraph != NULL) {
-            int failed = reserve_device_memory(e->entry->dev, size) != 0;
-            if (!failed && graph_record(capgraph, e->entry->dev, size, e->entry->address) != 0) {
-                release_device_memory(e->entry->dev, size);
-                failed = 1;
-            }
-            if (failed) {
-                CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFreeAsync, e->entry->address, hStream);
-                free(e->entry);
-                free(e);
-                return CUDA_ERROR_OUT_OF_MEMORY;
-            }
-        }
-        free(e->entry);
-        free(e);
-        return 0;
-    }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemPoolGetAttribute, pool,
                                       CU_MEMPOOL_ATTR_RESERVED_MEM_HIGH, &poollimit);
     if (res != CUDA_SUCCESS) {
@@ -597,11 +589,38 @@ static int account_async_chunk(allocated_list_entry *e, size_t size, CUmemoryPoo
     return 0;
 }
 
+/** Admit captured allocations before the driver adds their nodes. */
+static CUresult allocate_captured(CUdeviceptr *address, size_t size, CUdevice dev,
+                                  CUmemoryPool pool, CUstream stream, int from_pool,
+                                  int *capturing) {
+    CUstreamCaptureStatus cap = CU_STREAM_CAPTURE_STATUS_NONE;
+    cuuint64_t capid;
+    CUgraph graph = NULL;
+    CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCaptureInfo_v2, stream, &cap, &capid,
+                       &graph, NULL, NULL);
+    *capturing = cap != CU_STREAM_CAPTURE_STATUS_NONE;
+    if (!*capturing) return CUDA_SUCCESS;
+    graph_charge_entry *entry = NULL;
+    if (graph != NULL) {
+        CUresult res = graph_alloc_begin(graph, dev, size, &entry);
+        if (res != CUDA_SUCCESS) return res;
+    }
+    CUresult res = from_pool
+        ? CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAllocFromPoolAsync, address, size, pool, stream)
+        : CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAllocAsync, address, size, stream);
+    graph_alloc_end(entry, res == CUDA_SUCCESS ? *address : 0, res);
+    return res;
+}
+
+/** Admit capture allocations before dispatching default-pool allocation. */
 int add_chunk_async(CUdeviceptr *address, size_t size, CUstream hStream) {
     size_t addr = 0;
     CUresult res = CUDA_SUCCESS;
     CUdevice dev;
     cuCtxGetDevice(&dev);
+    int capturing;
+    res = allocate_captured(address, size, dev, NULL, hStream, 0, &capturing);
+    if (capturing) return res;
     if (oom_check(dev, size))
         return CUDA_ERROR_OUT_OF_MEMORY;
 
@@ -610,6 +629,8 @@ int add_chunk_async(CUdeviceptr *address, size_t size, CUstream hStream) {
     res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemAllocAsync,&e->entry->address,size,hStream);
     if (res != CUDA_SUCCESS) {
         LOG_ERROR("cuMemoryAllocate failed res=%d",res);
+        free(e->entry);
+        free(e);
         return res;
     }
     *address = e->entry->address;
@@ -620,14 +641,18 @@ int add_chunk_async(CUdeviceptr *address, size_t size, CUstream hStream) {
         LOG_ERROR("cuDeviceGetMemPool failed res=%d",res);
         return res;
     }
-    return account_async_chunk(e, size, pool, hStream);
+    return account_async_chunk(e, size, pool);
 }
 
+/** Admit capture allocations before dispatching caller-pool allocation. */
 int add_chunk_from_pool_async(CUdeviceptr *address, size_t size, CUmemoryPool pool, CUstream hStream) {
     size_t addr = 0;
     CUresult res = CUDA_SUCCESS;
     CUdevice dev;
     cuCtxGetDevice(&dev);
+    int capturing;
+    res = allocate_captured(address, size, dev, pool, hStream, 1, &capturing);
+    if (capturing) return res;
     if (oom_check(dev, size))
         return CUDA_ERROR_OUT_OF_MEMORY;
 
@@ -636,11 +661,13 @@ int add_chunk_from_pool_async(CUdeviceptr *address, size_t size, CUmemoryPool po
     res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemAllocFromPoolAsync, &e->entry->address, size, pool, hStream);
     if (res != CUDA_SUCCESS) {
         LOG_ERROR("cuMemAllocFromPoolAsync failed res=%d", res);
+        free(e->entry);
+        free(e);
         return res;
     }
     *address = e->entry->address;
     /* Account against the caller's pool, not the default. */
-    return account_async_chunk(e, size, pool, hStream);
+    return account_async_chunk(e, size, pool);
 }
 
 int allocate_async_raw(CUdeviceptr *dptr, size_t size, CUstream hStream) {
