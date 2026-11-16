@@ -134,6 +134,11 @@ static void check_extended_streams(CUstream stream) {
     config.blockDimX = 4; config.blockDimY = 5; config.blockDimZ = 6;
     config.sharedMemBytes = 32; config.hStream = stream;
     config.attrs = (CUlaunchAttribute *)3; config.numAttrs = 1;  // NOLINT(readability/casting)
+    calls = preparations = limits = 0;
+    cuda_library_entry[OVERRIDE_cuLaunchKernelEx].fn_ptr = NULL;
+    REQUIRE(cuLaunchKernelEx_ptsz(&config, (CUfunction)8, NULL, NULL) == CUDA_ERROR_NOT_SUPPORTED);
+    REQUIRE(calls == 0 && preparations == 0 && limits == 0); checks++;
+    cuda_library_entry[OVERRIDE_cuLaunchKernelEx].fn_ptr = native_kernel_ex;
     CUDA_MEMCPY2D copy = {0}; expected_copy = &copy;
     CUmemLocation location = {CU_MEM_LOCATION_TYPE_DEVICE, 7};
     for (int op = 0; op < 8; op++) {
