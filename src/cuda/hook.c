@@ -40,6 +40,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuCtxCreate_v2"},
     {.name = "cuCtxCreate_v3"},
     {.name = "cuCtxCreate_v4"},
+    {.name = "cuGreenCtxCreate"},
     {.name = "cuCtxDestroy_v2"},
     {.name = "cuCtxGetApiVersion"},
     {.name = "cuCtxGetCacheConfig"},
