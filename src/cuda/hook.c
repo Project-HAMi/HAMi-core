@@ -61,6 +61,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuStreamCreate"},
     {.name = "cuStreamDestroy_v2"},
     {.name = "cuStreamSynchronize"},
+    {.name = "cuStreamSynchronize_ptsz"},
     /* Memory Part */
     {.name = "cuArray3DCreate_v2"},
     {.name = "cuArrayCreate_v2"},
@@ -88,6 +89,8 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuStreamGetCtx"},
     {.name = "cuGreenCtxDestroy"},
     {.name = "cuCtxFromGreenCtx"},
+    {.name = "cuStreamBeginCapture"},
+    {.name = "cuStreamBeginCapture_ptsz"},
     {.name = "cuMemGetInfo_v2"},
     {.name = "cuMemcpy"},
     {.name = "cuPointerGetAttribute"},
@@ -98,6 +101,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuIpcOpenMemHandle_v2"},
     {.name = "cuMemGetAddressRange_v2"},
     {.name = "cuMemcpyAsync"},
+    {.name = "cuMemcpyAsync_ptsz"},
     {.name = "cuMemcpyAtoD_v2"},
     {.name = "cuMemcpyDtoA_v2"},
     {.name = "cuMemcpyDtoD_v2"},
@@ -149,15 +153,15 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemCreate"},
     {.name = "cuMemRelease"},
     {.name = "cuMemMap"},
-    {.name = "cuStreamBeginCapture"},
-    {.name = "cuStreamBeginCapture_ptsz"},
     {.name = "cuStreamBeginCapture_v2"},
     {.name = "cuStreamEndCapture"},
     {.name = "cuMemUnmap"},
     {.name = "cuMemRetainAllocationHandle"},
     {.name = "cuMemImportFromShareableHandle"},
     {.name = "cuMemAllocAsync"},
+    {.name = "cuMemAllocAsync_ptsz"},
     {.name = "cuMemFreeAsync"},
+    {.name = "cuMemFreeAsync_ptsz"},
     {.name = "cuStreamGetCaptureInfo_v2"},
     {.name = "cuStreamGetCaptureInfo_v3"},
     {.name = "cuGraphAddMemAllocNode"},
@@ -173,6 +177,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemPoolCreate"},
     {.name = "cuMemPoolDestroy"},
     {.name = "cuMemAllocFromPoolAsync"},
+    {.name = "cuMemAllocFromPoolAsync_ptsz"},
     {.name = "cuMemPoolExportToShareableHandle"},
     {.name = "cuMemPoolImportFromShareableHandle"},
     {.name = "cuMemPoolExportPointer"},
@@ -247,8 +252,13 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuGraphInstantiate"},
     {.name = "cuGraphInstantiateWithFlags"},
     {.name = "cuGraphInstantiateWithParams"},
+    {.name = "cuGraphInstantiateWithParams_ptsz"},
     {.name = "cuGraphUpload"},
+    {.name = "cuGraphUpload_ptsz"},
     {.name = "cuGraphLaunch"},
+    {.name = "cuGraphLaunch_ptsz"},
+    {.name = "cuStreamBeginCapture_v2_ptsz"},
+    {.name = "cuStreamEndCapture_ptsz"},
     {.name = "cuGraphExecDestroy"},
     {.name = "cuGraphDestroy"},
 
@@ -322,6 +332,7 @@ const char* get_real_func_name(const char* base_name,int cuda_version) {
   return NULL; // if not found
 }
 
+/** Find exported hooks while keeping untracked graph APIs native. */
 void *find_symbols_in_table(const char *symbol) {
     char symbol_v[500];
     void *pfn;
@@ -333,9 +344,12 @@ void *find_symbols_in_table(const char *symbol) {
         strcmp(symbol, "cuGraphInstantiate") != 0 &&
         strcmp(symbol, "cuGraphInstantiateWithFlags") != 0 &&
         strcmp(symbol, "cuGraphInstantiateWithParams") != 0 &&
-        strcmp(symbol, "cuGraphExecDestroy") != 0 &&
+        strcmp(symbol, "cuGraphInstantiateWithParams_ptsz") != 0 &&
         strcmp(symbol, "cuGraphLaunch") != 0 &&
+        strcmp(symbol, "cuGraphLaunch_ptsz") != 0 &&
         strcmp(symbol, "cuGraphUpload") != 0 &&
+        strcmp(symbol, "cuGraphUpload_ptsz") != 0 &&
+        strcmp(symbol, "cuGraphExecDestroy") != 0 &&
         strcmp(symbol, "cuGraphDestroy") != 0) {
         return NULL;
     }
@@ -363,8 +377,88 @@ void *find_symbols_in_table_by_cudaversion(const char *symbol,int  cudaVersion) 
 }
 
 
+/** Select graph and capture hooks according to CUDA version and stream flags. */
+static void *find_symbols_with_flags(const char *symbol, int cudaVersion, cuuint64_t flags) {
+    if (strcmp(symbol, "cuStreamBeginCapture") == 0 && cudaVersion < 10010) {
+        const char *name = flags & CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM
+            ? "cuStreamBeginCapture_ptsz" : "cuStreamBeginCapture";
+        return __dlsym_hook_section(NULL, name);
+    }
+    if (flags & CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM) {
+        if (strcmp(symbol, "cuGraphLaunch") == 0)
+            return __dlsym_hook_section(NULL, "cuGraphLaunch_ptsz");
+        if (strcmp(symbol, "cuGraphUpload") == 0)
+            return __dlsym_hook_section(NULL, "cuGraphUpload_ptsz");
+        if (strcmp(symbol, "cuGraphInstantiateWithParams") == 0)
+            return __dlsym_hook_section(NULL, "cuGraphInstantiateWithParams_ptsz");
+        if (strcmp(symbol, "cuStreamBeginCapture") == 0 || strcmp(symbol, "cuStreamBeginCapture_v2") == 0)
+            return __dlsym_hook_section(NULL, "cuStreamBeginCapture_v2_ptsz");
+        if (strcmp(symbol, "cuStreamEndCapture") == 0)
+            return __dlsym_hook_section(NULL, "cuStreamEndCapture_ptsz");
+    }
+    return find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
+}
+
+/** Resolve known stream hooks while preserving native availability and stream semantics. */
+static int resolve_stream_proc(const char *symbol, void **pfn, int version, cuuint64_t flags,
+                                CUdriverProcAddressQueryResult *status, int v2, CUresult *result) {
+    static const struct { const char *base; const char *per_thread; } hooks[] = {
+        {"cuMemAllocAsync", "cuMemAllocAsync_ptsz"},
+        {"cuMemAllocFromPoolAsync", "cuMemAllocFromPoolAsync_ptsz"},
+        {"cuMemFreeAsync", "cuMemFreeAsync_ptsz"},
+        {"cuMemcpyAsync", "cuMemcpyAsync_ptsz"},
+        {"cuStreamSynchronize", "cuStreamSynchronize_ptsz"}
+    };
+    for (size_t i = 0; i < sizeof(hooks) / sizeof(hooks[0]); i++) {
+        int named_per_thread = strcmp(symbol, hooks[i].per_thread) == 0;
+        if (!named_per_thread && strcmp(symbol, hooks[i].base) != 0) continue;
+        *result = v2
+            ? CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress_v2, symbol, pfn, version, flags, status)
+            : CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress, symbol, pfn, version, flags);
+        if (*result == CUDA_SUCCESS && *pfn != NULL &&
+            (!v2 || status == NULL || *status == CU_GET_PROC_ADDRESS_SUCCESS)) {
+            const char *name = named_per_thread || (flags & CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM)
+                ? hooks[i].per_thread : hooks[i].base;
+            void *hook = __dlsym_hook_section(NULL, name);
+            if (hook != NULL) *pfn = hook;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+/** Resolve graph and capture hooks only when the native driver supports the requested entry point. */
+static int resolve_graph_proc(const char *symbol, void **pfn, int version, cuuint64_t flags,
+                              CUdriverProcAddressQueryResult *status, int v2, CUresult *result) {
+    if (strncmp(symbol, "cuGraph", 7) != 0 && strcmp(symbol, "cuStreamBeginCapture") != 0 &&
+        strcmp(symbol, "cuStreamEndCapture") != 0 &&
+        strcmp(symbol, "cuStreamBeginCapture_ptsz") != 0 &&
+        strcmp(symbol, "cuStreamBeginCapture_v2") != 0 &&
+        strcmp(symbol, "cuStreamBeginCapture_v2_ptsz") != 0 &&
+        strcmp(symbol, "cuStreamEndCapture_ptsz") != 0 &&
+        strcmp(symbol, "cuDeviceGraphMemTrim") != 0 &&
+        strcmp(symbol, "cuDevicePrimaryCtxReset") != 0 &&
+        strcmp(symbol, "cuDevicePrimaryCtxReset_v2") != 0 &&
+        strcmp(symbol, "cuGreenCtxDestroy") != 0) return 0;
+    *result = v2
+        ? CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress_v2, symbol, pfn, version, flags, status)
+        : CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress, symbol, pfn, version, flags);
+    if (strcmp(symbol, "cuDevicePrimaryCtxReset") == 0 && version < 11000) return 1;
+    if (*result == CUDA_SUCCESS && *pfn != NULL &&
+        (!v2 || status == NULL || *status == CU_GET_PROC_ADDRESS_SUCCESS)) {
+        void *hook = find_symbols_with_flags(symbol, version, flags);
+        if (hook != NULL) *pfn = hook;
+    }
+    return 1;
+}
+
+
+/** Resolve indirect lookups with native graph availability and stream semantics. */
 CUresult _cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ) {
     LOG_INFO("into _cuGetProcAddress symbol=%s:%d",symbol,cudaVersion);
+    CUresult result;
+    if (resolve_graph_proc(symbol, pfn, cudaVersion, flags, NULL, 0, &result)) return result;
+    if (resolve_stream_proc(symbol, pfn, cudaVersion, flags, NULL, 0, &result)) return result;
     *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
     if (*pfn==NULL){
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress,symbol,pfn,cudaVersion,flags);
@@ -375,8 +469,12 @@ CUresult _cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, c
     }
 }
 
+/** Resolve lookups with native graph availability and stream semantics. */
 CUresult cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ) {
     LOG_INFO("into cuGetProcAddress symbol=%s:%d",symbol,cudaVersion);
+    CUresult result;
+    if (resolve_graph_proc(symbol, pfn, cudaVersion, flags, NULL, 0, &result)) return result;
+    if (resolve_stream_proc(symbol, pfn, cudaVersion, flags, NULL, 0, &result)) return result;
     *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
     if (strcmp(symbol,"cuGetProcAddress")==0) {
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress,symbol,pfn,cudaVersion,flags); 
@@ -394,8 +492,12 @@ CUresult cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cu
     }
 }
 
+/** Preserve native graph status during indirect versioned lookups. */
 CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags, CUdriverProcAddressQueryResult *symbolStatus){
     LOG_INFO("into _cuGetProcAddress_v2 symbol=%s:%d",symbol,cudaVersion);
+    CUresult result;
+    if (resolve_graph_proc(symbol, pfn, cudaVersion, flags, symbolStatus, 1, &result)) return result;
+    if (resolve_stream_proc(symbol, pfn, cudaVersion, flags, symbolStatus, 1, &result)) return result;
     *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
     if (*pfn==NULL){
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress_v2,symbol,pfn,cudaVersion,flags,symbolStatus);
@@ -411,8 +513,12 @@ CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, c
     }
 }
 
+/** Preserve native graph status during versioned lookups. */
 CUresult cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags, CUdriverProcAddressQueryResult *symbolStatus){
     LOG_INFO("into cuGetProcAddress_v2 symbol=%s:%d",symbol,cudaVersion);
+    CUresult result;
+    if (resolve_graph_proc(symbol, pfn, cudaVersion, flags, symbolStatus, 1, &result)) return result;
+    if (resolve_stream_proc(symbol, pfn, cudaVersion, flags, symbolStatus, 1, &result)) return result;
     *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
     if (strcmp(symbol,"cuGetProcAddress_v2")==0) {
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress_v2,symbol,pfn,cudaVersion,flags,symbolStatus); 

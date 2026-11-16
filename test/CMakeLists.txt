@@ -102,12 +102,20 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             set_property(TARGET ${TEST_TARGET_NAME} APPEND_STRING PROPERTY
                 LINK_FLAGS " -Wl,--wrap=hostpid_broker_query_trusted,--wrap=hostpid_fallback_lock_acquire_until,--wrap=hostpid_fallback_lock_acquire_shared_until")
         endif()
-    elseif (TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat")
+    elseif (TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat"
+            OR TEST_TARGET_NAME STREQUAL "test_cuda_ptsz_wrappers")
         add_executable(${TEST_TARGET_NAME}
             ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/memory.c
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/allocator/allocator.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        if (TEST_TARGET_NAME STREQUAL "test_cuda_ptsz_wrappers")
+            target_sources(${TEST_TARGET_NAME} PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/graph.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/stream.c)
+        else()
+            target_sources(${TEST_TARGET_NAME} PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/allocator/allocator.c)
+        endif()
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
             _GNU_SOURCE HOOK_MEMINFO_ENABLE)
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
@@ -278,7 +286,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_init"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_concurrency"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker"
-            OR TEST_TARGET_NAME STREQUAL "test_graph_allocation_admission")
+            OR TEST_TARGET_NAME STREQUAL "test_graph_allocation_admission"
+            OR TEST_TARGET_NAME STREQUAL "test_cuda_ptsz_wrappers")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         target_link_libraries(${TEST_TARGET_NAME}
@@ -477,3 +486,6 @@ set_tests_properties(graph_submission_accounting PROPERTIES TIMEOUT 20)
 add_test(NAME graph_allocation_admission COMMAND test_graph_allocation_admission)
 set_tests_properties(graph_allocation_admission PROPERTIES TIMEOUT 15)
 target_link_options(test_graph_allocation_admission PRIVATE "-Wl,--wrap=calloc")
+
+add_test(NAME cuda_ptsz_wrappers COMMAND test_cuda_ptsz_wrappers)
+set_tests_properties(cuda_ptsz_wrappers PROPERTIES TIMEOUT 10)

@@ -820,3 +820,26 @@ CUresult cuDestroyExternalSemaphore(CUexternalSemaphore extSem) {
     LOG_DEBUG("cuDestroyExternalSemaphore");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuDestroyExternalSemaphore,extSem);
 }
+
+/** Allocate asynchronously with per-thread semantics for a NULL stream. */
+CUresult cuMemAllocAsync_ptsz(CUdeviceptr *dptr, size_t bytesize, CUstream stream) {
+    return cuMemAllocAsync(dptr, bytesize, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+
+/** Allocate from a pool with per-thread semantics for a NULL stream. */
+CUresult cuMemAllocFromPoolAsync_ptsz(CUdeviceptr *dptr, size_t bytesize, CUmemoryPool pool, CUstream stream) {
+    return cuMemAllocFromPoolAsync(dptr, bytesize, pool, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+
+/** Free asynchronously with per-thread semantics for a NULL stream. */
+CUresult cuMemFreeAsync_ptsz(CUdeviceptr dptr, CUstream stream) {
+    return cuMemFreeAsync(dptr, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+
+/** Copy asynchronously with per-thread semantics for a NULL stream. */
+CUresult cuMemcpyAsync_ptsz(CUdeviceptr dst, CUdeviceptr src, size_t size, CUstream stream) {
+    return cuMemcpyAsync(dst, src, size, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}

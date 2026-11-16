@@ -416,3 +416,34 @@ CUresult cuDeviceGraphMemTrim(CUdevice device) {
     if (res == CUDA_SUCCESS) graph_pool_trimmed();
     return res;
 }
+
+/** Launch through the accounting hook with per-thread NULL-stream semantics. */
+CUresult cuGraphLaunch_ptsz(CUgraphExec exec, CUstream stream) {
+    return cuGraphLaunch(exec, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+
+/** Upload through the accounting hook with per-thread NULL-stream semantics. */
+CUresult cuGraphUpload_ptsz(CUgraphExec exec, CUstream stream) {
+    return cuGraphUpload(exec, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+
+/** Begin capture with per-thread NULL-stream semantics. */
+CUresult cuStreamBeginCapture_v2_ptsz(CUstream stream, CUstreamCaptureMode mode) {
+    return cuStreamBeginCapture_v2(stream == NULL ? CU_STREAM_PER_THREAD : stream, mode);
+}
+
+
+/** End capture with per-thread NULL-stream semantics. */
+CUresult cuStreamEndCapture_ptsz(CUstream stream, CUgraph *graph) {
+    return cuStreamEndCapture(stream == NULL ? CU_STREAM_PER_THREAD : stream, graph);
+}
+
+
+/** Reserve per-thread upload demand before native parameter-based instantiation. */
+CUresult cuGraphInstantiateWithParams_ptsz(CUgraphExec *exec, CUgraph graph,
+                                          CUDA_GRAPH_INSTANTIATE_PARAMS *params) {
+    return instantiate_with_params((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry,
+        cuGraphInstantiateWithParams_ptsz), exec, graph, params, 1);
+}

@@ -93,6 +93,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuStreamCreate),
     CUDA_OVERRIDE_ENUM(cuStreamDestroy_v2),
     CUDA_OVERRIDE_ENUM(cuStreamSynchronize),
+    CUDA_OVERRIDE_ENUM(cuStreamSynchronize_ptsz),
     /* cuMemory Part */
     CUDA_OVERRIDE_ENUM(cuArray3DCreate_v2),
     CUDA_OVERRIDE_ENUM(cuArrayCreate_v2),
@@ -120,6 +121,8 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuStreamGetCtx),
     CUDA_OVERRIDE_ENUM(cuGreenCtxDestroy),
     CUDA_OVERRIDE_ENUM(cuCtxFromGreenCtx),
+    CUDA_OVERRIDE_ENUM(cuStreamBeginCapture),
+    CUDA_OVERRIDE_ENUM(cuStreamBeginCapture_ptsz),
     CUDA_OVERRIDE_ENUM(cuMemGetInfo_v2),
     CUDA_OVERRIDE_ENUM(cuMemcpy),
     CUDA_OVERRIDE_ENUM(cuPointerGetAttribute),
@@ -130,6 +133,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuIpcOpenMemHandle_v2),
     CUDA_OVERRIDE_ENUM(cuMemGetAddressRange_v2),
     CUDA_OVERRIDE_ENUM(cuMemcpyAsync),
+    CUDA_OVERRIDE_ENUM(cuMemcpyAsync_ptsz),
     CUDA_OVERRIDE_ENUM(cuMemcpyAtoD_v2),
     CUDA_OVERRIDE_ENUM(cuMemcpyDtoA_v2),
     CUDA_OVERRIDE_ENUM(cuMemcpyDtoD_v2),
@@ -182,15 +186,15 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuMemCreate),
     CUDA_OVERRIDE_ENUM(cuMemRelease),
     CUDA_OVERRIDE_ENUM(cuMemMap),
-    CUDA_OVERRIDE_ENUM(cuStreamBeginCapture),
-    CUDA_OVERRIDE_ENUM(cuStreamBeginCapture_ptsz),
     CUDA_OVERRIDE_ENUM(cuStreamBeginCapture_v2),
     CUDA_OVERRIDE_ENUM(cuStreamEndCapture),
     CUDA_OVERRIDE_ENUM(cuMemUnmap),
     CUDA_OVERRIDE_ENUM(cuMemRetainAllocationHandle),
     CUDA_OVERRIDE_ENUM(cuMemImportFromShareableHandle),
     CUDA_OVERRIDE_ENUM(cuMemAllocAsync),
+    CUDA_OVERRIDE_ENUM(cuMemAllocAsync_ptsz),
     CUDA_OVERRIDE_ENUM(cuMemFreeAsync),
+    CUDA_OVERRIDE_ENUM(cuMemFreeAsync_ptsz),
     CUDA_OVERRIDE_ENUM(cuStreamGetCaptureInfo_v2),
     CUDA_OVERRIDE_ENUM(cuStreamGetCaptureInfo_v3),
     CUDA_OVERRIDE_ENUM(cuGraphAddMemAllocNode),
@@ -206,6 +210,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuMemPoolCreate),
     CUDA_OVERRIDE_ENUM(cuMemPoolDestroy),
     CUDA_OVERRIDE_ENUM(cuMemAllocFromPoolAsync),
+    CUDA_OVERRIDE_ENUM(cuMemAllocFromPoolAsync_ptsz),
     CUDA_OVERRIDE_ENUM(cuMemPoolExportToShareableHandle),
     CUDA_OVERRIDE_ENUM(cuMemPoolImportFromShareableHandle),
     CUDA_OVERRIDE_ENUM(cuMemPoolExportPointer),
@@ -280,8 +285,13 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuGraphInstantiate),
     CUDA_OVERRIDE_ENUM(cuGraphInstantiateWithFlags),
     CUDA_OVERRIDE_ENUM(cuGraphInstantiateWithParams),
+    CUDA_OVERRIDE_ENUM(cuGraphInstantiateWithParams_ptsz),
     CUDA_OVERRIDE_ENUM(cuGraphUpload),
+    CUDA_OVERRIDE_ENUM(cuGraphUpload_ptsz),
     CUDA_OVERRIDE_ENUM(cuGraphLaunch),
+    CUDA_OVERRIDE_ENUM(cuGraphLaunch_ptsz),
+    CUDA_OVERRIDE_ENUM(cuStreamBeginCapture_v2_ptsz),
+    CUDA_OVERRIDE_ENUM(cuStreamEndCapture_ptsz),
     CUDA_OVERRIDE_ENUM(cuGraphExecDestroy),
     CUDA_OVERRIDE_ENUM(cuGraphDestroy),
 
@@ -291,6 +301,19 @@ typedef enum {
 }cuda_override_enum_t;
 
 extern cuda_entry_t cuda_library_entry[];
+
+CUresult cuMemAllocAsync_ptsz(CUdeviceptr *dptr, size_t bytesize, CUstream stream);
+CUresult cuMemAllocFromPoolAsync_ptsz(CUdeviceptr *dptr, size_t bytesize, CUmemoryPool pool, CUstream stream);
+CUresult cuMemFreeAsync_ptsz(CUdeviceptr dptr, CUstream stream);
+CUresult cuMemcpyAsync_ptsz(CUdeviceptr dst, CUdeviceptr src, size_t size, CUstream stream);
+CUresult cuStreamSynchronize_ptsz(CUstream stream);
+
+CUresult cuGraphInstantiateWithParams_ptsz(CUgraphExec *exec, CUgraph graph, CUDA_GRAPH_INSTANTIATE_PARAMS *params);
+CUresult cuGraphUpload_ptsz(CUgraphExec exec, CUstream stream);
+CUresult cuGraphLaunch_ptsz(CUgraphExec exec, CUstream stream);
+CUresult cuStreamBeginCapture_v2_ptsz(CUstream stream, CUstreamCaptureMode mode);
+CUresult cuStreamEndCapture_ptsz(CUstream stream, CUgraph *graph);
+
 
 #endif
 
@@ -305,6 +328,11 @@ CUresult cuGetProcAddress( const char* symbol, void** pfn, int  cudaVersion, cuu
 #undef cuGraphInstantiate
 CUresult cuGraphInstantiate(CUgraphExec *phGraphExec, CUgraph hGraph, CUgraphNode *phErrorNode, char *logBuffer, size_t bufferSize);
 
+
+#undef cuStreamBeginCapture
+CUresult cuStreamBeginCapture_v2(CUstream stream, CUstreamCaptureMode mode);
+#undef cuStreamEndCapture
+CUresult cuStreamEndCapture(CUstream stream, CUgraph *graph);
 
 #undef cuStreamBeginCapture
 CUresult cuStreamBeginCapture(CUstream stream);

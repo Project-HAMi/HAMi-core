@@ -134,6 +134,16 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
 
 /** Resolve supported CUDA and NVML hooks by their exported spelling. */
 void* __dlsym_hook_section(void* handle, const char* symbol) {
+    DLSYM_HOOK_FUNC(cuStreamSynchronize_ptsz);
+    DLSYM_HOOK_FUNC(cuMemcpyAsync_ptsz);
+    DLSYM_HOOK_FUNC(cuMemAllocAsync_ptsz);
+    DLSYM_HOOK_FUNC(cuMemFreeAsync_ptsz);
+    DLSYM_HOOK_FUNC(cuMemAllocFromPoolAsync_ptsz);
+    DLSYM_HOOK_FUNC(cuGraphInstantiateWithParams_ptsz);
+    DLSYM_HOOK_FUNC(cuGraphUpload_ptsz);
+    DLSYM_HOOK_FUNC(cuGraphLaunch_ptsz);
+    DLSYM_HOOK_FUNC(cuStreamBeginCapture_v2_ptsz);
+    DLSYM_HOOK_FUNC(cuStreamEndCapture_ptsz);
     int it;
     for (it=0;it<CUDA_ENTRY_END;it++){
         if (strcmp(cuda_library_entry[it].name,symbol) == 0){

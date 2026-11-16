@@ -23,3 +23,8 @@ CUresult cuStreamSynchronize(CUstream hstream){
     if (res == CUDA_SUCCESS) graph_synchronized(NULL, hstream, 0, submitted);
     return res;
 }
+
+/** Synchronize with per-thread semantics for a NULL stream. */
+CUresult cuStreamSynchronize_ptsz(CUstream stream) {
+    return cuStreamSynchronize(stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
