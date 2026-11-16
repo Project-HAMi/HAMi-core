@@ -19,8 +19,11 @@ static size_t used = 256 * MIB;
 static pthread_mutex_t shared = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t gate = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t changed = PTHREAD_COND_INITIALIZER;
-static _Thread_local CUgraph capture;
-static _Thread_local cuuint64_t capture_id;
+static _Thread_local unsigned int current_context = 1;
+static _Thread_local CUgraph capture_graphs[3];
+static _Thread_local cuuint64_t capture_ids[3];
+#define capture capture_graphs[current_context]
+#define capture_id capture_ids[current_context]
 static _Atomic unsigned int serial = 10;
 static CUresult begin_result, end_result, info_result;
 static int keep_capture, ready, finish, allocating, release_allocation, requested, begin_calls;
@@ -77,6 +80,10 @@ static CUresult native_end(CUstream stream, CUgraph *graph) {
     *graph = end_result == CUDA_SUCCESS ? capture : NULL;
     if (!keep_capture) capture = NULL;
     return end_result;
+}
+
+static CUresult native_current(CUcontext *ctx) {
+    *ctx = (CUcontext)(uintptr_t)current_context; return CUDA_SUCCESS;
 }
 
 static CUresult native_destroy(CUgraph graph) { (void)graph; return CUDA_SUCCESS; }
@@ -139,6 +146,29 @@ static void check_thread_identity(void) {
     end_result = CUDA_SUCCESS;
 }
 
+/** Keep independent per-thread captures isolated across contexts on one host thread. */
+static void check_context_identity(void) {
+    current_context = 1;
+    REQUIRE(cuStreamBeginCapture_v2(CU_STREAM_PER_THREAD, CU_STREAM_CAPTURE_MODE_RELAXED) == CUDA_SUCCESS);
+    REQUIRE(graph_record(capture, 0, 100 * MIB, 1, capture_id) == CUDA_SUCCESS);
+    current_context = 2;
+    REQUIRE(cuStreamBeginCapture_v2(CU_STREAM_PER_THREAD, CU_STREAM_CAPTURE_MODE_RELAXED) == CUDA_SUCCESS);
+    REQUIRE(graph_record(capture, 0, 200 * MIB, 2, capture_id) == CUDA_SUCCESS);
+    cuuint64_t id;
+    uint64_t other = graph_capture_token(CU_STREAM_PER_THREAD, &id);
+    current_context = 1;
+    CUgraph graph;
+    end_result = CUDA_ERROR_STREAM_CAPTURE_INVALIDATED;
+    REQUIRE(cuStreamEndCapture_ptsz(NULL, &graph) == end_result);
+    REQUIRE(used == 456 * MIB);
+    current_context = 2;
+    REQUIRE(graph_capture_token(CU_STREAM_PER_THREAD, &id) == other);
+    REQUIRE(cuStreamEndCapture_ptsz(NULL, &graph) == end_result);
+    REQUIRE(used == 256 * MIB);
+    current_context = 1;
+    end_result = CUDA_SUCCESS;
+}
+
 /** Pause an actual allocator call immediately before native allocation. */
 static CUresult native_allocate(CUdeviceptr *ptr, size_t bytes, CUstream stream) {
     (void)bytes; (void)stream;
@@ -196,6 +226,7 @@ static void check_transition_serialization(void) {
 int main(void) {
     device_allocasync = &async_list;
     cuda_library_entry[OVERRIDE_cuStreamGetCaptureInfo_v3].fn_ptr = native_info;
+    cuda_library_entry[OVERRIDE_cuCtxGetCurrent].fn_ptr = native_current;
     cuda_library_entry[OVERRIDE_cuStreamBeginCapture_v2].fn_ptr = native_begin;
     cuda_library_entry[OVERRIDE_cuStreamEndCapture].fn_ptr = native_end;
     cuda_library_entry[OVERRIDE_cuGraphDestroy].fn_ptr = native_destroy;
@@ -207,8 +238,8 @@ int main(void) {
     REQUIRE(cuStreamBeginCapture((CUstream)10) == CUDA_SUCCESS);
     REQUIRE(cuStreamEndCapture((CUstream)10, &graph) == CUDA_SUCCESS);
     REQUIRE(cuStreamBeginCapture_ptsz(NULL) == CUDA_SUCCESS);
-    REQUIRE(cuStreamEndCapture(CU_STREAM_PER_THREAD, &graph) == CUDA_SUCCESS);
-    check_failed_end(); check_thread_identity(); check_transition_serialization();
+    REQUIRE(cuStreamEndCapture_ptsz(NULL, &graph) == CUDA_SUCCESS);
+    check_failed_end(); check_thread_identity(); check_context_identity(); check_transition_serialization();
     puts("PASS: capture identity, terminal errors, and allocation transition ordering");
     return 0;
 }
