@@ -100,6 +100,11 @@ void release_device_memory(CUdevice dev, size_t size);
  * destroyed; memory without one stays allocated, as in the driver, until ptr
  * is freed. A graph that never ran allocated nothing, so its charge is
  * dropped on destroy either way. */
+typedef struct graph_charge_entry graph_charge_entry;
+int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, cuuint64_t capid, int capturing,
+                      graph_charge_entry **out);
+void graph_alloc_end(graph_charge_entry *entry, CUdeviceptr ptr, CUresult result);
+void graph_pool_trimmed(void);
 int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr, cuuint64_t capid);
 void graph_mark_free(CUgraph graph, CUdeviceptr ptr);
 void graph_ptr_freed(CUdeviceptr ptr);

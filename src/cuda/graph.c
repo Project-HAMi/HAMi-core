@@ -351,3 +351,12 @@ CUresult cuGraphDestroy(CUgraph hGraph) {
     }
     return res;
 }
+
+/** Trim supported native graph pools and refresh retained-pool accounting on success. */
+CUresult cuDeviceGraphMemTrim(CUdevice device) {
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuDeviceGraphMemTrim) == NULL)
+        return CUDA_ERROR_NOT_SUPPORTED;
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGraphMemTrim, device);
+    if (res == CUDA_SUCCESS) graph_pool_trimmed();
+    return res;
+}
