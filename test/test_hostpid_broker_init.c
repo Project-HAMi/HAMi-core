@@ -133,6 +133,18 @@ void hostpid_fallback_lock_after_fork(void) {
 void reset_lazy_context_sizing(void) {
 }
 
+static int trusted_admission_calls;
+
+/* Stands in for a host with no broker, whatever runs on this machine. */
+int __wrap_hostpid_broker_acquire_driver_admission_trusted(
+    hostpid_driver_admission_operation_t operation, int *lease_fd) {
+    (void)operation;
+    trusted_admission_calls++;
+    *lease_fd = -1;
+    errno = ENOENT;
+    return -1;
+}
+
 static void reset(const char *gate) {
     if (gate == NULL) {
         check(unsetenv("LIBVGPU_HOSTPID_BROKER") == 0, "unset broker gate");
@@ -265,6 +277,8 @@ int main(void) {
     reset("1");
     check(driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_RETAIN) == -1,
           "admission without a trusted broker falls through");
+    check(trusted_admission_calls == 1,
+          "only the gated call asks the trusted broker");
 
     if (failures != 0) {
         fprintf(stderr, "%d host PID broker init checks failed\n", failures);

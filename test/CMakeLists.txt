@@ -102,6 +102,11 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             set_property(TARGET ${TEST_TARGET_NAME} APPEND_STRING PROPERTY
                 LINK_FLAGS " -Wl,--wrap=hostpid_broker_query_trusted,--wrap=hostpid_fallback_lock_acquire_until,--wrap=hostpid_fallback_lock_acquire_shared_until")
         endif()
+        if (TEST_TARGET_NAME STREQUAL "test_hostpid_broker_init")
+            # A broker on the host must not answer the missing broker check.
+            set_property(TARGET ${TEST_TARGET_NAME} APPEND_STRING PROPERTY
+                LINK_FLAGS " -Wl,--wrap=hostpid_broker_acquire_driver_admission_trusted")
+        endif()
     elseif (TEST_TARGET_NAME STREQUAL "test_driver_admission_cancel")
         # Links the production cuInit and primary context hooks and the
         # broker client with its own driver table, so it needs no GPU.
