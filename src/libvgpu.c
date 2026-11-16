@@ -131,7 +131,7 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
 }
 #endif
 
-/** Return the HAMi hook matching the requested symbol, when available. */
+/** Return the registered CUDA hook for a requested symbol. */
 void* __dlsym_hook_section(void* handle, const char* symbol) {
     int it;
     for (it=0;it<CUDA_ENTRY_END;it++){
@@ -370,8 +370,15 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuGraphInstantiate);
     DLSYM_HOOK_FUNC(cuGraphInstantiateWithFlags);
     DLSYM_HOOK_FUNC(cuGraphInstantiateWithParams);
+    DLSYM_HOOK_FUNC(cuGraphInstantiateWithParams_ptsz);
     DLSYM_HOOK_FUNC(cuGraphUpload);
+    DLSYM_HOOK_FUNC(cuGraphUpload_ptsz);
     DLSYM_HOOK_FUNC(cuGraphLaunch);
+    DLSYM_HOOK_FUNC(cuGraphLaunch_ptsz);
+    DLSYM_HOOK_FUNC(cuStreamBeginCapture_v2);
+    DLSYM_HOOK_FUNC(cuStreamBeginCapture_v2_ptsz);
+    DLSYM_HOOK_FUNC(cuStreamEndCapture);
+    DLSYM_HOOK_FUNC(cuStreamEndCapture_ptsz);
     DLSYM_HOOK_FUNC(cuGraphExecDestroy);
     DLSYM_HOOK_FUNC(cuGraphDestroy);
 #ifdef HOOK_MEMINFO_ENABLE

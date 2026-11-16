@@ -268,8 +268,15 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuGraphInstantiate),
     CUDA_OVERRIDE_ENUM(cuGraphInstantiateWithFlags),
     CUDA_OVERRIDE_ENUM(cuGraphInstantiateWithParams),
+    CUDA_OVERRIDE_ENUM(cuGraphInstantiateWithParams_ptsz),
     CUDA_OVERRIDE_ENUM(cuGraphUpload),
+    CUDA_OVERRIDE_ENUM(cuGraphUpload_ptsz),
     CUDA_OVERRIDE_ENUM(cuGraphLaunch),
+    CUDA_OVERRIDE_ENUM(cuGraphLaunch_ptsz),
+    CUDA_OVERRIDE_ENUM(cuStreamBeginCapture_v2),
+    CUDA_OVERRIDE_ENUM(cuStreamBeginCapture_v2_ptsz),
+    CUDA_OVERRIDE_ENUM(cuStreamEndCapture),
+    CUDA_OVERRIDE_ENUM(cuStreamEndCapture_ptsz),
     CUDA_OVERRIDE_ENUM(cuGraphExecDestroy),
     CUDA_OVERRIDE_ENUM(cuGraphDestroy),
 
@@ -285,6 +292,13 @@ CUresult cuMemAllocFromPoolAsync_ptsz(CUdeviceptr *dptr, size_t bytesize, CUmemo
 CUresult cuMemFreeAsync_ptsz(CUdeviceptr dptr, CUstream stream);
 CUresult cuStreamSynchronize_ptsz(CUstream stream);
 
+CUresult cuGraphInstantiateWithParams_ptsz(CUgraphExec *exec, CUgraph graph, CUDA_GRAPH_INSTANTIATE_PARAMS *params);
+CUresult cuGraphUpload_ptsz(CUgraphExec exec, CUstream stream);
+CUresult cuGraphLaunch_ptsz(CUgraphExec exec, CUstream stream);
+CUresult cuStreamBeginCapture_v2_ptsz(CUstream stream, CUstreamCaptureMode mode);
+CUresult cuStreamEndCapture_ptsz(CUstream stream, CUgraph *graph);
+
+
 #endif
 
 #undef cuGetProcAddress
@@ -292,3 +306,8 @@ CUresult cuGetProcAddress( const char* symbol, void** pfn, int  cudaVersion, cuu
 #undef cuGraphInstantiate
 CUresult cuGraphInstantiate(CUgraphExec *phGraphExec, CUgraph hGraph, CUgraphNode *phErrorNode, char *logBuffer, size_t bufferSize);
 
+
+#undef cuStreamBeginCapture
+CUresult cuStreamBeginCapture_v2(CUstream stream, CUstreamCaptureMode mode);
+#undef cuStreamEndCapture
+CUresult cuStreamEndCapture(CUstream stream, CUgraph *graph);

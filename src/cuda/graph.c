@@ -283,6 +283,14 @@ CUresult cuGraphInstantiateWithParams(CUgraphExec *phGraphExec, CUgraph hGraph,
     return track_exec(res, hGraph, phGraphExec);
 }
 
+/** Preserve per-thread upload semantics while tracking the instantiated graph. */
+CUresult cuGraphInstantiateWithParams_ptsz(CUgraphExec *exec, CUgraph graph,
+                                           CUDA_GRAPH_INSTANTIATE_PARAMS *params) {
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphInstantiateWithParams_ptsz,
+                                      exec, graph, params);
+    return track_exec(res, graph, exec);
+}
+
 CUresult cuGraphUpload(CUgraphExec hGraphExec, CUstream hStream) {
 	LOG_DEBUG("cuGraphUpload");
 	return CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphUpload,hGraphExec,hStream);
@@ -291,6 +299,36 @@ CUresult cuGraphUpload(CUgraphExec hGraphExec, CUstream hStream) {
 CUresult cuGraphLaunch(CUgraphExec hGraphExec, CUstream hStream) {
 	LOG_DEBUG("cuGraphLaunch");
 	return CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphLaunch,hGraphExec,hStream);
+}
+
+/** Upload through the accounting hook with per-thread NULL-stream semantics. */
+CUresult cuGraphUpload_ptsz(CUgraphExec exec, CUstream stream) {
+    return cuGraphUpload(exec, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Launch through the accounting hook with per-thread NULL-stream semantics. */
+CUresult cuGraphLaunch_ptsz(CUgraphExec exec, CUstream stream) {
+    return cuGraphLaunch(exec, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Forward capture begin with its version-two ABI. */
+CUresult cuStreamBeginCapture_v2(CUstream stream, CUstreamCaptureMode mode) {
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamBeginCapture_v2, stream, mode);
+}
+
+/** Begin capture with per-thread NULL-stream semantics. */
+CUresult cuStreamBeginCapture_v2_ptsz(CUstream stream, CUstreamCaptureMode mode) {
+    return cuStreamBeginCapture_v2(stream == NULL ? CU_STREAM_PER_THREAD : stream, mode);
+}
+
+/** Forward capture end without changing its native result. */
+CUresult cuStreamEndCapture(CUstream stream, CUgraph *graph) {
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamEndCapture, stream, graph);
+}
+
+/** End capture with per-thread NULL-stream semantics. */
+CUresult cuStreamEndCapture_ptsz(CUstream stream, CUgraph *graph) {
+    return cuStreamEndCapture(stream == NULL ? CU_STREAM_PER_THREAD : stream, graph);
 }
 
 CUresult cuGraphExecDestroy(CUgraphExec hGraphExec) {
