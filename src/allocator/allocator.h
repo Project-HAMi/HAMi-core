@@ -94,10 +94,11 @@ int oom_check(const int dev,size_t addon);
 int reserve_device_memory(CUdevice dev, size_t size);
 void release_device_memory(CUdevice dev, size_t size);
 
-/* Reserve graph allocation bookkeeping and quota before native mutation. */
+/* Reserve explicit allocation-node bookkeeping and quota before native mutation. */
 typedef struct graph_charge_entry graph_charge_entry;
 int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, graph_charge_entry **out);
 void graph_alloc_end(graph_charge_entry *entry, CUdeviceptr ptr, CUresult result);
+int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr);
 void graph_mark_free(CUgraph graph, CUdeviceptr ptr);
 void graph_ptr_freed(CUdeviceptr ptr);
 void graph_ptr_freed_async(CUdeviceptr ptr, CUstream hStream);

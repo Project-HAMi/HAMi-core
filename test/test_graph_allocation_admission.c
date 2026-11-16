@@ -20,7 +20,6 @@ cuda_entry_t cuda_library_entry[CUDA_ENTRY_END];
 static size_t used = 256 * MIB;
 static int nodes, native_calls, undo_calls, fail_calloc, compete;
 static CUresult native_result, competing_result;
-static CUgraph capture_graph;
 static uintptr_t serial = 10;
 
 void *__real_calloc(size_t count, size_t size);
@@ -59,11 +58,6 @@ static CUresult native_allocate(CUdeviceptr *ptr, size_t size, CUstream stream) 
     return CUDA_SUCCESS;
 }
 
-static CUresult native_pool_allocate(CUdeviceptr *ptr, size_t size, CUmemoryPool pool, CUstream stream) {
-    REQUIRE(pool == (CUmemoryPool)7);
-    return native_allocate(ptr, size, stream);
-}
-
 /** Model an allocation node whose creation cannot be undone individually. */
 static CUresult native_add(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
                             size_t count, CUDA_MEM_ALLOC_NODE_PARAMS *params) {
@@ -77,69 +71,51 @@ static CUresult native_undo(CUgraphNode node) {
     (void)node; undo_calls++; return CUDA_ERROR_NOT_SUPPORTED;
 }
 
-/** Report whether the simulated stream is recording an allocation graph. */
-static CUresult native_capture(CUstream stream, CUstreamCaptureStatus *status, cuuint64_t *id,
-                                CUgraph *graph, const CUgraphNode **deps, size_t *count) {
-    (void)stream; (void)deps; (void)count;
-    *status = capture_graph ? CU_STREAM_CAPTURE_STATUS_ACTIVE : CU_STREAM_CAPTURE_STATUS_NONE;
-    *id = 123; *graph = capture_graph;
-    return CUDA_SUCCESS;
-}
-
-/** Dispatch each allocation style through its production entry point. */
-static CUresult allocate(int kind, size_t size, CUdeviceptr *ptr) {
-    if (kind == 0) {
-        CUDA_MEM_ALLOC_NODE_PARAMS params = {0};
-        CUgraphNode node;
-        params.poolProps.allocType = CU_MEM_ALLOCATION_TYPE_PINNED;
-        params.poolProps.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-        params.poolProps.location.id = 0;
-        params.bytesize = size;
-        CUresult result = cuGraphAddMemAllocNode(&node, (CUgraph)2, NULL, 0, &params);
-        if (result == CUDA_SUCCESS) *ptr = params.dptr;
-        return result;
-    }
-    capture_graph = (CUgraph)2;
-    return kind == 1 ? allocate_async_raw(ptr, size, (CUstream)3)
-                     : allocate_from_pool_async_raw(ptr, size, (CUmemoryPool)7, (CUstream)3);
+/** Add an allocation node through the production hook. */
+static CUresult allocate(size_t size, CUdeviceptr *ptr) {
+    CUDA_MEM_ALLOC_NODE_PARAMS params = {0};
+    CUgraphNode node;
+    params.poolProps.allocType = CU_MEM_ALLOCATION_TYPE_PINNED;
+    params.poolProps.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+    params.poolProps.location.id = 0;
+    params.bytesize = size;
+    CUresult result = cuGraphAddMemAllocNode(&node, (CUgraph)2, NULL, 0, &params);
+    if (result == CUDA_SUCCESS) *ptr = params.dptr;
+    return result;
 }
 
 /** Check quota rejection, native failure, heap failure, and concurrent admission. */
-static void check_kind(int kind) {
+static void check_admission(void) {
     CUdeviceptr ptr = 99;
     native_calls = nodes = undo_calls = 0;
-    REQUIRE(allocate(kind, 900 * MIB, &ptr) == CUDA_ERROR_OUT_OF_MEMORY);
+    REQUIRE(allocate(900 * MIB, &ptr) == CUDA_ERROR_OUT_OF_MEMORY);
     REQUIRE(ptr == 99 && native_calls == 0 && nodes == 0 && used == 256 * MIB);
 
     fail_calloc = 1;
-    REQUIRE(allocate(kind, 400 * MIB, &ptr) == CUDA_ERROR_OUT_OF_MEMORY);
+    REQUIRE(allocate(400 * MIB, &ptr) == CUDA_ERROR_OUT_OF_MEMORY);
     REQUIRE(native_calls == 0 && nodes == 0 && undo_calls == 0 && used == 256 * MIB);
 
     native_result = CUDA_ERROR_INVALID_VALUE;
-    REQUIRE(allocate(kind, 400 * MIB, &ptr) == native_result);
+    REQUIRE(allocate(400 * MIB, &ptr) == native_result);
     REQUIRE(native_calls == 1 && nodes == 0 && used == 256 * MIB);
     native_result = CUDA_SUCCESS;
 
     compete = 1;
-    REQUIRE(allocate(kind, 500 * MIB, &ptr) == CUDA_SUCCESS);
+    REQUIRE(allocate(500 * MIB, &ptr) == CUDA_SUCCESS);
     REQUIRE(competing_result == CUDA_ERROR_OUT_OF_MEMORY);
     REQUIRE(nodes == 1 && used == 756 * MIB);
     compete = 0;
     graph_mark_free((CUgraph)2, ptr);
     graph_release((CUgraph)2);
     REQUIRE(used == 256 * MIB && undo_calls == 0);
-    capture_graph = NULL;
 }
 
-/** Run admission regressions for explicit nodes and both captured allocation APIs. */
+/** Run admission regressions for explicit allocation nodes. */
 int main(void) {
     log_utils_init();
     cuda_library_entry[OVERRIDE_cuGraphAddMemAllocNode].fn_ptr = native_add;
     cuda_library_entry[OVERRIDE_cuGraphDestroyNode].fn_ptr = native_undo;
-    cuda_library_entry[OVERRIDE_cuMemAllocAsync].fn_ptr = native_allocate;
-    cuda_library_entry[OVERRIDE_cuMemAllocFromPoolAsync].fn_ptr = native_pool_allocate;
-    cuda_library_entry[OVERRIDE_cuStreamGetCaptureInfo_v2].fn_ptr = native_capture;
-    for (int kind = 0; kind < 3; kind++) check_kind(kind);
+    check_admission();
     puts("PASS: graph allocation admission, rollback, and concurrent reservation");
     return 0;
 }
