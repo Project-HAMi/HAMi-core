@@ -184,6 +184,8 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuMemCreate),
     CUDA_OVERRIDE_ENUM(cuMemRelease),
     CUDA_OVERRIDE_ENUM(cuMemMap),
+    CUDA_OVERRIDE_ENUM(cuStreamBeginCapture),
+    CUDA_OVERRIDE_ENUM(cuStreamBeginCapture_ptsz),
     CUDA_OVERRIDE_ENUM(cuStreamBeginCapture_v2),
     CUDA_OVERRIDE_ENUM(cuStreamEndCapture),
     CUDA_OVERRIDE_ENUM(cuMemUnmap),
@@ -347,3 +349,6 @@ CUresult cuMemsetD2D32Async_ptsz(CUdeviceptr ptr, size_t pitch, unsigned int val
 CUresult cuLaunchKernel_ptsz(CUfunction function, unsigned int gx, unsigned int gy, unsigned int gz,
                               unsigned int bx, unsigned int by, unsigned int bz, unsigned int shared,
                               CUstream stream, void **params, void **extra);
+
+CUresult cuStreamBeginCapture(CUstream stream);
+CUresult cuStreamBeginCapture_ptsz(CUstream stream);

@@ -15,6 +15,7 @@
 } while (0)
 
 cuda_entry_t cuda_library_entry[CUDA_ENTRY_END];
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static CUresult native_result;
 static CUstream seen_stream;
 static int calls, completions, legacy_calls, checks;
@@ -63,13 +64,18 @@ void graph_exec_launched(CUgraphExec exec) {
     REQUIRE(exec == (CUgraphExec)9); launches++;
 }
 
-void graph_capture_begin(CUstream stream) {
-    REQUIRE(stream == expected_stream); capture_starts++;
+int graph_capture_prepare(CUstream stream, CUstreamCaptureMode mode, uint64_t *token) {
+    (void)mode; REQUIRE(stream == expected_stream); *token = 123; return 0;
 }
-
-/** Return the capture associated with the normalized stream. */
-cuuint64_t graph_capture_id(CUstream stream, int take) {
-    REQUIRE(stream == expected_stream && take == 1); return 123;
+void graph_capture_started(uint64_t token, CUresult result) {
+    REQUIRE(token == 123); capture_starts += result == CUDA_SUCCESS;
+}
+uint64_t graph_capture_token(CUstream stream, cuuint64_t *id) {
+    REQUIRE(stream == expected_stream); *id = 123; return 123;
+}
+void graph_capture_finish(uint64_t token) { REQUIRE(token == 123); }
+CUresult graph_capture_info(CUstream stream, CUstreamCaptureStatus *cap, cuuint64_t *id, CUgraph *graph) {
+    (void)stream; *cap = CU_STREAM_CAPTURE_STATUS_NONE; *id = 0; *graph = NULL; return CUDA_SUCCESS;
 }
 
 /** Complete capture tracking with the native result. */

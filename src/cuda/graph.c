@@ -312,21 +312,54 @@ CUresult cuGraphLaunch(CUgraphExec hGraphExec, CUstream hStream) {
     return res;
 }
 
-CUresult cuStreamBeginCapture_v2(CUstream hStream, CUstreamCaptureMode mode) {
-    LOG_DEBUG("cuStreamBeginCapture_v2");
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamBeginCapture_v2, hStream, mode);
-    if (res == CUDA_SUCCESS) graph_capture_begin(hStream);
+/** Preserve the original one-argument capture ABI while protecting allocation admission. */
+CUresult cuStreamBeginCapture(CUstream stream) {
+    uint64_t token;
+    pthread_mutex_lock(&mutex);
+    CUresult res = graph_capture_prepare(stream, CU_STREAM_CAPTURE_MODE_GLOBAL, &token);
+    if (res == CUDA_SUCCESS) {
+        res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamBeginCapture, stream);
+        graph_capture_started(token, res);
+    }
+    pthread_mutex_unlock(&mutex);
     return res;
 }
 
-CUresult cuStreamEndCapture(CUstream hStream, CUgraph *phGraph) {
-    LOG_DEBUG("cuStreamEndCapture");
-    /* Even a refused end (wrong thread) terminates the capture, so the
-     * association always ends here. */
-    cuuint64_t id = graph_capture_id(hStream, 1);
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamEndCapture, hStream, phGraph);
-    /* The graph is NULL when the capture failed. */
-    graph_capture_end(id, res == CUDA_SUCCESS && phGraph != NULL ? *phGraph : NULL);
+/** Begin an original-ABI capture with per-thread default-stream semantics. */
+CUresult cuStreamBeginCapture_ptsz(CUstream stream) {
+    return cuStreamBeginCapture(stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Serialize capture entry with asynchronous allocation admission. */
+CUresult cuStreamBeginCapture_v2(CUstream stream, CUstreamCaptureMode mode) {
+    uint64_t token;
+    pthread_mutex_lock(&mutex);
+    CUresult res = graph_capture_prepare(stream, mode, &token);
+    if (res == CUDA_SUCCESS) {
+        res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamBeginCapture_v2, stream, mode);
+        graph_capture_started(token, res);
+    }
+    pthread_mutex_unlock(&mutex);
+    return res;
+}
+
+/** Keep capture identity and charges until native capture termination. */
+CUresult cuStreamEndCapture(CUstream stream, CUgraph *graph) {
+    pthread_mutex_lock(&mutex);
+    cuuint64_t id;
+    uint64_t token = graph_capture_token(stream, &id);
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamEndCapture, stream, graph);
+    CUstreamCaptureStatus cap;
+    cuuint64_t current_id;
+    CUgraph current_graph;
+    int ended = res == CUDA_SUCCESS || res == CUDA_ERROR_STREAM_CAPTURE_INVALIDATED;
+    if (!ended && graph_capture_info(stream, &cap, &current_id, &current_graph) == CUDA_SUCCESS)
+        ended = cap == CU_STREAM_CAPTURE_STATUS_NONE || (id != 0 && current_id != 0 && id != current_id);
+    if (ended) {
+        graph_capture_finish(token);
+        graph_capture_end(id, res == CUDA_SUCCESS && graph != NULL ? *graph : NULL);
+    }
+    pthread_mutex_unlock(&mutex);
     return res;
 }
 
