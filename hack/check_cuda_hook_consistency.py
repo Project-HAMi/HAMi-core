@@ -19,8 +19,8 @@ WRAPPER_GLOB = "src/cuda/*.c"
 # Symbols intentionally excluded from specific checks.
 # cuStreamGetCaptureInfo_v2/_v3 are only called internally. Hooking them would
 # hand one signature to callers that resolve cuStreamGetCaptureInfo.
-OPTIONAL_DLSYM_SYMBOLS = {"cuGetExportTable", "cuStreamGetCaptureInfo_v2", "cuStreamGetCaptureInfo_v3", "cuDeviceGetGraphMemAttribute"}
-OPTIONAL_WRAPPER_SYMBOLS = {"cuGetExportTable", "cuStreamGetCaptureInfo_v2", "cuStreamGetCaptureInfo_v3", "cuDeviceGetGraphMemAttribute"}
+OPTIONAL_DLSYM_SYMBOLS = {"cuCtxFromGreenCtx", "cuEventCreate", "cuEventRecord", "cuEventQuery", "cuStreamGetId", "cuStreamGetCtx", "cuGetExportTable", "cuStreamGetCaptureInfo_v2", "cuStreamGetCaptureInfo_v3", "cuDeviceGetGraphMemAttribute", "cuCtxGetId"}
+OPTIONAL_WRAPPER_SYMBOLS = {"cuCtxFromGreenCtx", "cuEventCreate", "cuEventRecord", "cuEventQuery", "cuStreamGetId", "cuStreamGetCtx", "cuGetExportTable", "cuStreamGetCaptureInfo_v2", "cuStreamGetCaptureInfo_v3", "cuDeviceGetGraphMemAttribute", "cuCtxGetId"}
 
 
 def strip_c_comments(content: str) -> str:

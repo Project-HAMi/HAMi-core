@@ -104,15 +104,27 @@ typedef struct graph_charge_entry graph_charge_entry;
 int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, cuuint64_t capid, int capturing,
                       graph_charge_entry **out);
 void graph_alloc_end(graph_charge_entry *entry, CUdeviceptr ptr, CUresult result);
-void graph_pool_trimmed(void);
-int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr, cuuint64_t capid);
 void graph_mark_free(CUgraph graph, CUdeviceptr ptr);
 void graph_ptr_freed(CUdeviceptr ptr);
 void graph_ptr_freed_async(CUdeviceptr ptr, CUstream hStream);
 void graph_release(CUgraph graph);
-int graph_exec_created(CUgraph graph, CUgraphExec exec);
+typedef struct graph_exec_state graph_exec_state;
+int graph_exec_prepare(CUgraph graph, graph_exec_state **out);
+void graph_exec_commit(graph_exec_state *state, CUgraphExec exec);
+void graph_exec_discard(graph_exec_state *state);
 void graph_exec_destroyed(CUgraphExec exec);
-void graph_exec_launched(CUgraphExec exec);
+int graph_exec_reserve(graph_exec_state *state, CUstream stream);
+int graph_exec_begin(CUgraphExec exec, CUstream stream, graph_exec_state **out);
+void graph_exec_end(graph_exec_state *state, CUstream stream, CUresult result);
+cuuint64_t graph_context_id(CUcontext ctx);
+void graph_context_destroyed(CUcontext ctx, cuuint64_t id);
+void graph_primary_context(CUdevice dev, CUcontext ctx);
+void graph_primary_context_released(CUdevice dev, int reset);
+void graph_stream_destroyed(CUstream stream);
+uint64_t graph_sync_begin(void);
+void graph_synchronized(CUcontext ctx, CUstream stream, int whole_context,
+                        uint64_t submitted);
+void graph_pool_trimmed(void);
 CUresult graph_capture_info(CUstream hStream, CUstreamCaptureStatus *cap, cuuint64_t *id, CUgraph *graph);
 int graph_capture_prepare(CUstream stream, CUstreamCaptureMode mode, uint64_t *token);
 void graph_capture_started(uint64_t token, CUresult result);
@@ -120,6 +132,8 @@ uint64_t graph_capture_token(CUstream stream, cuuint64_t *id);
 void graph_capture_finish(uint64_t token);
 cuuint64_t graph_capture_id_of(CUgraph graph);
 void graph_capture_end(cuuint64_t capid, CUgraph graph);
+
+int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr, cuuint64_t capid);
 
 // Allocate and free device memory
 int allocate_raw(CUdeviceptr *dptr, size_t size);
