@@ -354,6 +354,11 @@ CUresult cuStreamEndCapture(CUstream stream, CUgraph *graph) {
     return res;
 }
 
+/** End a per-thread capture through the tracked termination path. */
+CUresult cuStreamEndCapture_ptsz(CUstream stream, CUgraph *graph) {
+    return cuStreamEndCapture(stream == NULL ? CU_STREAM_PER_THREAD : stream, graph);
+}
+
 CUresult cuGraphExecDestroy(CUgraphExec hGraphExec) {
 	LOG_DEBUG("cuGraphExecDestroy");
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecDestroy, hGraphExec);
