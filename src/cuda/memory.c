@@ -1089,8 +1089,11 @@ CUresult cuMemsetD2D32_v2_ptds(CUdeviceptr ptr, size_t pitch, unsigned int value
 
 /** Copy the launch configuration while retaining the existing compute limiter. */
 CUresult cuLaunchKernelEx_ptsz(const CUlaunchConfig *config, CUfunction function, void **params, void **extra) {
-    if (config == NULL)
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuLaunchKernelEx) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    if (config == NULL) {
+        if (CUDA_FIND_ENTRY(cuda_library_entry, cuLaunchKernelEx_ptsz) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
         return CUDA_OVERRIDE_CALL(cuda_library_entry, cuLaunchKernelEx_ptsz, config, function, params, extra);
+    }
     CUlaunchConfig copy = *config;
     if (copy.hStream == NULL) copy.hStream = CU_STREAM_PER_THREAD;
     return cuLaunchKernelEx(&copy, function, params, extra);
