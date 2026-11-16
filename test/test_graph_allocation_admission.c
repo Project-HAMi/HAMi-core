@@ -207,6 +207,9 @@ int main(void) {
     CUgraphNodeParams empty = {0}; empty.type = CU_GRAPH_NODE_TYPE_EMPTY;
     REQUIRE(cuGraphAddNode_v2(&node, (CUgraph)2, NULL, NULL, 0, &empty) == CUDA_SUCCESS);
     REQUIRE(used == 256 * MIB);
+    cuda_library_entry[OVERRIDE_cuGraphAddNode_v2].fn_ptr = NULL;
+    REQUIRE(cuGraphAddNode_v2(&node, (CUgraph)2, NULL, NULL, 0, &empty) == CUDA_ERROR_NOT_SUPPORTED);
+    cuda_library_entry[OVERRIDE_cuGraphAddNode_v2].fn_ptr = native_generic_v2;
     CUdeviceptr ptr;
     CUgraph graph;
     REQUIRE(cuStreamBeginCapture_v2((CUstream)3, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);

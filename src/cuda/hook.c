@@ -260,6 +260,7 @@ int prior_function(char tmp[500]) {
     return 0;
 }
 
+/** Load native entries without falling back across incompatible generic-node ABIs. */
 void load_cuda_libraries() {
     void *table = NULL;
     int i = 0;
@@ -280,6 +281,7 @@ void load_cuda_libraries() {
             cuda_library_entry[i].fn_ptr=real_dlsym(RTLD_NEXT,cuda_library_entry[i].name);
             if (!cuda_library_entry[i].fn_ptr){
                 LOG_INFO("can't find function %s in %s", cuda_library_entry[i].name,cuda_filename);
+                if (i == OVERRIDE_cuGraphAddNode_v2) continue;
                 snprintf(tmpfunc, sizeof(tmpfunc), "%s", cuda_library_entry[i].name);
                 while (prior_function(tmpfunc)) {
                     cuda_library_entry[i].fn_ptr=real_dlsym(RTLD_NEXT,tmpfunc);
@@ -364,6 +366,8 @@ static int resolve_graph_add_proc(const char *symbol, void **pfn, int version, c
     *result = v2
         ? CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress_v2, symbol, pfn, version, flags, status)
         : CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress, symbol, pfn, version, flags);
+    /* Preserve newer node semantics until their versions are supported. */
+    if (strcmp(symbol, "cuGraphAddNode") == 0 && version > 13030) return 1;
     if (*result == CUDA_SUCCESS && *pfn != NULL &&
         (!v2 || status == NULL || *status == CU_GET_PROC_ADDRESS_SUCCESS)) {
         const char *name = current || version >= 12030 ? "cuGraphAddNode_v2" : "cuGraphAddNode";
