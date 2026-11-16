@@ -51,8 +51,9 @@ int main(void) {
         CHECK(cuGraphDestroy(g));
     }
 
-    // Capture allocations are charged to the graph: with a 1 GiB limit, two
-    // live 768 MiB captures (each with a free node) cannot coexist, and destroying one frees room.
+    // Capture allocations are charged to the graph, and graphs share the
+    // device graph pool (#395): two live 768 MiB captures with free nodes cost
+    // 768 MiB, while two allocations in one capture cost both.
     CUdeviceptr p;
     CUgraph g1, g2;
     CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_RELAXED));
@@ -60,15 +61,19 @@ int main(void) {
     CHECK(cuMemFreeAsync(p, s));
     CHECK(cuStreamEndCapture(s, &g1));
     CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_RELAXED));
-    if (cuMemAllocAsync(&p, 768ull << 20, s) != CUDA_ERROR_OUT_OF_MEMORY) {
-        fprintf(stderr, "FAIL: second 768 MiB capture alloc not rejected\n");
-        return 1;
-    }
-    cuStreamEndCapture(s, &g2);
-    CHECK(cuGraphDestroy(g1));
-    CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_RELAXED));
     CHECK(cuMemAllocAsync(&p, 768ull << 20, s));
     CHECK(cuMemFreeAsync(p, s));
+    CHECK(cuStreamEndCapture(s, &g2));
+    CHECK(cuGraphDestroy(g1));
+    CHECK(cuGraphDestroy(g2));
+
+    CUdeviceptr p2;
+    CHECK(cuStreamBeginCapture(s, CU_STREAM_CAPTURE_MODE_RELAXED));
+    CHECK(cuMemAllocAsync(&p, 500ull << 20, s));
+    if (cuMemAllocAsync(&p2, 500ull << 20, s) != CUDA_ERROR_OUT_OF_MEMORY) {
+        fprintf(stderr, "FAIL: second 500 MiB alloc in one capture not rejected\n");
+        return 1;
+    }
     CHECK(cuStreamEndCapture(s, &g2));
     CHECK(cuGraphDestroy(g2));
 
