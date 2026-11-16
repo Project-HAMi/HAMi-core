@@ -155,6 +155,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuStreamBeginCapture_ptsz"},
     {.name = "cuStreamBeginCapture_v2"},
     {.name = "cuStreamEndCapture"},
+    {.name = "cuStreamEndCapture_ptsz"},
     {.name = "cuMemUnmap"},
     {.name = "cuMemRetainAllocationHandle"},
     {.name = "cuMemImportFromShareableHandle"},
@@ -258,7 +259,6 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuGraphLaunch"},
     {.name = "cuGraphLaunch_ptsz"},
     {.name = "cuStreamBeginCapture_v2_ptsz"},
-    {.name = "cuStreamEndCapture_ptsz"},
     {.name = "cuGraphExecDestroy"},
     {.name = "cuGraphDestroy"},
 
