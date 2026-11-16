@@ -367,7 +367,11 @@ void *find_symbols_in_table_by_cudaversion(const char *symbol,int  cudaVersion) 
 
 /** Select graph and capture hooks according to CUDA version and stream flags. */
 static void *find_symbols_with_flags(const char *symbol, int cudaVersion, cuuint64_t flags) {
-    if (strcmp(symbol, "cuStreamBeginCapture") == 0 && cudaVersion < 10010) return NULL;
+    if (strcmp(symbol, "cuStreamBeginCapture") == 0 && cudaVersion < 10010) {
+        const char *name = flags & CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM
+            ? "cuStreamBeginCapture_ptsz" : "cuStreamBeginCapture";
+        return __dlsym_hook_section(NULL, name);
+    }
     if (flags & CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM) {
         if (strcmp(symbol, "cuGraphLaunch") == 0)
             return __dlsym_hook_section(NULL, "cuGraphLaunch_ptsz");
@@ -416,6 +420,7 @@ static int resolve_graph_proc(const char *symbol, void **pfn, int version, cuuin
                               CUdriverProcAddressQueryResult *status, int v2, CUresult *result) {
     if (strncmp(symbol, "cuGraph", 7) != 0 && strcmp(symbol, "cuStreamBeginCapture") != 0 &&
         strcmp(symbol, "cuStreamEndCapture") != 0 &&
+        strcmp(symbol, "cuStreamBeginCapture_ptsz") != 0 &&
         strcmp(symbol, "cuStreamBeginCapture_v2") != 0 &&
         strcmp(symbol, "cuStreamBeginCapture_v2_ptsz") != 0 &&
         strcmp(symbol, "cuStreamEndCapture_ptsz") != 0) return 0;

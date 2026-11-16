@@ -198,6 +198,22 @@ static int check_graph_lookup_failures(void) {
         puts("FAIL CUDA 10.0 capture ABI passthrough");
         return 1;
     }
+    g_present[0] = "cuStreamBeginCapture";
+    g_present[1] = "cuStreamBeginCapture_ptsz";
+    for (int pt = 0; pt < 2; pt++) for (int entry = 0; entry < 4; entry++) {
+        const char *expected = g_present[pt];
+        CUdriverProcAddressQueryResult status = STATUS_POISON;
+        cuuint64_t flags = pt ? CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM : CU_GET_PROC_ADDRESS_LEGACY_STREAM;
+        if (entry == 0) result = cuGetProcAddress("cuStreamBeginCapture", &pfn, 10000, flags);
+        else if (entry == 1) result = _cuGetProcAddress("cuStreamBeginCapture", &pfn, 10000, flags);
+        else if (entry == 2) result = cuGetProcAddress_v2("cuStreamBeginCapture", &pfn, 10000, flags, &status);
+        else result = _cuGetProcAddress_v2("cuStreamBeginCapture", &pfn, 10000, flags, &status);
+        if (result != CUDA_SUCCESS || pfn != (void *)expected ||
+            (entry >= 2 && status != CU_GET_PROC_ADDRESS_SUCCESS)) {
+            puts("FAIL CUDA 10.0 capture ABI selection");
+            return 1;
+        }
+    }
     puts("ok   graph lookup failures preserve native results and pointers");
     return 0;
 }
