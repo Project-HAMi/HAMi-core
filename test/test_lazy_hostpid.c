@@ -3,7 +3,9 @@
 // lock and creates primary contexts, which serialized hundreds of short lived
 // children that only initialize the driver (#382). It runs on first GPU use.
 // Run under LD_PRELOAD=libvgpu.so; exit 77 (skip) without it.
+#define _GNU_SOURCE
 #include <cuda.h>
+#include <dlfcn.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -12,8 +14,10 @@ CUresult cuCtxCreate_v2(CUcontext *pctx, unsigned int flags, CUdevice dev);
 CUresult cuCtxCreate_v3(CUcontext *pctx, CUexecAffinityParam *paramsArray, int numParams,
                         unsigned int flags, CUdevice dev);
 
-// Exported by libvgpu.so; null when it is not preloaded.
-extern int vgpu_hostpid_found(void) __attribute__((weak));
+// Exported by libvgpu.so and looked up at run time: a weak reference in this
+// non-PIE executable is resolved to null at link time, which skipped the test
+// even with libvgpu.so preloaded.
+static int (*vgpu_hostpid_found)(void);
 
 #define CHECK(call)                                                            \
     do {                                                                       \
@@ -28,6 +32,7 @@ extern int vgpu_hostpid_found(void) __attribute__((weak));
 // usage: test_lazy_hostpid [primary|v2|v3|v4|green]: the call that creates the first context.
 int main(int argc, char **argv) {
     const char *mode = argc > 1 ? argv[1] : "primary";
+    vgpu_hostpid_found = (int (*)(void))dlsym(RTLD_DEFAULT, "vgpu_hostpid_found");
     if (vgpu_hostpid_found == NULL) {
         fprintf(stderr, "SKIP: libvgpu.so not preloaded\n");
         return 77;
