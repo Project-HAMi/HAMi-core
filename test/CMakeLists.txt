@@ -251,7 +251,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
-            LINK_FLAGS "-Wl,--gc-sections")
+            LINK_FLAGS "-Wl,--gc-sections,--wrap=dlopen,--wrap=dlclose")
     elseif (TEST_TARGET_NAME STREQUAL "test_rate_limiter_recent_kernel")
         # Includes the watcher source to reach its static limit state and
         # stubs the driver and shared region, so it needs no GPU.

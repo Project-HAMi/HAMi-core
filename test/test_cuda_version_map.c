@@ -17,7 +17,7 @@ CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion,
                               CUdriverProcAddressQueryResult *symbolStatus);
 CUresult _cuGetProcAddress(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags);
 
-/* Referenced by load_cuda_libraries(), which this test never calls. */
+/* Native symbol-loader dependency supplied by the regression fixture. */
 typedef void *(*fp_dlsym)(void *, const char *);
 fp_dlsym real_dlsym;
 
@@ -300,6 +300,7 @@ static int check_stream_procs(void) {
 }
 
 #include "test/graph_node_proc_fixture.h"
+#include "test/graph_loader_fixture.h"
 /** Preserve the original copy ABI when the requested CUDA version predates size_t counts. */
 static int check_legacy_copy_abi(void) {
     const char *names[] = {"cuMemcpyHtoDAsync", "cuMemcpyDtoHAsync", "cuMemcpyDtoDAsync"};
@@ -369,6 +370,8 @@ int main(void) {
     failures += check_legacy_copy_abi();
     failures += check_graph_node_procs();
     failures += check_graph_pool_procs();
+
+    failures += check_graph_loader_abi();
 
     if (failures) {
         printf("%d version map check(s) failed\n", failures);

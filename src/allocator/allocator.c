@@ -883,9 +883,16 @@ int graph_capture_prepare(CUstream stream, CUstreamCaptureMode mode, uint64_t *t
     if (l == NULL) return CUDA_ERROR_OUT_OF_MEMORY;
     l->stream = stream;
     l->mode = mode;
-    if (CUDA_FIND_ENTRY(cuda_library_entry, cuStreamGetCtx) != NULL &&
-        CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCtx, stream, &l->ctx) == CUDA_SUCCESS)
-        l->ctx_id = graph_context_id(l->ctx);
+    if (stream == CU_STREAM_PER_THREAD) {
+        CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxGetCurrent, &l->ctx);
+        if (res != CUDA_SUCCESS) {
+            free(l);
+            return res;
+        }
+    } else if (CUDA_FIND_ENTRY(cuda_library_entry, cuStreamGetCtx) != NULL) {
+        CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCtx, stream, &l->ctx);
+    }
+    if (l->ctx != NULL) l->ctx_id = graph_context_id(l->ctx);
     pthread_mutex_lock(&graph_mutex);
     if (graph_thread_id == 0) graph_thread_id = ++graph_thread_serial;
     l->thread = graph_thread_id;
@@ -933,9 +940,13 @@ void graph_capture_started(uint64_t token, CUresult result) {
 uint64_t graph_capture_token(CUstream stream, cuuint64_t *id) {
     uint64_t token = 0;
     *id = 0;
+    CUcontext ctx = NULL;
+    if (stream == CU_STREAM_PER_THREAD &&
+        CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxGetCurrent, &ctx) != CUDA_SUCCESS) return 0;
     pthread_mutex_lock(&graph_mutex);
     for (capture_link *l = capture_links; l != NULL; l = l->next) {
-        if (l->stream != stream || (stream == CU_STREAM_PER_THREAD && l->thread != graph_thread_id)) continue;
+        if (l->stream != stream || (stream == CU_STREAM_PER_THREAD &&
+            (l->thread != graph_thread_id || l->ctx != ctx))) continue;
         token = l->token;
         *id = l->id;
         if (l->id != 0) break;
