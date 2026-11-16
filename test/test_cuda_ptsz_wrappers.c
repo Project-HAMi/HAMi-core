@@ -73,6 +73,9 @@ void graph_capture_started(uint64_t token, CUresult result) {
 uint64_t graph_capture_token(CUstream stream, cuuint64_t *id) {
     REQUIRE(stream == expected_stream); *id = 123; return 123;
 }
+CUresult graph_capture_resolve(CUstream stream, cuuint64_t *id, uint64_t *token) {
+    *token = graph_capture_token(stream, id); return CUDA_SUCCESS;
+}
 void graph_capture_finish(uint64_t token) { REQUIRE(token == 123); }
 CUresult graph_capture_info(CUstream stream, CUstreamCaptureStatus *cap, cuuint64_t *id, CUgraph *graph) {
     (void)stream; *cap = CU_STREAM_CAPTURE_STATUS_NONE; *id = 0; *graph = NULL; return CUDA_SUCCESS;
@@ -243,9 +246,12 @@ static void check_instantiation(CUstream stream) {
     checks++;
 }
 
+#include "test/extended_stream_fixture.h"
+
 /** Run stream and result checks through all production per-thread wrappers. */
 int main(void) {
     log_utils_init();
+    register_extended_streams();
     cuda_library_entry[OVERRIDE_cuMemcpyAsync].fn_ptr = native_copy;
     cuda_library_entry[OVERRIDE_cuMemcpyHtoDAsync_v2].fn_ptr = native_htod;
     cuda_library_entry[OVERRIDE_cuMemcpyDtoHAsync_v2].fn_ptr = native_dtoh;
@@ -271,6 +277,7 @@ int main(void) {
             check_wrappers(streams[i]);
             check_instantiation(streams[i]);
             check_submission_wrappers(streams[i]);
+            check_extended_streams(streams[i]);
         }
     }
     printf("PASS: %d production wrapper calls preserve stream semantics and results\n", checks);

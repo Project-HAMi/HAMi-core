@@ -132,6 +132,29 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuMemsetD32Async_ptsz),
     CUDA_OVERRIDE_ENUM(cuMemsetD2D32Async_ptsz),
     CUDA_OVERRIDE_ENUM(cuLaunchKernel_ptsz),
+    CUDA_OVERRIDE_ENUM(cuMemcpy2DAsync_v2_ptsz),
+    CUDA_OVERRIDE_ENUM(cuMemcpy3DAsync_v2_ptsz),
+    CUDA_OVERRIDE_ENUM(cuMemcpy3DPeerAsync_ptsz),
+    CUDA_OVERRIDE_ENUM(cuMemcpyPeerAsync_ptsz),
+    CUDA_OVERRIDE_ENUM(cuMemPrefetchAsync_ptsz),
+    CUDA_OVERRIDE_ENUM(cuMemPrefetchAsync_v2_ptsz),
+    CUDA_OVERRIDE_ENUM(cuLaunchCooperativeKernel_ptsz),
+    CUDA_OVERRIDE_ENUM(cuMemcpy_ptds),
+    CUDA_OVERRIDE_ENUM(cuMemcpyHtoD_v2_ptds),
+    CUDA_OVERRIDE_ENUM(cuMemcpyDtoH_v2_ptds),
+    CUDA_OVERRIDE_ENUM(cuMemcpyDtoD_v2_ptds),
+    CUDA_OVERRIDE_ENUM(cuMemcpyPeer_ptds),
+    CUDA_OVERRIDE_ENUM(cuMemcpy2D_v2_ptds),
+    CUDA_OVERRIDE_ENUM(cuMemcpy2DUnaligned_v2_ptds),
+    CUDA_OVERRIDE_ENUM(cuMemcpy3D_v2_ptds),
+    CUDA_OVERRIDE_ENUM(cuMemcpy3DPeer_ptds),
+    CUDA_OVERRIDE_ENUM(cuMemsetD8_v2_ptds),
+    CUDA_OVERRIDE_ENUM(cuMemsetD2D8_v2_ptds),
+    CUDA_OVERRIDE_ENUM(cuMemsetD16_v2_ptds),
+    CUDA_OVERRIDE_ENUM(cuMemsetD2D16_v2_ptds),
+    CUDA_OVERRIDE_ENUM(cuMemsetD32_v2_ptds),
+    CUDA_OVERRIDE_ENUM(cuMemsetD2D32_v2_ptds),
+    CUDA_OVERRIDE_ENUM(cuLaunchKernelEx_ptsz),
     CUDA_OVERRIDE_ENUM(cuMemcpyAtoD_v2),
     CUDA_OVERRIDE_ENUM(cuMemcpyDtoA_v2),
     CUDA_OVERRIDE_ENUM(cuMemcpyDtoD_v2),
@@ -352,3 +375,31 @@ CUresult cuLaunchKernel_ptsz(CUfunction function, unsigned int gx, unsigned int 
 
 CUresult cuStreamBeginCapture(CUstream stream);
 CUresult cuStreamBeginCapture_ptsz(CUstream stream);
+
+CUresult cuMemcpy2DAsync_v2_ptsz(const CUDA_MEMCPY2D *copy, CUstream stream);
+CUresult cuMemcpy3DAsync_v2_ptsz(const CUDA_MEMCPY3D *copy, CUstream stream);
+CUresult cuMemcpy3DPeerAsync_ptsz(const CUDA_MEMCPY3D_PEER *copy, CUstream stream);
+CUresult cuMemcpyPeerAsync_ptsz(CUdeviceptr dst, CUcontext dst_ctx, CUdeviceptr src, CUcontext src_ctx,
+                                 size_t size, CUstream stream);
+CUresult cuMemPrefetchAsync_ptsz(CUdeviceptr ptr, size_t count, CUdevice dev, CUstream stream);
+CUresult cuMemPrefetchAsync_v2_ptsz(CUdeviceptr ptr, size_t count, CUmemLocation location, unsigned int flags,
+                                    CUstream stream);
+CUresult cuLaunchCooperativeKernel_ptsz(CUfunction function, unsigned int gx, unsigned int gy, unsigned int gz,
+                                        unsigned int bx, unsigned int by, unsigned int bz,
+                                        unsigned int shared, CUstream stream, void **params);
+CUresult cuMemcpy_ptds(CUdeviceptr dst, CUdeviceptr src, size_t size);
+CUresult cuMemcpyHtoD_v2_ptds(CUdeviceptr dst, const void *src, size_t size);
+CUresult cuMemcpyDtoH_v2_ptds(void *dst, CUdeviceptr src, size_t size);
+CUresult cuMemcpyDtoD_v2_ptds(CUdeviceptr dst, CUdeviceptr src, size_t size);
+CUresult cuMemcpyPeer_ptds(CUdeviceptr dst, CUcontext dst_ctx, CUdeviceptr src, CUcontext src_ctx, size_t size);
+CUresult cuMemcpy2D_v2_ptds(const CUDA_MEMCPY2D *copy);
+CUresult cuMemcpy2DUnaligned_v2_ptds(const CUDA_MEMCPY2D *copy);
+CUresult cuMemcpy3D_v2_ptds(const CUDA_MEMCPY3D *copy);
+CUresult cuMemcpy3DPeer_ptds(const CUDA_MEMCPY3D_PEER *copy);
+CUresult cuMemsetD8_v2_ptds(CUdeviceptr ptr, unsigned char value, size_t count);
+CUresult cuMemsetD2D8_v2_ptds(CUdeviceptr ptr, size_t pitch, unsigned char value, size_t width, size_t height);
+CUresult cuMemsetD16_v2_ptds(CUdeviceptr ptr, uint16_t value, size_t count);
+CUresult cuMemsetD2D16_v2_ptds(CUdeviceptr ptr, size_t pitch, uint16_t value, size_t width, size_t height);
+CUresult cuMemsetD32_v2_ptds(CUdeviceptr ptr, unsigned int value, size_t count);
+CUresult cuMemsetD2D32_v2_ptds(CUdeviceptr ptr, size_t pitch, unsigned int value, size_t width, size_t height);
+CUresult cuLaunchKernelEx_ptsz(const CUlaunchConfig *config, CUfunction function, void **params, void **extra);

@@ -100,6 +100,29 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemsetD32Async_ptsz"},
     {.name = "cuMemsetD2D32Async_ptsz"},
     {.name = "cuLaunchKernel_ptsz"},
+    {.name = "cuMemcpy2DAsync_v2_ptsz"},
+    {.name = "cuMemcpy3DAsync_v2_ptsz"},
+    {.name = "cuMemcpy3DPeerAsync_ptsz"},
+    {.name = "cuMemcpyPeerAsync_ptsz"},
+    {.name = "cuMemPrefetchAsync_ptsz"},
+    {.name = "cuMemPrefetchAsync_v2_ptsz"},
+    {.name = "cuLaunchCooperativeKernel_ptsz"},
+    {.name = "cuMemcpy_ptds"},
+    {.name = "cuMemcpyHtoD_v2_ptds"},
+    {.name = "cuMemcpyDtoH_v2_ptds"},
+    {.name = "cuMemcpyDtoD_v2_ptds"},
+    {.name = "cuMemcpyPeer_ptds"},
+    {.name = "cuMemcpy2D_v2_ptds"},
+    {.name = "cuMemcpy2DUnaligned_v2_ptds"},
+    {.name = "cuMemcpy3D_v2_ptds"},
+    {.name = "cuMemcpy3DPeer_ptds"},
+    {.name = "cuMemsetD8_v2_ptds"},
+    {.name = "cuMemsetD2D8_v2_ptds"},
+    {.name = "cuMemsetD16_v2_ptds"},
+    {.name = "cuMemsetD2D16_v2_ptds"},
+    {.name = "cuMemsetD32_v2_ptds"},
+    {.name = "cuMemsetD2D32_v2_ptds"},
+    {.name = "cuLaunchKernelEx_ptsz"},
     {.name = "cuMemcpyAtoD_v2"},
     {.name = "cuMemcpyDtoA_v2"},
     {.name = "cuMemcpyDtoD_v2"},
@@ -404,7 +427,7 @@ static int resolve_stream_proc(const char *symbol, void **pfn, int version, cuui
                                 CUdriverProcAddressQueryResult *status, int v2, CUresult *result) {
     static const struct {
         const char *base, *per_thread, *legacy;
-        int min_version;
+        int min_version, max_version;
     } hooks[] = {
         {"cuMemAllocAsync", "cuMemAllocAsync_ptsz"},
         {"cuMemAllocFromPoolAsync", "cuMemAllocFromPoolAsync_ptsz"},
@@ -423,11 +446,50 @@ static int resolve_stream_proc(const char *symbol, void **pfn, int version, cuui
         {"cuMemsetD2D16Async", "cuMemsetD2D16Async_ptsz", "cuMemsetD2D16Async", 0},
         {"cuMemsetD32Async", "cuMemsetD32Async_ptsz", "cuMemsetD32Async", 0},
         {"cuMemsetD2D32Async", "cuMemsetD2D32Async_ptsz", "cuMemsetD2D32Async", 0},
-        {"cuLaunchKernel", "cuLaunchKernel_ptsz", "cuLaunchKernel", 0}
+        {"cuLaunchKernel", "cuLaunchKernel_ptsz", "cuLaunchKernel", 0},
+        {"cuMemcpy2DAsync", "cuMemcpy2DAsync_v2_ptsz", "cuMemcpy2DAsync_v2", 3020, 0},
+        {"cuMemcpy2DAsync_v2", "cuMemcpy2DAsync_v2_ptsz", "cuMemcpy2DAsync_v2", 0, 0},
+        {"cuMemcpy3DAsync", "cuMemcpy3DAsync_v2_ptsz", "cuMemcpy3DAsync_v2", 3020, 0},
+        {"cuMemcpy3DAsync_v2", "cuMemcpy3DAsync_v2_ptsz", "cuMemcpy3DAsync_v2", 0, 0},
+        {"cuMemcpy3DPeerAsync", "cuMemcpy3DPeerAsync_ptsz", "cuMemcpy3DPeerAsync", 0, 0},
+        {"cuMemcpyPeerAsync", "cuMemcpyPeerAsync_ptsz", "cuMemcpyPeerAsync", 0, 0},
+        {"cuMemPrefetchAsync", "cuMemPrefetchAsync_ptsz", "cuMemPrefetchAsync", 0, 12019},
+        {"cuMemPrefetchAsync", "cuMemPrefetchAsync_v2_ptsz", "cuMemPrefetchAsync_v2", 12020, 0},
+        {"cuMemPrefetchAsync_v2", "cuMemPrefetchAsync_v2_ptsz", "cuMemPrefetchAsync_v2", 0, 0},
+        {"cuLaunchCooperativeKernel", "cuLaunchCooperativeKernel_ptsz", "cuLaunchCooperativeKernel", 0, 0},
+        {"cuMemcpy", "cuMemcpy_ptds", "cuMemcpy", 0, 0},
+        {"cuMemcpyHtoD", "cuMemcpyHtoD_v2_ptds", "cuMemcpyHtoD_v2", 3020, 0},
+        {"cuMemcpyHtoD_v2", "cuMemcpyHtoD_v2_ptds", "cuMemcpyHtoD_v2", 0, 0},
+        {"cuMemcpyDtoH", "cuMemcpyDtoH_v2_ptds", "cuMemcpyDtoH_v2", 3020, 0},
+        {"cuMemcpyDtoH_v2", "cuMemcpyDtoH_v2_ptds", "cuMemcpyDtoH_v2", 0, 0},
+        {"cuMemcpyDtoD", "cuMemcpyDtoD_v2_ptds", "cuMemcpyDtoD_v2", 3020, 0},
+        {"cuMemcpyDtoD_v2", "cuMemcpyDtoD_v2_ptds", "cuMemcpyDtoD_v2", 0, 0},
+        {"cuMemcpyPeer", "cuMemcpyPeer_ptds", "cuMemcpyPeer", 0, 0},
+        {"cuMemcpy2D", "cuMemcpy2D_v2_ptds", "cuMemcpy2D_v2", 3020, 0},
+        {"cuMemcpy2D_v2", "cuMemcpy2D_v2_ptds", "cuMemcpy2D_v2", 0, 0},
+        {"cuMemcpy2DUnaligned", "cuMemcpy2DUnaligned_v2_ptds", "cuMemcpy2DUnaligned_v2", 3020, 0},
+        {"cuMemcpy2DUnaligned_v2", "cuMemcpy2DUnaligned_v2_ptds", "cuMemcpy2DUnaligned_v2", 0, 0},
+        {"cuMemcpy3D", "cuMemcpy3D_v2_ptds", "cuMemcpy3D_v2", 3020, 0},
+        {"cuMemcpy3D_v2", "cuMemcpy3D_v2_ptds", "cuMemcpy3D_v2", 0, 0},
+        {"cuMemcpy3DPeer", "cuMemcpy3DPeer_ptds", "cuMemcpy3DPeer", 0, 0},
+        {"cuMemsetD8", "cuMemsetD8_v2_ptds", "cuMemsetD8_v2", 3020, 0},
+        {"cuMemsetD8_v2", "cuMemsetD8_v2_ptds", "cuMemsetD8_v2", 0, 0},
+        {"cuMemsetD2D8", "cuMemsetD2D8_v2_ptds", "cuMemsetD2D8_v2", 3020, 0},
+        {"cuMemsetD2D8_v2", "cuMemsetD2D8_v2_ptds", "cuMemsetD2D8_v2", 0, 0},
+        {"cuMemsetD16", "cuMemsetD16_v2_ptds", "cuMemsetD16_v2", 3020, 0},
+        {"cuMemsetD16_v2", "cuMemsetD16_v2_ptds", "cuMemsetD16_v2", 0, 0},
+        {"cuMemsetD2D16", "cuMemsetD2D16_v2_ptds", "cuMemsetD2D16_v2", 3020, 0},
+        {"cuMemsetD2D16_v2", "cuMemsetD2D16_v2_ptds", "cuMemsetD2D16_v2", 0, 0},
+        {"cuMemsetD32", "cuMemsetD32_v2_ptds", "cuMemsetD32_v2", 3020, 0},
+        {"cuMemsetD32_v2", "cuMemsetD32_v2_ptds", "cuMemsetD32_v2", 0, 0},
+        {"cuMemsetD2D32", "cuMemsetD2D32_v2_ptds", "cuMemsetD2D32_v2", 3020, 0},
+        {"cuMemsetD2D32_v2", "cuMemsetD2D32_v2_ptds", "cuMemsetD2D32_v2", 0, 0},
+        {"cuLaunchKernelEx", "cuLaunchKernelEx_ptsz", "cuLaunchKernelEx", 0, 0}
     };
     for (size_t i = 0; i < sizeof(hooks) / sizeof(hooks[0]); i++) {
         int named_per_thread = strcmp(symbol, hooks[i].per_thread) == 0;
         if (!named_per_thread && strcmp(symbol, hooks[i].base) != 0) continue;
+        if (!named_per_thread && hooks[i].max_version && version > hooks[i].max_version) continue;
         *result = v2
             ? CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress_v2, symbol, pfn, version, flags, status)
             : CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress, symbol, pfn, version, flags);

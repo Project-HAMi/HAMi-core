@@ -622,22 +622,31 @@ void graph_capture_started(uint64_t token, CUresult result) {
 }
 
 
-/** Find a tracked capture token and its cached capture ID. */
-uint64_t graph_capture_token(CUstream stream, cuuint64_t *id) {
-    uint64_t token = 0;
+/** Resolve a capture identity before native termination can mutate its scope. */
+CUresult graph_capture_resolve(CUstream stream, cuuint64_t *id, uint64_t *token) {
+    *token = 0;
     *id = 0;
     CUcontext ctx = NULL;
-    if (stream == CU_STREAM_PER_THREAD &&
-        CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxGetCurrent, &ctx) != CUDA_SUCCESS) return 0;
+    if (stream == CU_STREAM_PER_THREAD) {
+        CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxGetCurrent, &ctx);
+        if (res != CUDA_SUCCESS) return res;
+    }
     pthread_mutex_lock(&graph_mutex);
     for (capture_link *l = capture_links; l != NULL; l = l->next) {
         if (l->stream != stream || (stream == CU_STREAM_PER_THREAD &&
             (l->thread != graph_thread_id || l->ctx != ctx))) continue;
-        token = l->token;
+        *token = l->token;
         *id = l->id;
         if (l->id != 0) break;
     }
     pthread_mutex_unlock(&graph_mutex);
+    return CUDA_SUCCESS;
+}
+
+/** Return the tracked capture token for callers that do not mutate native state. */
+uint64_t graph_capture_token(CUstream stream, cuuint64_t *id) {
+    uint64_t token;
+    graph_capture_resolve(stream, id, &token);
     return token;
 }
 

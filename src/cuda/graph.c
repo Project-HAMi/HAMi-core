@@ -347,8 +347,13 @@ CUresult cuStreamBeginCapture_v2(CUstream stream, CUstreamCaptureMode mode) {
 CUresult cuStreamEndCapture(CUstream stream, CUgraph *graph) {
     pthread_mutex_lock(&mutex);
     cuuint64_t id;
-    uint64_t token = graph_capture_token(stream, &id);
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamEndCapture, stream, graph);
+    uint64_t token;
+    CUresult res = graph_capture_resolve(stream, &id, &token);
+    if (res != CUDA_SUCCESS) {
+        pthread_mutex_unlock(&mutex);
+        return res;
+    }
+    res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamEndCapture, stream, graph);
     CUstreamCaptureStatus cap;
     cuuint64_t current_id;
     CUgraph current_graph;
