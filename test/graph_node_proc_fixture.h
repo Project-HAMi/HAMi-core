@@ -23,14 +23,14 @@ static CUresult graph_proc_native_v2(const char *symbol, void **pfn, int version
     return res;
 }
 
-/** Check both generic-node ABIs and native outcomes through all procedure lookup routes. */
+/** Check all generic-node ABIs and native outcomes through all procedure lookup routes. */
 static int check_graph_node_procs(void) {
-    const int versions[] = {12020, 12029, 12030, 13000, 13030, 13040, 13050};
-    char *names[] = {"cuGraphAddNode", "cuGraphAddNode_v2"};
-    g_present[0] = names[0]; g_present[1] = names[1]; g_present[2] = NULL;
+    const int versions[] = {12020, 12029, 12030, 13000, 13030, 13039, 13040, 13050, 13051, 99999};
+    char *names[] = {"cuGraphAddNode", "cuGraphAddNode_v2", "cuGraphAddNode_v3"};
+    g_present[0] = names[0]; g_present[1] = names[1]; g_present[2] = names[2]; g_present[3] = NULL;
     cuda_library_entry[OVERRIDE_cuGetProcAddress].fn_ptr = graph_proc_native;
     cuda_library_entry[OVERRIDE_cuGetProcAddress_v2].fn_ptr = graph_proc_native_v2;
-    for (int n = 0; n < 2; n++) for (int v = 0; v < 7; v++) for (int pt = 0; pt < 2; pt++)
+    for (int n = 0; n < 3; n++) for (int v = 0; v < 10; v++) for (int pt = 0; pt < 2; pt++)
         for (int entry = 0; entry < 4; entry++) for (int state = 0; state < 4; state++) {
             graph_proc_result = state == 1 ? CUDA_ERROR_NOT_FOUND : CUDA_SUCCESS;
             graph_proc_pointer = state != 2;
@@ -45,15 +45,15 @@ static int check_graph_node_procs(void) {
             else res = _cuGetProcAddress_v2(names[n], &pfn, versions[v], flags, &status);
             void *expected = graph_proc_pointer ? graph_native_marker : NULL;
             if (graph_proc_result == CUDA_SUCCESS && graph_proc_pointer && (entry < 2 || state != 3) &&
-                (n || versions[v] <= 13030))
-                expected = names[n || versions[v] >= 12030];
+                (n || versions[v] <= 13050))
+                expected = names[n ? n : (versions[v] >= 13040 ? 2 : versions[v] >= 12030)];
             if (res != graph_proc_result || pfn != expected || (entry >= 2 && status != graph_proc_status)) {
                 printf("FAIL graph node lookup: %s version=%d entry=%d state=%d\n",
                        names[n], versions[v], entry, state);
                 return 1;
             }
         }
-    puts("ok   generic graph node ABIs and native lookup outcomes: 448 cases");
+    puts("ok   generic graph node ABIs and native lookup outcomes: 960 cases");
     return 0;
 }
 

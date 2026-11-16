@@ -20,6 +20,7 @@ cuda_entry_t cuda_library_entry[CUDA_ENTRY_END];
 static size_t used = 256 * MIB;
 static int nodes, native_calls, undo_calls, fail_calloc, compete;
 static CUresult native_result, competing_result;
+static int v3_calls;
 static uintptr_t serial = 10;
 static CUgraph captured_graph;
 static CUresult end_result;
@@ -101,6 +102,17 @@ static CUresult native_generic_v2(CUgraphNode *node, CUgraph graph, const CUgrap
     return native_generic(node, graph, deps, count, params);
 }
 
+/** Preserve the v3 native validation and dependency data instead of calling v2. */
+static CUresult native_generic_v3(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
+                                   const CUgraphEdgeData *data, size_t count, CUgraphNodeParams *params) {
+    v3_calls++;
+    if (params != NULL && params->type == CU_GRAPH_NODE_TYPE_KERNEL) {
+        REQUIRE(data != NULL && count == 1 && deps != NULL && graph == (CUgraph)2);
+        return CUDA_ERROR_INVALID_CONTEXT;
+    }
+    return native_generic_v2(node, graph, deps, data, count, params);
+}
+
 static CUresult native_undo(CUgraphNode node) {
     (void)node; undo_calls++; return CUDA_ERROR_NOT_SUPPORTED;
 }
@@ -146,7 +158,8 @@ static CUresult allocate(int kind, size_t size, CUdeviceptr *ptr) {
         generic.alloc.poolProps = params.poolProps;
         generic.alloc.bytesize = size;
         result = kind == 3 ? cuGraphAddNode(&node, (CUgraph)2, NULL, 0, &generic)
-                           : cuGraphAddNode_v2(&node, (CUgraph)2, NULL, NULL, 0, &generic);
+                           : kind == 4 ? cuGraphAddNode_v2(&node, (CUgraph)2, NULL, NULL, 0, &generic)
+                           : cuGraphAddNode_v3(&node, (CUgraph)2, NULL, NULL, 0, &generic);
         params.dptr = generic.alloc.dptr;
     } else {
         result = cuGraphAddMemAllocNode(&node, (CUgraph)2, NULL, 0, &params);
@@ -168,7 +181,8 @@ static void check_invalid_device(void) {
         generic.alloc.poolProps = params.poolProps; generic.alloc.bytesize = params.bytesize;
         REQUIRE(cuGraphAddNode(&node, (CUgraph)2, NULL, 0, &generic) == CUDA_ERROR_INVALID_VALUE);
         REQUIRE(cuGraphAddNode_v2(&node, (CUgraph)2, NULL, NULL, 0, &generic) == CUDA_ERROR_INVALID_VALUE);
-        REQUIRE(native_calls == before + 3 && used == 256 * MIB);
+        REQUIRE(cuGraphAddNode_v3(&node, (CUgraph)2, NULL, NULL, 0, &generic) == CUDA_ERROR_INVALID_VALUE);
+        REQUIRE(native_calls == before + 4 && used == 256 * MIB);
     }
 }
 
@@ -199,7 +213,8 @@ static void check_admission(int kind) {
         CUgraphNodeParams params = {0}; CUgraphNode node;
         params.type = CU_GRAPH_NODE_TYPE_MEM_FREE; params.free.dptr = ptr;
         REQUIRE((kind == 3 ? cuGraphAddNode(&node, (CUgraph)2, NULL, 0, &params)
-                           : cuGraphAddNode_v2(&node, (CUgraph)2, NULL, NULL, 0, &params)) == CUDA_SUCCESS);
+                           : kind == 4 ? cuGraphAddNode_v2(&node, (CUgraph)2, NULL, NULL, 0, &params)
+                           : cuGraphAddNode_v3(&node, (CUgraph)2, NULL, NULL, 0, &params)) == CUDA_SUCCESS);
     } else if (kind == 0) {
         graph_mark_free((CUgraph)2, ptr);
     } else {
@@ -219,13 +234,14 @@ int main(void) {
     cuda_library_entry[OVERRIDE_cuGraphDestroyNode].fn_ptr = native_undo;
     cuda_library_entry[OVERRIDE_cuGraphAddNode].fn_ptr = native_generic;
     cuda_library_entry[OVERRIDE_cuGraphAddNode_v2].fn_ptr = native_generic_v2;
+    cuda_library_entry[OVERRIDE_cuGraphAddNode_v3].fn_ptr = native_generic_v3;
     cuda_library_entry[OVERRIDE_cuStreamGetCaptureInfo_v2].fn_ptr = native_capture;
     cuda_library_entry[OVERRIDE_cuStreamBeginCapture_v2].fn_ptr = native_begin;
     cuda_library_entry[OVERRIDE_cuStreamEndCapture].fn_ptr = native_end;
     cuda_library_entry[OVERRIDE_cuMemAllocAsync].fn_ptr = native_allocate;
     cuda_library_entry[OVERRIDE_cuMemAllocFromPoolAsync].fn_ptr = native_pool_allocate;
     cuda_library_entry[OVERRIDE_cuMemFreeAsync].fn_ptr = native_free;
-    for (int kind = 0; kind < 5; kind++) check_admission(kind);
+    for (int kind = 0; kind < 6; kind++) check_admission(kind);
     CUgraphNode node;
     REQUIRE(cuGraphAddNode(&node, (CUgraph)2, NULL, 0, NULL) == CUDA_ERROR_INVALID_VALUE);
     CUgraphNodeParams empty = {0}; empty.type = CU_GRAPH_NODE_TYPE_EMPTY;
@@ -234,6 +250,14 @@ int main(void) {
     cuda_library_entry[OVERRIDE_cuGraphAddNode_v2].fn_ptr = NULL;
     REQUIRE(cuGraphAddNode_v2(&node, (CUgraph)2, NULL, NULL, 0, &empty) == CUDA_ERROR_NOT_SUPPORTED);
     cuda_library_entry[OVERRIDE_cuGraphAddNode_v2].fn_ptr = native_generic_v2;
+    CUgraphNodeParams kernel = {0}; kernel.type = CU_GRAPH_NODE_TYPE_KERNEL;
+    CUgraphEdgeData edge = {0}; CUgraphNode dependency = (CUgraphNode)1;
+    int before_v3 = v3_calls;
+    REQUIRE(cuGraphAddNode_v3(&node, (CUgraph)2, &dependency, &edge, 1, &kernel) == CUDA_ERROR_INVALID_CONTEXT);
+    REQUIRE(v3_calls == before_v3 + 1 && used == 256 * MIB);
+    cuda_library_entry[OVERRIDE_cuGraphAddNode_v3].fn_ptr = NULL;
+    REQUIRE(cuGraphAddNode_v3(&node, (CUgraph)2, NULL, NULL, 0, &empty) == CUDA_ERROR_NOT_SUPPORTED);
+    cuda_library_entry[OVERRIDE_cuGraphAddNode_v3].fn_ptr = native_generic_v3;
     check_invalid_device();
     CUdeviceptr ptr;
     CUgraph graph;

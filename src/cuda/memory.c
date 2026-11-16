@@ -672,6 +672,12 @@ CUresult cuGraphAddNode_v2(CUgraphNode *node, CUgraph graph, const CUgraphNode *
         1, node, graph, deps, data, count, params);
 }
 
+CUresult cuGraphAddNode_v3(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
+                           const CUgraphEdgeData *data, size_t count, CUgraphNodeParams *params) {
+    return graph_add_node((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuGraphAddNode_v3),
+        1, node, graph, deps, data, count, params);
+}
+
 CUresult cuGraphAddMemFreeNode(CUgraphNode *phGraphNode, CUgraph hGraph,
         const CUgraphNode *dependencies, size_t numDependencies, CUdeviceptr dptr) {
     LOG_DEBUG("cuGraphAddMemFreeNode");
