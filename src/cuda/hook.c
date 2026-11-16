@@ -389,17 +389,19 @@ void *find_symbols_in_table_by_cudaversion(const char *symbol,int  cudaVersion) 
 }
 
 
-/** Preserve native availability while selecting the generic Graph-node ABI. */
+
+/** Preserve native availability while selecting graph memory hooks and node ABIs. */
 static int resolve_graph_add_proc(const char *symbol, void **pfn, int version, cuuint64_t flags,
                                   CUdriverProcAddressQueryResult *status, int v2, CUresult *result) {
     int current = strcmp(symbol, "cuGraphAddNode_v2") == 0;
-    if (!current && strcmp(symbol, "cuGraphAddNode") != 0) return 0;
+    int trim = strcmp(symbol, "cuDeviceGraphMemTrim") == 0;
+    if (!current && !trim && strcmp(symbol, "cuGraphAddNode") != 0) return 0;
     *result = v2
         ? CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress_v2, symbol, pfn, version, flags, status)
         : CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress, symbol, pfn, version, flags);
     if (*result == CUDA_SUCCESS && *pfn != NULL &&
         (!v2 || status == NULL || *status == CU_GET_PROC_ADDRESS_SUCCESS)) {
-        const char *name = current || version >= 12030 ? "cuGraphAddNode_v2" : "cuGraphAddNode";
+        const char *name = trim ? symbol : (current || version >= 12030 ? "cuGraphAddNode_v2" : "cuGraphAddNode");
         void *hook = __dlsym_hook_section(NULL, name);
         if (hook != NULL) *pfn = hook;
     }
@@ -482,7 +484,6 @@ static int resolve_graph_proc(const char *symbol, void **pfn, int version, cuuin
         strcmp(symbol, "cuStreamBeginCapture_v2") != 0 &&
         strcmp(symbol, "cuStreamBeginCapture_v2_ptsz") != 0 &&
         strcmp(symbol, "cuStreamEndCapture_ptsz") != 0 &&
-        strcmp(symbol, "cuDeviceGraphMemTrim") != 0 &&
         strcmp(symbol, "cuDevicePrimaryCtxReset") != 0 &&
         strcmp(symbol, "cuDevicePrimaryCtxReset_v2") != 0 &&
         strcmp(symbol, "cuGreenCtxDestroy") != 0) return 0;

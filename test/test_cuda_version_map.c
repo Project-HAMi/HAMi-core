@@ -368,6 +368,7 @@ int main(void) {
     failures += check_stream_procs();
     failures += check_legacy_copy_abi();
     failures += check_graph_node_procs();
+    failures += check_graph_pool_procs();
 
     if (failures) {
         printf("%d version map check(s) failed\n", failures);
