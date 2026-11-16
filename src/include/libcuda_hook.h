@@ -120,6 +120,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuIpcOpenMemHandle_v2),
     CUDA_OVERRIDE_ENUM(cuMemGetAddressRange_v2),
     CUDA_OVERRIDE_ENUM(cuMemcpyAsync),
+    CUDA_OVERRIDE_ENUM(cuMemcpyAsync_ptsz),
     CUDA_OVERRIDE_ENUM(cuMemcpyAtoD_v2),
     CUDA_OVERRIDE_ENUM(cuMemcpyDtoA_v2),
     CUDA_OVERRIDE_ENUM(cuMemcpyDtoD_v2),
@@ -290,6 +291,7 @@ extern cuda_entry_t cuda_library_entry[];
 CUresult cuMemAllocAsync_ptsz(CUdeviceptr *dptr, size_t bytesize, CUstream stream);
 CUresult cuMemAllocFromPoolAsync_ptsz(CUdeviceptr *dptr, size_t bytesize, CUmemoryPool pool, CUstream stream);
 CUresult cuMemFreeAsync_ptsz(CUdeviceptr dptr, CUstream stream);
+CUresult cuMemcpyAsync_ptsz(CUdeviceptr dst, CUdeviceptr src, size_t size, CUstream stream);
 CUresult cuStreamSynchronize_ptsz(CUstream stream);
 
 CUresult cuGraphInstantiateWithParams_ptsz(CUgraphExec *exec, CUgraph graph, CUDA_GRAPH_INSTANTIATE_PARAMS *params);

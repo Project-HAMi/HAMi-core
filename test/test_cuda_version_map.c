@@ -231,6 +231,7 @@ static int check_stream_procs(void) {
         {"cuMemAllocAsync", "cuMemAllocAsync_ptsz"},
         {"cuMemAllocFromPoolAsync", "cuMemAllocFromPoolAsync_ptsz"},
         {"cuMemFreeAsync", "cuMemFreeAsync_ptsz"},
+        {"cuMemcpyAsync", "cuMemcpyAsync_ptsz"},
         {"cuStreamSynchronize", "cuStreamSynchronize_ptsz"}
     };
     static const cuuint64_t flags[] = {CU_GET_PROC_ADDRESS_DEFAULT, CU_GET_PROC_ADDRESS_LEGACY_STREAM,
@@ -238,7 +239,8 @@ static int check_stream_procs(void) {
     cuda_library_entry[CUDA_OVERRIDE_ENUM(cuGetProcAddress)].fn_ptr = (void *)stream_get_proc;
     cuda_library_entry[CUDA_OVERRIDE_ENUM(cuGetProcAddress_v2)].fn_ptr = (void *)stream_get_proc_v2;
     int failures = 0;
-    for (int n = 0; n < 4; n++) for (int explicit_pt = 0; explicit_pt < 2; explicit_pt++)
+    size_t count = sizeof(names) / sizeof(names[0]);
+    for (size_t n = 0; n < count; n++) for (int explicit_pt = 0; explicit_pt < 2; explicit_pt++)
         for (int api = 0; api < 4; api++) for (int f = 0; f < 3; f++) for (int state = 0; state < 4; state++) {
             g_present[0] = names[n][0]; g_present[1] = names[n][1]; g_present[2] = NULL;
             stream_proc_result = state == 1 ? CUDA_ERROR_NOT_FOUND : CUDA_SUCCESS;

@@ -259,6 +259,11 @@ CUresult cuMemcpyAsync ( CUdeviceptr dst, CUdeviceptr src, size_t ByteCount, CUs
     return res; 
 }
 
+/** Copy asynchronously with per-thread semantics for a NULL stream. */
+CUresult cuMemcpyAsync_ptsz(CUdeviceptr dst, CUdeviceptr src, size_t size, CUstream stream) {
+    return cuMemcpyAsync(dst, src, size, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
 CUresult cuMemcpyAtoD_v2( CUdeviceptr dstDevice, CUarray srcArray, size_t srcOffset, size_t ByteCount ){
     LOG_DEBUG("cuMemcpyAtoD_v2,dst=%llx count=%lu",dstDevice,ByteCount);
     ENSURE_RUNNING();

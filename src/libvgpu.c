@@ -227,6 +227,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemcpyPeer);
     DLSYM_HOOK_FUNC(cuMemcpyPeerAsync);
     DLSYM_HOOK_FUNC(cuMemcpyAsync);
+    DLSYM_HOOK_FUNC(cuMemcpyAsync_ptsz);
     DLSYM_HOOK_FUNC(cuMemcpyAtoD_v2);
     DLSYM_HOOK_FUNC(cuMemcpyDtoA_v2);
     DLSYM_HOOK_FUNC(cuMemcpyDtoD_v2);

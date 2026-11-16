@@ -88,6 +88,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuIpcOpenMemHandle_v2"},
     {.name = "cuMemGetAddressRange_v2"},
     {.name = "cuMemcpyAsync"},
+    {.name = "cuMemcpyAsync_ptsz"},
     {.name = "cuMemcpyAtoD_v2"},
     {.name = "cuMemcpyDtoA_v2"},
     {.name = "cuMemcpyDtoD_v2"},
@@ -387,6 +388,7 @@ static int resolve_stream_proc(const char *symbol, void **pfn, int version, cuui
         {"cuMemAllocAsync", "cuMemAllocAsync_ptsz"},
         {"cuMemAllocFromPoolAsync", "cuMemAllocFromPoolAsync_ptsz"},
         {"cuMemFreeAsync", "cuMemFreeAsync_ptsz"},
+        {"cuMemcpyAsync", "cuMemcpyAsync_ptsz"},
         {"cuStreamSynchronize", "cuStreamSynchronize_ptsz"}
     };
     for (size_t i = 0; i < sizeof(hooks) / sizeof(hooks[0]); i++) {
