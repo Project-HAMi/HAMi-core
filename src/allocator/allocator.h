@@ -98,14 +98,21 @@ void release_device_memory(CUdevice dev, size_t size);
  * via reserve_device_memory) for the allocation at ptr. Memory with a free
  * node is released once its graph and every exec instantiated from it are
  * destroyed; memory without one stays allocated, as in the driver, until ptr
- * is freed. */
-int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr);
+ * is freed. A graph that never ran allocated nothing, so its charge is
+ * dropped on destroy either way. */
+int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr, cuuint64_t capid);
 void graph_mark_free(CUgraph graph, CUdeviceptr ptr);
 void graph_ptr_freed(CUdeviceptr ptr);
 void graph_ptr_freed_async(CUdeviceptr ptr, CUstream hStream);
 void graph_release(CUgraph graph);
 int graph_exec_created(CUgraph graph, CUgraphExec exec);
 void graph_exec_destroyed(CUgraphExec exec);
+void graph_exec_launched(CUgraphExec exec);
+void graph_capture_info(CUstream hStream, CUstreamCaptureStatus *cap, cuuint64_t *id, CUgraph *graph);
+void graph_capture_begin(CUstream stream);
+cuuint64_t graph_capture_id(CUstream stream, int take);
+cuuint64_t graph_capture_id_of(CUgraph graph);
+void graph_capture_end(cuuint64_t capid, CUgraph graph);
 
 // Allocate and free device memory
 int allocate_raw(CUdeviceptr *dptr, size_t size);
