@@ -370,7 +370,12 @@ static CUresult end_capture(cuda_sym_t end, CUstream stream, CUgraph *graph, int
     pthread_mutex_lock(&mutex);
     CUstream accounting_stream = per_thread && stream == NULL ? CU_STREAM_PER_THREAD : stream;
     cuuint64_t id;
-    uint64_t token = graph_capture_token(accounting_stream, &id);
+    uint64_t token;
+    CUresult lookup = graph_capture_resolve(accounting_stream, &id, &token);
+    if (lookup != CUDA_SUCCESS) {
+        pthread_mutex_unlock(&mutex);
+        return lookup;
+    }
     CUresult res = end(stream, graph);
     CUstreamCaptureStatus cap;
     cuuint64_t current_id;

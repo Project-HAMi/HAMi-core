@@ -29,8 +29,9 @@ static void test_serial_and_overlap(void) {
     pool_result = CUDA_SUCCESS;
     reserved = 640 * MIB;
     gpu_done = 1;
-    REQUIRE(reserve_device_memory(0, 300 * MIB) == CUDA_ERROR_OUT_OF_MEMORY);
-    REQUIRE(used == 896 * MIB); /* Completion does not free cached backing. */
+    REQUIRE(reserve_device_memory(0, 300 * MIB) == CUDA_SUCCESS);
+    REQUIRE(used == 856 * MIB); /* Quota pressure trims completed backing before retrying. */
+    release_device_memory(0, 300 * MIB);
     destroy(a, x); destroy(b, y);
     clean();
 }
@@ -379,6 +380,27 @@ static void test_capture_context_failure(void) {
     clean();
 }
 
+/** Relax internal queries for captures entered through native APIs and restore the caller's mode. */
+static void test_external_capture_queries(void) {
+    CUgraph graph = make_graph();
+    REQUIRE(add(graph, 300, 1, NULL) == CUDA_SUCCESS);
+    CUgraphExec exec = instantiate(graph);
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    for (int mode = 0; mode < 3; mode++) {
+        interaction_mode = mode; external_capture = 1;
+        int before = event_queries;
+        REQUIRE(oom_check(0, 0) == 0);
+        REQUIRE(event_queries > before && interaction_mode == mode);
+        exchange_result = CUDA_ERROR_UNKNOWN;
+        before = event_queries;
+        REQUIRE(oom_check(0, 0) == 0 && event_queries == before);
+        REQUIRE(interaction_mode == mode);
+        exchange_result = CUDA_SUCCESS; external_capture = 0;
+    }
+    interaction_mode = CU_STREAM_CAPTURE_MODE_GLOBAL;
+    destroy(graph, exec); clean();
+}
+
 /** Verify graph submission admission, completion, and synchronization interleavings. */
 int main(void) {
 #define DRIVER(name, fn) cuda_library_entry[CUDA_OVERRIDE_ENUM(name)].fn_ptr = (void *)(fn)
@@ -395,6 +417,7 @@ int main(void) {
     DRIVER(cuEventQuery, driver_event_query);
     DRIVER(cuEventDestroy_v2, driver_event_destroy);
     DRIVER(cuDeviceGetGraphMemAttribute, driver_reserved);
+    DRIVER(cuThreadExchangeStreamCaptureMode, driver_exchange_mode);
     DRIVER(cuDeviceGraphMemTrim, driver_trim);
     DRIVER(cuStreamGetId, driver_stream_id);
     DRIVER(cuStreamGetCtx, driver_stream_ctx);
@@ -408,6 +431,7 @@ int main(void) {
     DRIVER(cuStreamGetCaptureInfo_v3, driver_capture);
     DRIVER(cuStreamBeginCapture_v2, driver_begin_capture);
     DRIVER(cuStreamEndCapture, driver_end_capture);
+    test_external_capture_queries();
     test_capture_context_failure(); test_event_failure(); test_serial_and_overlap();
     for (int mode = 0; mode < 3; mode++) test_persistent(mode);
     test_submission_failure(); test_persistent_replay_after_free(); test_destroy_inflight();

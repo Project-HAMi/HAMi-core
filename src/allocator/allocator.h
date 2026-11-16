@@ -125,6 +125,7 @@ CUresult graph_capture_info(CUstream hStream, CUstreamCaptureStatus *cap, cuuint
 int graph_capture_prepare(CUstream stream, CUstreamCaptureMode mode, uint64_t *token);
 void graph_capture_started(uint64_t token, CUresult result);
 uint64_t graph_capture_token(CUstream stream, cuuint64_t *id);
+CUresult graph_capture_resolve(CUstream stream, cuuint64_t *id, uint64_t *token);
 void graph_capture_finish(uint64_t token);
 cuuint64_t graph_capture_id_of(CUgraph graph);
 void graph_capture_end(cuuint64_t capid, CUgraph graph);

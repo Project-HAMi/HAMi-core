@@ -109,6 +109,7 @@ int main(void) {
     DRIVER(cuGraphDestroy, driver_destroy);
     DRIVER(cuGraphExecDestroy, driver_destroy);
     DRIVER(cuDeviceGetGraphMemAttribute, driver_reserved);
+    DRIVER(cuThreadExchangeStreamCaptureMode, driver_exchange_mode);
     DRIVER(cuDeviceGraphMemTrim, driver_trim);
     DRIVER(cuStreamGetCaptureInfo_v3, driver_capture);
     DRIVER(cuStreamBeginCapture_v2, driver_begin_capture);
