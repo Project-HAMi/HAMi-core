@@ -46,7 +46,7 @@ static int check_graph_node_procs(void) {
             void *expected = graph_proc_pointer ? graph_native_marker : NULL;
             if (graph_proc_result == CUDA_SUCCESS && graph_proc_pointer && (entry < 2 || state != 3) &&
                 (n || versions[v] <= 13050))
-                expected = names[n ? n : (versions[v] >= 13040 ? 2 : versions[v] >= 12030)];
+                expected = names[n ? n : versions[v] >= 12030];
             if (res != graph_proc_result || pfn != expected || (entry >= 2 && status != graph_proc_status)) {
                 printf("FAIL graph node lookup: %s version=%d entry=%d state=%d\n",
                        names[n], versions[v], entry, state);
