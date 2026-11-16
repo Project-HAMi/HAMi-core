@@ -535,70 +535,101 @@ void graph_ptr_freed(CUdeviceptr ptr) {
     pthread_mutex_unlock(&graph_mutex);
 }
 
-/* A capture's id, remembered per origin stream at its start: an invalidated
- * capture no longer reports its id or graph when it ends, and an allocation
- * on a stream that joined the capture must still be traced back to it. */
+/* Preserve capture identity until native termination is established. */
 typedef struct capture_link {
     CUstream stream;
     CUgraph graph;
     cuuint64_t id;
+    uint64_t thread;
+    uint64_t token;
+    CUstreamCaptureMode mode;
     struct capture_link *next;
 } capture_link;
 static capture_link *capture_links;
+static uint64_t capture_serial, graph_thread_serial;
+static _Thread_local uint64_t graph_thread_id;
 
-/* Capture state of a stream. The id is 0 when the driver cannot report it. */
-void graph_capture_info(CUstream hStream, CUstreamCaptureStatus *cap, cuuint64_t *id, CUgraph *graph) {
+/** Return native capture state and preserve query failures. */
+CUresult graph_capture_info(CUstream hStream, CUstreamCaptureStatus *cap, cuuint64_t *id, CUgraph *graph) {
     *cap = CU_STREAM_CAPTURE_STATUS_NONE;
     *id = 0;
     *graph = NULL;
     if (CUDA_FIND_ENTRY(cuda_library_entry, cuStreamGetCaptureInfo_v3) != NULL) {
-        CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCaptureInfo_v3, hStream, cap, id, graph,
-                           NULL, NULL, NULL);
-    } else {
-        CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCaptureInfo_v2, hStream, cap, id, graph,
-                           NULL, NULL);
+        return CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCaptureInfo_v3, hStream, cap, id, graph,
+                                   NULL, NULL, NULL);
     }
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCaptureInfo_v2, hStream, cap, id, graph, NULL, NULL);
 }
 
-void graph_capture_begin(CUstream stream) {
-    CUstreamCaptureStatus cap;
-    cuuint64_t id;
-    CUgraph graph;
-    graph_capture_info(stream, &cap, &id, &graph);
-    capture_link *l = id != 0 ? malloc(sizeof(*l)) : NULL;
-    if (l == NULL) return;
+
+/** Register a capture scope before entering the native capture call. */
+int graph_capture_prepare(CUstream stream, CUstreamCaptureMode mode, uint64_t *token) {
+    capture_link *l = calloc(1, sizeof(*l));
+    if (l == NULL) return CUDA_ERROR_OUT_OF_MEMORY;
     l->stream = stream;
-    l->graph = graph;
-    l->id = id;
+    l->mode = mode;
     pthread_mutex_lock(&graph_mutex);
+    if (graph_thread_id == 0) graph_thread_id = ++graph_thread_serial;
+    l->thread = graph_thread_id;
+    l->token = ++capture_serial;
+    *token = l->token;
     l->next = capture_links;
     capture_links = l;
     pthread_mutex_unlock(&graph_mutex);
+    return CUDA_SUCCESS;
 }
 
-/* The id of the capture running on stream, 0 if unknown. With take, the
- * association ends with the capture. */
-cuuint64_t graph_capture_id(CUstream stream, int take) {
-    cuuint64_t id = 0;
+
+/** Remove the capture scope identified by its token. */
+void graph_capture_finish(uint64_t token) {
     pthread_mutex_lock(&graph_mutex);
     capture_link **pp = &capture_links;
     while (*pp != NULL) {
         capture_link *l = *pp;
-        if (l->stream == stream) {
-            id = l->id;
-            if (take) {
-                *pp = l->next;
-                free(l);
-            }
+        if (l->token == token) {
+            *pp = l->next;
+            free(l);
             break;
         }
         pp = &l->next;
     }
     pthread_mutex_unlock(&graph_mutex);
-    return id;
 }
 
-/* The id of the running capture that builds graph, 0 for a standalone graph. */
+
+/** Record a successful capture or discard its scope after native failure. */
+void graph_capture_started(uint64_t token, CUresult result) {
+    if (result != CUDA_SUCCESS) {
+        graph_capture_finish(token);
+        return;
+    }
+    pthread_mutex_lock(&graph_mutex);
+    for (capture_link *l = capture_links; l != NULL; l = l->next) {
+        if (l->token != token) continue;
+        CUstreamCaptureStatus cap;
+        graph_capture_info(l->stream, &cap, &l->id, &l->graph);
+        break;
+    }
+    pthread_mutex_unlock(&graph_mutex);
+}
+
+
+/** Find a tracked capture token and its cached capture ID. */
+uint64_t graph_capture_token(CUstream stream, cuuint64_t *id) {
+    uint64_t token = 0;
+    *id = 0;
+    pthread_mutex_lock(&graph_mutex);
+    for (capture_link *l = capture_links; l != NULL; l = l->next) {
+        if (l->stream != stream || (stream == CU_STREAM_PER_THREAD && l->thread != graph_thread_id)) continue;
+        token = l->token;
+        *id = l->id;
+        if (l->id != 0) break;
+    }
+    pthread_mutex_unlock(&graph_mutex);
+    return token;
+}
+
+
 cuuint64_t graph_capture_id_of(CUgraph graph) {
     cuuint64_t id = 0;
     pthread_mutex_lock(&graph_mutex);
@@ -611,6 +642,7 @@ cuuint64_t graph_capture_id_of(CUgraph graph) {
     pthread_mutex_unlock(&graph_mutex);
     return id;
 }
+
 
 void graph_ptr_freed_async(CUdeviceptr ptr, CUstream hStream) {
     CUstreamCaptureStatus cap;
