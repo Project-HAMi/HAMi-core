@@ -187,6 +187,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuGraphAddMemAllocNode),
     CUDA_OVERRIDE_ENUM(cuGraphAddNode),
     CUDA_OVERRIDE_ENUM(cuGraphAddNode_v2),
+    CUDA_OVERRIDE_ENUM(cuGraphAddNode_v3),
     CUDA_OVERRIDE_ENUM(cuGraphAddMemFreeNode),
     /* memory APIs */
     CUDA_OVERRIDE_ENUM(cuMemHostGetDevicePointer_v2),
@@ -307,5 +308,7 @@ CUresult cuStreamBeginCapture_ptsz(CUstream stream);
 CUresult cuGraphAddNode(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
                         size_t count, CUgraphNodeParams *params);
 CUresult cuGraphAddNode_v2(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
+                           const CUgraphEdgeData *data, size_t count, CUgraphNodeParams *params);
+CUresult cuGraphAddNode_v3(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
                            const CUgraphEdgeData *data, size_t count, CUgraphNodeParams *params);
 CUresult cuStreamEndCapture_ptsz(CUstream stream, CUgraph *graph);
