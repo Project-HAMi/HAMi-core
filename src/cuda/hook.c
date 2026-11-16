@@ -145,6 +145,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuStreamBeginCapture_ptsz"},
     {.name = "cuStreamBeginCapture_v2"},
     {.name = "cuStreamEndCapture"},
+    {.name = "cuStreamEndCapture_ptsz"},
     {.name = "cuMemUnmap"},
     {.name = "cuMemRetainAllocationHandle"},
     {.name = "cuMemImportFromShareableHandle"},
