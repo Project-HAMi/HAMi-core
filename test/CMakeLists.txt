@@ -94,6 +94,11 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             # Read a scratch file, never the production /overrideEnv.
             target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
                 ENV_OVERRIDE_FILE=\"${CMAKE_CURRENT_BINARY_DIR}/override_env.test\")
+        elseif (TEST_TARGET_NAME STREQUAL "test_fork_reinit_leak")
+            # A file nothing creates, so no override can move the cache path
+            # this test inspects.
+            target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+                ENV_OVERRIDE_FILE=\"${CMAKE_CURRENT_BINARY_DIR}/override_env.absent\")
         endif()
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
             -ffunction-sections -fdata-sections)

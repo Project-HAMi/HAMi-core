@@ -1227,10 +1227,12 @@ void try_create_shrreg() {
 
     /* A forked child re-enters here still holding the parent's fd and mapping.
        Drop them before locking the new fd, since closing any fd on the file
-       releases this process's lockf locks. */
+       releases this process's lockf locks. Clear the pointer before unmapping
+       so the inherited SIGUSR1 and SIGUSR2 handlers never read unmapped memory. */
     if (region_info.shared_region != NULL) {
-        munmap(region_info.shared_region, SHARED_REGION_SIZE_MAGIC);
+        shared_region_t* inherited = region_info.shared_region;
         region_info.shared_region = NULL;
+        munmap(inherited, SHARED_REGION_SIZE_MAGIC);
     }
     if (region_info.fd != -1) {
         close(region_info.fd);
