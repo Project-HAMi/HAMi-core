@@ -399,6 +399,7 @@ int remove_chunk_async(
     return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFreeAsync, dptr, hStream);
 }
 
+/** Keep asynchronous free tracking within the capture transition lock. */
 int free_raw_async(CUdeviceptr dptr, CUstream hStream) {
     pthread_mutex_lock(&mutex);
     unsigned int tmp = remove_chunk_async(device_allocasync, dptr, hStream);
@@ -684,7 +685,7 @@ static size_t graph_wanted(int dev) {
     return want;
 }
 
-/* Rebalance graph charges and check quota before allowing growth. */
+/** Apply cached graph demand changes under the shared quota lock. */
 static int graph_rebalance(int check) {
     graph_update_cache();
     int ret = 0;
@@ -825,7 +826,7 @@ int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr, cuui
     return ret;
 }
 
-/* Only free nodes owned by the allocating graph release its memory. */
+/** Record graph-owned frees without driver queries during capture. */
 void graph_mark_free(CUgraph graph, CUdeviceptr ptr) {
     pthread_mutex_lock(&graph_mutex);
     for (graph_charge_entry *g = graph_charges; g != NULL; g = g->next) {
@@ -864,7 +865,7 @@ void graph_ptr_freed(CUdeviceptr ptr) {
     pthread_mutex_unlock(&graph_mutex);
 }
 
-/* Capture state of a stream. The id is 0 when the driver cannot report it. */
+/** Return native capture state while preserving query failures. */
 CUresult graph_capture_info(CUstream hStream, CUstreamCaptureStatus *cap, cuuint64_t *id, CUgraph *graph) {
     *cap = CU_STREAM_CAPTURE_STATUS_NONE;
     *id = 0;
