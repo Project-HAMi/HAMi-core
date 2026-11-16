@@ -13,10 +13,24 @@ CUresult cuDevicePrimaryCtxGetState( CUdevice dev, unsigned int* flags, int* act
     return res;
 }
 
+static int primary_context_active(CUdevice dev) {
+    unsigned int flags = 0;
+    int active = 0;
+
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuDevicePrimaryCtxGetState,
+                              dev, &flags, &active) == CUDA_SUCCESS && active;
+}
+
 CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev){
     LOG_INFO("dev=%d context_size=%ld",dev,context_size);
     //for Initialization only
-    int lease_fd = driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_RETAIN);
+    int lease_fd = -1;
+    // Retaining an active context only takes a reference; skip the permit.
+    // If another thread drops the last reference meanwhile, this retain
+    // creates the context without a permit. Admission is best effort.
+    if (driver_admission_enabled() && !primary_context_active(dev)) {
+        lease_fd = driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_RETAIN);
+    }
     CUresult res;
     pthread_cleanup_push(driver_admission_cleanup, &lease_fd);
     res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRetain,pctx,dev);

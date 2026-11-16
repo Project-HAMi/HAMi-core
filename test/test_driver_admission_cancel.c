@@ -6,6 +6,9 @@
  * client, installs its own driver entry table and runs a fake broker that
  * holds each lease until EOF. The fake driver blocks in pause(), which is a
  * cancellation point, so the cancel lands inside the driver call.
+ *
+ * It also checks that cuInit skips the permit after one success (until a
+ * fork) and that retain skips it while the primary context is active.
  */
 #undef NDEBUG
 #include <assert.h>
@@ -33,6 +36,7 @@ int ctx_activate[16];
 int pidfound;
 int env_utilization_switch;
 extern pthread_once_t pre_cuinit_flag;
+void childReinitPostInit(void);
 
 void load_cuda_libraries(void) {}
 void ensure_initialized(void) {}
@@ -86,10 +90,13 @@ int hostpid_fallback_lock_release(void) { return 0; }
 void hostpid_fallback_lock_after_fork(void) {}
 
 static char socket_path[PATH_MAX];
+static volatile int admission_requests;
+static volatile int primary_active;
 
 /* The trusted broker lives at a root-owned path; use the test socket. */
 int __wrap_hostpid_broker_acquire_driver_admission_trusted(
     hostpid_driver_admission_operation_t operation, int *lease_fd) {
+    admission_requests++;
     return hostpid_broker_acquire_driver_admission(socket_path, operation,
                                                    lease_fd);
 }
@@ -111,6 +118,13 @@ static CUresult fake_retain(CUcontext *context, CUdevice device) {
 static CUresult fake_release(CUdevice device) {
     (void)device;
     return fake_driver();
+}
+static CUresult fake_get_state(CUdevice device, unsigned int *flags,
+                               int *active) {
+    (void)device;
+    *flags = 0;
+    *active = primary_active;
+    return CUDA_SUCCESS;
 }
 
 static void noop(void) {}
@@ -211,6 +225,49 @@ static void run_case(int operation, int cancel, int in_accounting) {
     finish_broker(broker);
 }
 
+/* No permit request reaches the broker; a request would fail anyway. */
+static void expect_no_permit(int operation) {
+    CUcontext context;
+    int before = admission_requests;
+
+    if (operation == HOSTPID_DRIVER_ADMISSION_INIT) {
+        assert(cuInit(0) == CUDA_SUCCESS);
+    } else {
+        assert(cuDevicePrimaryCtxRetain(&context, 0) == CUDA_SUCCESS);
+    }
+    assert(admission_requests == before);
+}
+
+static void run_skip_cases(void) {
+    int operation = HOSTPID_DRIVER_ADMISSION_INIT;
+    pid_t child;
+    int status;
+
+    // The first successful cuInit takes a permit, later calls do not.
+    run_case(operation, 0, 0);
+    expect_no_permit(operation);
+    puts("cuInit: no permit after one success");
+
+    // A forked child must initialize again, so it asks for a permit.
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        int before = admission_requests;
+
+        cuInit(0);
+        _exit(admission_requests == before + 1 ? 0 : 1);
+    }
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    puts("cuInit: forked child asks for a permit");
+
+    // The retain cases in main ran with an inactive context and took one.
+    primary_active = 1;
+    expect_no_permit(HOSTPID_DRIVER_ADMISSION_RETAIN);
+    primary_active = 0;
+    puts("cuDevicePrimaryCtxRetain: no permit while the context is active");
+}
+
 int main(void) {
     static const char *names[] = {"cuInit", "cuDevicePrimaryCtxRetain",
                                   "cuDevicePrimaryCtxRelease_v2"};
@@ -222,13 +279,19 @@ int main(void) {
     assert(setenv("LIBVGPU_DRIVER_ADMISSION", "1", 1) == 0);
     log_utils_init();
     assert(sem_init(&driver_entered, 0, 0) == 0);
-    // preInit loads the real libcuda; mark it as done.
+    // preInit loads the real libcuda; mark it as done, but register its
+    // fork handlers so the fork case runs the production child handler.
     pthread_once(&pre_cuinit_flag, noop);
+    assert(pthread_atfork(hostpid_broker_admission_fork_prepare,
+                          hostpid_broker_admission_fork_parent,
+                          childReinitPostInit) == 0);
     cuda_library_entry[CUDA_OVERRIDE_ENUM(cuInit)].fn_ptr = (void *)fake_init;
     cuda_library_entry[CUDA_OVERRIDE_ENUM(cuDevicePrimaryCtxRetain)].fn_ptr =
         (void *)fake_retain;
     cuda_library_entry[CUDA_OVERRIDE_ENUM(cuDevicePrimaryCtxRelease_v2)]
         .fn_ptr = (void *)fake_release;
+    cuda_library_entry[CUDA_OVERRIDE_ENUM(cuDevicePrimaryCtxGetState)].fn_ptr =
+        (void *)fake_get_state;
 
     for (int operation = HOSTPID_DRIVER_ADMISSION_INIT;
          operation <= HOSTPID_DRIVER_ADMISSION_RELEASE; operation++) {
@@ -244,6 +307,7 @@ int main(void) {
         }
         printf("%s: cancelled call returns its lease\n", names[operation]);
     }
+    run_skip_cases();
     puts("driver admission cancel tests passed");
     return 0;
 }
