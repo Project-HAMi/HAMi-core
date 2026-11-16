@@ -255,4 +255,3 @@ static void clean(void) {
     REQUIRE(used == 256 * MIB);
     gpu_done = 0;
 }
-
