@@ -18,9 +18,12 @@ cuda_entry_t cuda_library_entry[CUDA_ENTRY_END];
 static CUresult native_result;
 static CUstream seen_stream;
 static int calls, completions, legacy_calls, checks;
+static int launches, capture_starts, capture_ends;
+static CUstream expected_stream;
 static CUDA_GRAPH_INSTANTIATE_PARAMS *expected_params;
 
 void ensure_initialized(void) {}
+void ensure_hostpid(void) {}
 int is_gpu_core_limit_enabled(void) { return 0; }
 int wait_status_self(int status) { REQUIRE(status == 1); return 1; }
 
@@ -49,6 +52,25 @@ void graph_ptr_freed_async(CUdeviceptr ptr, CUstream stream) {
 /** Record graph tracking after successful native instantiation. */
 int graph_exec_created(CUgraph graph, CUgraphExec exec) {
     REQUIRE(graph == (CUgraph)8 && exec == (CUgraphExec)9); completions++; return 0;
+}
+
+void graph_exec_launched(CUgraphExec exec) {
+    REQUIRE(exec == (CUgraphExec)9); launches++;
+}
+
+void graph_capture_begin(CUstream stream) {
+    REQUIRE(stream == expected_stream); capture_starts++;
+}
+
+/** Return the capture associated with the normalized stream. */
+cuuint64_t graph_capture_id(CUstream stream, int take) {
+    REQUIRE(stream == expected_stream && take == 1); return 123;
+}
+
+/** Complete capture tracking with the native result. */
+void graph_capture_end(cuuint64_t id, CUgraph graph) {
+    REQUIRE(id == 123 && graph == (native_result == CUDA_SUCCESS ? (CUgraph)8 : NULL));
+    capture_ends++;
 }
 
 /** Record copy arguments and the forwarded stream. */
@@ -83,11 +105,13 @@ static CUresult legacy_params(CUgraphExec *exec, CUgraph graph, CUDA_GRAPH_INSTA
 /** Invoke each actual wrapper and check the stream delivered to its dependencies. */
 static void check_wrappers(CUstream stream) {
     CUstream expected = stream == NULL ? CU_STREAM_PER_THREAD : stream;
+    expected_stream = expected;
     for (int op = 0; op < 9; op++) {
         CUdeviceptr ptr = 0;
         CUgraph graph = NULL;
         CUresult result = CUDA_ERROR_UNKNOWN;
         calls = completions = 0;
+        launches = capture_starts = capture_ends = 0;
         seen_stream = (CUstream)99;
         switch (op) {
             case 0: result = cuMemAllocAsync_ptsz(&ptr, 32, stream); break;
@@ -102,6 +126,9 @@ static void check_wrappers(CUstream stream) {
         }
         REQUIRE(result == native_result && calls == 1 && seen_stream == expected);
         REQUIRE(completions == (op == 2 && result == CUDA_SUCCESS));
+        REQUIRE(launches == ((op == 5 || op == 6) && result == CUDA_SUCCESS));
+        REQUIRE(capture_starts == (op == 7 && result == CUDA_SUCCESS));
+        REQUIRE(capture_ends == (op == 8));
         if ((op == 0 || op == 1) && result == CUDA_SUCCESS) REQUIRE(ptr == 101);
         if (op == 8 && result == CUDA_SUCCESS) REQUIRE(graph == (CUgraph)8);
         checks++;
@@ -115,11 +142,12 @@ static void check_instantiation(CUstream stream) {
     params.hUploadStream = stream;
     expected_params = &params;
     CUgraphExec exec;
-    calls = completions = legacy_calls = 0;
+    calls = completions = legacy_calls = launches = 0;
     CUresult result = cuGraphInstantiateWithParams_ptsz(&exec, (CUgraph)8, &params);
     REQUIRE(result == native_result && calls == 1 && legacy_calls == 0);
     REQUIRE(seen_stream == stream && params.hUploadStream == stream);
     REQUIRE(completions == (result == CUDA_SUCCESS));
+    REQUIRE(launches == (result == CUDA_SUCCESS));
     if (result == CUDA_SUCCESS) REQUIRE(exec == (CUgraphExec)9);
     checks++;
 }

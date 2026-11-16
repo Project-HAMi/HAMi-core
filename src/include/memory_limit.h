@@ -16,8 +16,11 @@
 
 #define ENSURE_INITIALIZED() ensure_initialized();        \
 
+void ensure_hostpid(void);
+
 #define ENSURE_RUNNING() {                                \
     ensure_initialized();                                 \
+    ensure_hostpid();                                     \
     if (is_gpu_core_limit_enabled()) {                    \
         while(!wait_status_self(1)) { LOG_DEBUG("E1"); sleep(1); }         \
     }                                                      \

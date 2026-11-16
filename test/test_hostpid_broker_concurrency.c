@@ -163,7 +163,7 @@ static void run_child(int is_broker) {
         // then block behind the fallback, which the alarm turns into a failure.
         hostpid_fallback_lock_set_before_flock_hook(signal_broker_attempt);
     }
-    ensure_post_init();
+    ensure_hostpid();
     require(hostpid_fallback_lock_active_fd() == -1, "init releases node lock");
     if (broker_actor) {
         // Broker init finishes inside the fallback's NVML window without
