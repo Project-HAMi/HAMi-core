@@ -117,6 +117,19 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         # pull in unrelated driver/accounting dependencies.
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+        if (TEST_TARGET_NAME STREQUAL "test_graph_allocation_admission")
+            target_sources(${TEST_TARGET_NAME} PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/graph.c)
+        endif()
+    elseif (TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle")
+        add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/allocator/allocator.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/graph.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE _GNU_SOURCE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_device_total_mem")
         add_executable(${TEST_TARGET_NAME}
             ${TEST_SCRIPT}
@@ -266,7 +279,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_rate_limiter_recent_kernel"
             OR TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat"
             OR TEST_TARGET_NAME STREQUAL "test_graph_allocation_admission"
-            OR TEST_TARGET_NAME STREQUAL "test_device_total_mem")
+            OR TEST_TARGET_NAME STREQUAL "test_device_total_mem"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_sm_limiter_step")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
@@ -436,14 +450,15 @@ set_tests_properties(cuda_memory_compat PROPERTIES
     ENVIRONMENT "LIBCUDA_LOG_LEVEL=4"
     TIMEOUT 10)
 
-add_test(NAME graph_allocation_admission COMMAND test_graph_allocation_admission)
-set_tests_properties(graph_allocation_admission PROPERTIES
-    ENVIRONMENT "LIBCUDA_LOG_LEVEL=4"
-    TIMEOUT 10)
-target_link_options(test_graph_allocation_admission PRIVATE "-Wl,--wrap=calloc")
-
 # The SM limiter refill step must be the same fraction of the bucket on every
 # device (issue #348).
 add_test(NAME sm_limiter_step
     COMMAND test_sm_limiter_step)
 set_tests_properties(sm_limiter_step PROPERTIES TIMEOUT 10)
+
+add_test(NAME graph_capture_lifecycle COMMAND test_graph_capture_lifecycle)
+set_tests_properties(graph_capture_lifecycle PROPERTIES TIMEOUT 15)
+
+add_test(NAME graph_allocation_admission COMMAND test_graph_allocation_admission)
+set_tests_properties(graph_allocation_admission PROPERTIES TIMEOUT 15)
+target_link_options(test_graph_allocation_admission PRIVATE "-Wl,--wrap=calloc")

@@ -611,12 +611,11 @@ CUresult cuMemFreeAsync(CUdeviceptr dptr, CUstream hStream) {
         return CUDA_SUCCESS;
     }
     CUresult res = free_raw_async(dptr,hStream);
-    if (res == CUDA_SUCCESS) graph_ptr_freed_async(dptr, hStream);
     LOG_DEBUG("after free_raw_async dptr=%p res=%d",(void *)dptr,res);
     return res;
 }
 
-/** Reserve quota and bookkeeping before mutating a graph. */
+/** Reserve graph bookkeeping and quota before recording an allocation node. */
 CUresult cuGraphAddMemAllocNode(CUgraphNode *phGraphNode, CUgraph hGraph,
         const CUgraphNode *dependencies, size_t numDependencies,
         CUDA_MEM_ALLOC_NODE_PARAMS *nodeParams) {
@@ -627,7 +626,8 @@ CUresult cuGraphAddMemAllocNode(CUgraphNode *phGraphNode, CUgraph hGraph,
     size_t size = charge ? nodeParams->bytesize : 0;
     graph_charge_entry *entry = NULL;
     if (charge) {
-        CUresult res = graph_alloc_begin(hGraph, dev, size, &entry);
+        cuuint64_t id = graph_capture_id_of(hGraph);
+        CUresult res = graph_alloc_begin(hGraph, dev, size, id, id != 0, &entry);
         if (res != CUDA_SUCCESS) return res;
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphAddMemAllocNode,

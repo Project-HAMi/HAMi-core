@@ -94,9 +94,15 @@ int oom_check(const int dev,size_t addon);
 int reserve_device_memory(CUdevice dev, size_t size);
 void release_device_memory(CUdevice dev, size_t size);
 
-/* Reserve explicit allocation-node bookkeeping and quota before native mutation. */
+/* Graph allocation accounting. graph_record() tracks size (already reserved
+ * via reserve_device_memory) for the allocation at ptr. Memory with a free
+ * node is released once its graph and every exec instantiated from it are
+ * destroyed; memory without one stays allocated, as in the driver, until ptr
+ * is freed. A graph that never ran allocated nothing, so its charge is
+ * dropped on destroy either way. */
 typedef struct graph_charge_entry graph_charge_entry;
-int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, graph_charge_entry **out);
+int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, cuuint64_t capid, int capturing,
+                      graph_charge_entry **out);
 void graph_alloc_end(graph_charge_entry *entry, CUdeviceptr ptr, CUresult result);
 int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr, cuuint64_t capid);
 void graph_mark_free(CUgraph graph, CUdeviceptr ptr);
@@ -106,9 +112,11 @@ void graph_release(CUgraph graph);
 int graph_exec_created(CUgraph graph, CUgraphExec exec);
 void graph_exec_destroyed(CUgraphExec exec);
 void graph_exec_launched(CUgraphExec exec);
-void graph_capture_info(CUstream hStream, CUstreamCaptureStatus *cap, cuuint64_t *id, CUgraph *graph);
-void graph_capture_begin(CUstream stream);
-cuuint64_t graph_capture_id(CUstream stream, int take);
+CUresult graph_capture_info(CUstream hStream, CUstreamCaptureStatus *cap, cuuint64_t *id, CUgraph *graph);
+int graph_capture_prepare(CUstream stream, CUstreamCaptureMode mode, uint64_t *token);
+void graph_capture_started(uint64_t token, CUresult result);
+uint64_t graph_capture_token(CUstream stream, cuuint64_t *id);
+void graph_capture_finish(uint64_t token);
 cuuint64_t graph_capture_id_of(CUgraph graph);
 void graph_capture_end(cuuint64_t capid, CUgraph graph);
 
