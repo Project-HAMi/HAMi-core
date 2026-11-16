@@ -325,6 +325,24 @@ CUresult cuGraphLaunch(CUgraphExec hGraphExec, CUstream hStream) {
     return submit_graph((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuGraphLaunch), hGraphExec, hStream, 0);
 }
 
+/** Preserve the original one-argument capture ABI while protecting allocation admission. */
+CUresult cuStreamBeginCapture(CUstream stream) {
+    uint64_t token;
+    pthread_mutex_lock(&mutex);
+    CUresult res = graph_capture_prepare(stream, CU_STREAM_CAPTURE_MODE_GLOBAL, &token);
+    if (res == CUDA_SUCCESS) {
+        res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamBeginCapture, stream);
+        graph_capture_started(token, res);
+    }
+    pthread_mutex_unlock(&mutex);
+    return res;
+}
+
+/** Begin an original-ABI capture with per-thread default-stream semantics. */
+CUresult cuStreamBeginCapture_ptsz(CUstream stream) {
+    return cuStreamBeginCapture(stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
 
 /** Register capture protection before starting the native stream capture. */
 static CUresult begin_capture(cuda_sym_t begin, CUstream stream, CUstreamCaptureMode mode, int per_thread) {
