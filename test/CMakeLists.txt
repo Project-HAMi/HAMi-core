@@ -118,7 +118,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle"
             OR TEST_TARGET_NAME STREQUAL "test_graph_pool_lifetimes"
-            OR TEST_TARGET_NAME STREQUAL "test_graph_submission_accounting")
+            OR TEST_TARGET_NAME STREQUAL "test_graph_submission_accounting"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_allocation_admission")
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/allocator/allocator.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/graph.c
@@ -276,7 +277,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_lookup"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_init"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_concurrency"
-            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker")
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_allocation_admission")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         target_link_libraries(${TEST_TARGET_NAME}
@@ -472,3 +474,6 @@ set_tests_properties(graph_pool_lifetimes PROPERTIES TIMEOUT 15)
 
 add_test(NAME graph_submission_accounting COMMAND test_graph_submission_accounting)
 set_tests_properties(graph_submission_accounting PROPERTIES TIMEOUT 20)
+add_test(NAME graph_allocation_admission COMMAND test_graph_allocation_admission)
+set_tests_properties(graph_allocation_admission PROPERTIES TIMEOUT 15)
+target_link_options(test_graph_allocation_admission PRIVATE "-Wl,--wrap=calloc")
