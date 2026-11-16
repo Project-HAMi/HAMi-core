@@ -363,6 +363,22 @@ static void test_green_context_lifetime(void) {
 }
 #endif
 
+/** Return a failed stream lookup with an unusable output context. */
+static CUresult failed_capture_context(CUstream stream, CUcontext *ctx) {
+    (void)stream; *ctx = (CUcontext)99; return CUDA_ERROR_INVALID_HANDLE;
+}
+
+/** Ignore context outputs from failed lookups while retaining capture termination tracking. */
+static void test_capture_context_failure(void) {
+    cuda_library_entry[OVERRIDE_cuStreamGetCtx].fn_ptr = failed_capture_context;
+    CUgraph graph;
+    REQUIRE(cuStreamBeginCapture_v2((CUstream)10, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);
+    REQUIRE(cuStreamEndCapture((CUstream)10, &graph) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
+    cuda_library_entry[OVERRIDE_cuStreamGetCtx].fn_ptr = driver_stream_ctx;
+    clean();
+}
+
 /** Verify graph submission admission, completion, and synchronization interleavings. */
 int main(void) {
 #define DRIVER(name, fn) cuda_library_entry[CUDA_OVERRIDE_ENUM(name)].fn_ptr = (void *)(fn)
@@ -392,7 +408,7 @@ int main(void) {
     DRIVER(cuStreamGetCaptureInfo_v3, driver_capture);
     DRIVER(cuStreamBeginCapture_v2, driver_begin_capture);
     DRIVER(cuStreamEndCapture, driver_end_capture);
-    test_event_failure(); test_serial_and_overlap();
+    test_capture_context_failure(); test_event_failure(); test_serial_and_overlap();
     for (int mode = 0; mode < 3; mode++) test_persistent(mode);
     test_submission_failure(); test_persistent_replay_after_free(); test_destroy_inflight();
     test_context_lifetime();

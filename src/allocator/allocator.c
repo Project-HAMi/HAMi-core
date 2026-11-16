@@ -889,8 +889,9 @@ int graph_capture_prepare(CUstream stream, CUstreamCaptureMode mode, uint64_t *t
             free(l);
             return res;
         }
-    } else if (CUDA_FIND_ENTRY(cuda_library_entry, cuStreamGetCtx) != NULL) {
-        CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCtx, stream, &l->ctx);
+    } else if (CUDA_FIND_ENTRY(cuda_library_entry, cuStreamGetCtx) != NULL &&
+        CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCtx, stream, &l->ctx) != CUDA_SUCCESS) {
+        l->ctx = NULL;
     }
     if (l->ctx != NULL) l->ctx_id = graph_context_id(l->ctx);
     pthread_mutex_lock(&graph_mutex);
