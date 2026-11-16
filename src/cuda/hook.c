@@ -79,6 +79,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMipmappedArrayCreate"},
     {.name = "cuMipmappedArrayDestroy"},
     {.name = "cuDeviceGetGraphMemAttribute"},
+    {.name = "cuThreadExchangeStreamCaptureMode"},
     {.name = "cuDeviceGraphMemTrim"},
     {.name = "cuMemGetInfo_v2"},
     {.name = "cuMemcpy"},

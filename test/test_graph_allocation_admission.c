@@ -66,6 +66,9 @@ static CUresult native_allocate(CUdeviceptr *ptr, size_t size, CUstream stream) 
 static CUresult native_add(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
                             size_t count, CUDA_MEM_ALLOC_NODE_PARAMS *params) {
     (void)graph; (void)deps; (void)count;
+    if (params->poolProps.location.id < 0 || params->poolProps.location.id >= CUDA_DEVICE_MAX_COUNT) {
+        native_calls++; return CUDA_ERROR_INVALID_VALUE;
+    }
     CUresult result = native_allocate(&params->dptr, params->bytesize, NULL);
     if (result == CUDA_SUCCESS) *node = (CUgraphNode)++serial;
     return result;
@@ -78,6 +81,10 @@ static CUresult native_generic(CUgraphNode *node, CUgraph graph, const CUgraphNo
     (void)graph; (void)deps; (void)count;
     if (params == NULL) return CUDA_ERROR_INVALID_VALUE;
     if (params->type == CU_GRAPH_NODE_TYPE_MEM_ALLOC) {
+        if (params->alloc.poolProps.location.id < 0 ||
+            params->alloc.poolProps.location.id >= CUDA_DEVICE_MAX_COUNT) {
+            native_calls++; return CUDA_ERROR_INVALID_VALUE;
+        }
         CUresult result = native_allocate(&params->alloc.dptr, params->alloc.bytesize, NULL);
         if (result != CUDA_SUCCESS) return result;
     } else {
@@ -148,6 +155,23 @@ static CUresult allocate(int kind, size_t size, CUdeviceptr *ptr) {
     return result;
 }
 
+/** Preserve native validation for allocation-node device ordinals outside the accounting table. */
+static void check_invalid_device(void) {
+    const int devices[] = {-1, CUDA_DEVICE_MAX_COUNT, CUDA_DEVICE_MAX_COUNT + 1};
+    for (size_t i = 0; i < sizeof(devices) / sizeof(devices[0]); i++) {
+        CUDA_MEM_ALLOC_NODE_PARAMS params = {0}; CUgraphNode node;
+        params.poolProps.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+        params.poolProps.location.id = devices[i]; params.bytesize = 900 * MIB;
+        int before = native_calls;
+        REQUIRE(cuGraphAddMemAllocNode(&node, (CUgraph)2, NULL, 0, &params) == CUDA_ERROR_INVALID_VALUE);
+        CUgraphNodeParams generic = {0}; generic.type = CU_GRAPH_NODE_TYPE_MEM_ALLOC;
+        generic.alloc.poolProps = params.poolProps; generic.alloc.bytesize = params.bytesize;
+        REQUIRE(cuGraphAddNode(&node, (CUgraph)2, NULL, 0, &generic) == CUDA_ERROR_INVALID_VALUE);
+        REQUIRE(cuGraphAddNode_v2(&node, (CUgraph)2, NULL, NULL, 0, &generic) == CUDA_ERROR_INVALID_VALUE);
+        REQUIRE(native_calls == before + 3 && used == 256 * MIB);
+    }
+}
+
 /** Check quota rejection, native failure, heap failure, and concurrent admission. */
 static void check_admission(int kind) {
     if (kind == 1 || kind == 2)
@@ -210,6 +234,7 @@ int main(void) {
     cuda_library_entry[OVERRIDE_cuGraphAddNode_v2].fn_ptr = NULL;
     REQUIRE(cuGraphAddNode_v2(&node, (CUgraph)2, NULL, NULL, 0, &empty) == CUDA_ERROR_NOT_SUPPORTED);
     cuda_library_entry[OVERRIDE_cuGraphAddNode_v2].fn_ptr = native_generic_v2;
+    check_invalid_device();
     CUdeviceptr ptr;
     CUgraph graph;
     REQUIRE(cuStreamBeginCapture_v2((CUstream)3, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);

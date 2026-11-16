@@ -80,7 +80,7 @@ static void test_graph_handle_reuse(void) {
     REQUIRE(cuGraphLaunch(old_exec, NULL) == CUDA_SUCCESS);
     destroy(graph, old_exec);
     REQUIRE(add(graph, 300, 1, NULL) == CUDA_SUCCESS);
-    REQUIRE(used == 656 * MIB);
+    REQUIRE(used == 956 * MIB);
     REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
     graph_ptr_freed(old_ptr);
     clean();
@@ -99,6 +99,38 @@ static void test_capture_queries(void) {
     clean();
 }
 
+/** Include live outputs when admitting another graph's pending allocation demand. */
+static void test_persistent_and_pending(void) {
+    CUgraph a = make_graph(), b = make_graph(); CUdeviceptr ptr;
+    REQUIRE(add(a, 400, 0, &ptr) == CUDA_SUCCESS);
+    CUgraphExec exec = instantiate(a);
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    int before = nodes;
+    REQUIRE(add(b, 400, 1, NULL) == CUDA_ERROR_OUT_OF_MEMORY);
+    REQUIRE(nodes == before && used == 656 * MIB);
+    REQUIRE(add(b, 300, 1, NULL) == CUDA_SUCCESS);
+    REQUIRE(used == 956 * MIB);
+    REQUIRE(cuGraphDestroy(b) == CUDA_SUCCESS);
+    destroy(a, exec); graph_ptr_freed(ptr); clean();
+}
+
+/** Preserve cached backing across rebuilds and trim it only for a refused reservation. */
+static void test_trim_pressure(void) {
+    int before = trim_calls;
+    for (int i = 0; i < 8; i++) {
+        CUgraph graph = make_graph();
+        REQUIRE(add(graph, 300, 1, NULL) == CUDA_SUCCESS);
+        CUgraphExec exec = instantiate(graph);
+        REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+        reserved = 300 * MIB; gpu_done = 1;
+        destroy(graph, exec);
+        REQUIRE(used == 556 * MIB && trim_calls == before);
+    }
+    REQUIRE(reserve_device_memory(0, 600 * MIB) == CUDA_SUCCESS);
+    REQUIRE(trim_calls == before + 1 && used == 856 * MIB);
+    release_device_memory(0, 600 * MIB); clean();
+}
+
 /** Exercise pooled quota and pointer lifetimes through production CUDA wrappers. */
 int main(void) {
 #define DRIVER(name, fn) cuda_library_entry[CUDA_OVERRIDE_ENUM(name)].fn_ptr = (void *)(fn)
@@ -109,11 +141,13 @@ int main(void) {
     DRIVER(cuGraphDestroy, driver_destroy);
     DRIVER(cuGraphExecDestroy, driver_destroy);
     DRIVER(cuDeviceGetGraphMemAttribute, driver_reserved);
+    DRIVER(cuThreadExchangeStreamCaptureMode, driver_exchange_mode);
     DRIVER(cuDeviceGraphMemTrim, driver_trim);
     DRIVER(cuStreamGetCaptureInfo_v3, driver_capture);
     DRIVER(cuStreamBeginCapture_v2, driver_begin_capture);
     DRIVER(cuStreamEndCapture, driver_end_capture);
     DRIVER(cuCtxGetDevice, driver_device);
+    test_persistent_and_pending(); test_trim_pressure();
     test_serial_pool(); test_output_replay(); test_peak_removal();
     test_query_failure(); test_graph_handle_reuse(); test_capture_queries();
     puts("PASS: graph pool reuse, retained backing, cached peaks, and output lifetimes");

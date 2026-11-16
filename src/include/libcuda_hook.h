@@ -111,6 +111,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuMipmappedArrayCreate),
     CUDA_OVERRIDE_ENUM(cuMipmappedArrayDestroy),
     CUDA_OVERRIDE_ENUM(cuDeviceGetGraphMemAttribute),
+    CUDA_OVERRIDE_ENUM(cuThreadExchangeStreamCaptureMode),
     CUDA_OVERRIDE_ENUM(cuDeviceGraphMemTrim),
     CUDA_OVERRIDE_ENUM(cuMemGetInfo_v2),
     CUDA_OVERRIDE_ENUM(cuMemcpy),

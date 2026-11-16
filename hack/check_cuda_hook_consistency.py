@@ -22,6 +22,9 @@ WRAPPER_GLOB = "src/cuda/*.c"
 OPTIONAL_DLSYM_SYMBOLS = {"cuGetExportTable", "cuStreamGetCaptureInfo_v2", "cuStreamGetCaptureInfo_v3", "cuDeviceGetGraphMemAttribute"}
 OPTIONAL_WRAPPER_SYMBOLS = {"cuGetExportTable", "cuStreamGetCaptureInfo_v2", "cuStreamGetCaptureInfo_v3", "cuDeviceGetGraphMemAttribute"}
 
+OPTIONAL_DLSYM_SYMBOLS.add("cuThreadExchangeStreamCaptureMode")
+OPTIONAL_WRAPPER_SYMBOLS.add("cuThreadExchangeStreamCaptureMode")
+
 
 def strip_c_comments(content: str) -> str:
     content = re.sub(r"/\*.*?\*/", "", content, flags=re.S)

@@ -30,7 +30,17 @@ static _Atomic int global_captures;
 static CUcontext current_ctx = (CUcontext)1, pushed_ctx;
 static struct { CUcontext ctx; cuuint64_t ctx_id; int alive; } events[8192];
 static cuuint64_t context_ids[] = {0, 1, 2};
-static int event_queries, pool_queries, events_created;
+static int event_queries, pool_queries, events_created, trim_calls;
+static _Thread_local CUstreamCaptureMode interaction_mode;
+static _Thread_local int external_capture;
+static CUresult exchange_result;
+/** Model native capture interaction mode without changing the capture itself. */
+static CUresult driver_exchange_mode(CUstreamCaptureMode *mode) {
+    if (exchange_result != CUDA_SUCCESS) return exchange_result;
+    CUstreamCaptureMode old = interaction_mode; interaction_mode = *mode; *mode = old;
+    return CUDA_SUCCESS;
+}
+
 static pthread_mutex_t submit_gate = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t submit_cond = PTHREAD_COND_INITIALIZER;
 static int block_submit, submit_entered;
@@ -136,6 +146,7 @@ static CUresult driver_event_record(CUevent event, CUstream stream) {
 /** Report simulated GPU completion while rejecting event queries during capture. */
 static CUresult driver_event_query(CUevent event) {
     REQUIRE(capturing == NULL && atomic_load(&global_captures) == 0);
+    REQUIRE(!external_capture || interaction_mode == CU_STREAM_CAPTURE_MODE_RELAXED);
     event_queries++;
     REQUIRE((uintptr_t)event < 8192);
     if (!events[(uintptr_t)event].alive) return CUDA_ERROR_INVALID_HANDLE;
@@ -167,6 +178,7 @@ static CUresult driver_stream_id(CUstream stream, cuuint64_t *id) {
 /** Return simulated graph-pool backing or the configured native query failure. */
 static CUresult driver_reserved(CUdevice dev, CUgraphMem_attribute attr, void *value) {
     REQUIRE(capturing == NULL && atomic_load(&global_captures) == 0);
+    REQUIRE(!external_capture || interaction_mode == CU_STREAM_CAPTURE_MODE_RELAXED);
     pool_queries++;
     REQUIRE(dev == 0 && attr == CU_GRAPH_MEM_ATTR_RESERVED_MEM_CURRENT);
     if (pool_result != CUDA_SUCCESS) return pool_result;
@@ -176,6 +188,7 @@ static CUresult driver_reserved(CUdevice dev, CUgraphMem_attribute attr, void *v
 static CUresult driver_trim(CUdevice dev) {
     REQUIRE(capturing == NULL);
     REQUIRE(dev == 0);
+    trim_calls++;
     if (gpu_done) reserved = 0;
     return CUDA_SUCCESS;
 }
@@ -251,6 +264,7 @@ static void destroy(CUgraph graph, CUgraphExec exec) {
 }
 static void clean(void) {
     gpu_done = 1;
+    REQUIRE(cuDeviceGraphMemTrim(0) == CUDA_SUCCESS);
     REQUIRE(oom_check(0, 0) == 0);
     REQUIRE(used == 256 * MIB);
     gpu_done = 0;
