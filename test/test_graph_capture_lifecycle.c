@@ -25,7 +25,8 @@ static _Thread_local cuuint64_t capture_ids[3];
 #define capture capture_graphs[current_context]
 #define capture_id capture_ids[current_context]
 static _Atomic unsigned int serial = 10;
-static CUresult begin_result, end_result, info_result;
+static CUresult begin_result, end_result, info_result, context_result;
+static int end_calls;
 static int keep_capture, ready, finish, allocating, release_allocation, requested, begin_calls;
 static allocated_list async_list;
 
@@ -76,13 +77,15 @@ static CUresult native_begin_original(CUstream stream) {
 
 /** Simulate terminal and nonterminal native capture results. */
 static CUresult native_end(CUstream stream, CUgraph *graph) {
-    (void)stream;
+    (void)stream; end_calls++;
     *graph = end_result == CUDA_SUCCESS ? capture : NULL;
     if (!keep_capture) capture = NULL;
     return end_result;
 }
 
+/** Return the active context or an injected native query failure. */
 static CUresult native_current(CUcontext *ctx) {
+    if (context_result != CUDA_SUCCESS) return context_result;
     *ctx = (CUcontext)(uintptr_t)current_context; return CUDA_SUCCESS;
 }
 
@@ -99,7 +102,7 @@ static void check_failed_end(void) {
     REQUIRE(cuStreamBeginCapture_v2((CUstream)10, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);
     REQUIRE(graph_record(capture, 0, 100 * MIB, 1, capture_id) == CUDA_SUCCESS);
     uint64_t token = graph_capture_token((CUstream)10, &id);
-    keep_capture = 1; end_result = CUDA_ERROR_STREAM_CAPTURE_WRONG_THREAD;
+    keep_capture = 1; end_result = CUDA_ERROR_INVALID_VALUE;
     REQUIRE(cuStreamEndCapture((CUstream)10, &graph) == end_result);
     REQUIRE(graph_capture_token((CUstream)10, &id) == token && used == 356 * MIB);
     info_result = CUDA_ERROR_UNKNOWN;
@@ -109,6 +112,12 @@ static void check_failed_end(void) {
     REQUIRE(cuStreamEndCapture((CUstream)10, &graph) == end_result);
     REQUIRE(graph_capture_token((CUstream)10, &id) == 0 && used == 256 * MIB);
     info_result = end_result = CUDA_SUCCESS;
+    REQUIRE(cuStreamBeginCapture_v2((CUstream)10, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);
+    REQUIRE(graph_record(capture, 0, 100 * MIB, 1, capture_id) == CUDA_SUCCESS);
+    end_result = CUDA_ERROR_STREAM_CAPTURE_WRONG_THREAD;
+    REQUIRE(cuStreamEndCapture((CUstream)10, &graph) == end_result);
+    REQUIRE(graph_capture_token((CUstream)10, &id) == 0 && used == 256 * MIB);
+    end_result = CUDA_SUCCESS;
 }
 
 /** Hold another per-thread capture until the origin thread has ended its own. */
@@ -166,6 +175,22 @@ static void check_context_identity(void) {
     REQUIRE(cuStreamEndCapture_ptsz(NULL, &graph) == end_result);
     REQUIRE(used == 256 * MIB);
     current_context = 1;
+    end_result = CUDA_SUCCESS;
+}
+
+/** Leave native capture active when its per-thread context identity cannot be resolved. */
+static void check_context_failure(void) {
+    REQUIRE(cuStreamBeginCapture_v2(CU_STREAM_PER_THREAD, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);
+    REQUIRE(graph_record(capture, 0, 100 * MIB, 1, capture_id) == CUDA_SUCCESS);
+    int before = end_calls;
+    context_result = CUDA_ERROR_UNKNOWN;
+    CUgraph graph;
+    REQUIRE(cuStreamEndCapture_ptsz(NULL, &graph) == context_result);
+    REQUIRE(end_calls == before && capture != NULL && used == 356 * MIB);
+    context_result = CUDA_SUCCESS;
+    end_result = CUDA_ERROR_STREAM_CAPTURE_INVALIDATED;
+    REQUIRE(cuStreamEndCapture_ptsz(NULL, &graph) == end_result);
+    REQUIRE(used == 256 * MIB);
     end_result = CUDA_SUCCESS;
 }
 
@@ -239,7 +264,8 @@ int main(void) {
     REQUIRE(cuStreamEndCapture((CUstream)10, &graph) == CUDA_SUCCESS);
     REQUIRE(cuStreamBeginCapture_ptsz(NULL) == CUDA_SUCCESS);
     REQUIRE(cuStreamEndCapture_ptsz(NULL, &graph) == CUDA_SUCCESS);
-    check_failed_end(); check_thread_identity(); check_context_identity(); check_transition_serialization();
+    check_failed_end(); check_thread_identity(); check_context_identity();
+    check_context_failure(); check_transition_serialization();
     puts("PASS: capture identity, terminal errors, and allocation transition ordering");
     return 0;
 }
