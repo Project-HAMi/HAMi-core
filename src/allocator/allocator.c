@@ -399,6 +399,7 @@ int remove_chunk_async(
     return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFreeAsync, dptr, hStream);
 }
 
+/** Keep asynchronous free tracking within the capture transition lock. */
 int free_raw_async(CUdeviceptr dptr, CUstream hStream) {
     pthread_mutex_lock(&mutex);
     unsigned int tmp = remove_chunk_async(device_allocasync, dptr, hStream);
