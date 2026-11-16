@@ -90,6 +90,16 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemGetAddressRange_v2"},
     {.name = "cuMemcpyAsync"},
     {.name = "cuMemcpyAsync_ptsz"},
+    {.name = "cuMemcpyHtoDAsync_v2_ptsz"},
+    {.name = "cuMemcpyDtoHAsync_v2_ptsz"},
+    {.name = "cuMemcpyDtoDAsync_v2_ptsz"},
+    {.name = "cuMemsetD8Async_ptsz"},
+    {.name = "cuMemsetD2D8Async_ptsz"},
+    {.name = "cuMemsetD16Async_ptsz"},
+    {.name = "cuMemsetD2D16Async_ptsz"},
+    {.name = "cuMemsetD32Async_ptsz"},
+    {.name = "cuMemsetD2D32Async_ptsz"},
+    {.name = "cuLaunchKernel_ptsz"},
     {.name = "cuMemcpyAtoD_v2"},
     {.name = "cuMemcpyDtoA_v2"},
     {.name = "cuMemcpyDtoD_v2"},
@@ -390,12 +400,28 @@ static void *find_symbols_with_flags(const char *symbol, int cudaVersion, cuuint
 /** Resolve known stream hooks while preserving native availability and stream semantics. */
 static int resolve_stream_proc(const char *symbol, void **pfn, int version, cuuint64_t flags,
                                 CUdriverProcAddressQueryResult *status, int v2, CUresult *result) {
-    static const struct { const char *base; const char *per_thread; } hooks[] = {
+    static const struct {
+        const char *base, *per_thread, *legacy;
+        int min_version;
+    } hooks[] = {
         {"cuMemAllocAsync", "cuMemAllocAsync_ptsz"},
         {"cuMemAllocFromPoolAsync", "cuMemAllocFromPoolAsync_ptsz"},
         {"cuMemFreeAsync", "cuMemFreeAsync_ptsz"},
         {"cuMemcpyAsync", "cuMemcpyAsync_ptsz"},
-        {"cuStreamSynchronize", "cuStreamSynchronize_ptsz"}
+        {"cuStreamSynchronize", "cuStreamSynchronize_ptsz"},
+        {"cuMemcpyHtoDAsync", "cuMemcpyHtoDAsync_v2_ptsz", "cuMemcpyHtoDAsync_v2", 3020},
+        {"cuMemcpyDtoHAsync", "cuMemcpyDtoHAsync_v2_ptsz", "cuMemcpyDtoHAsync_v2", 3020},
+        {"cuMemcpyDtoDAsync", "cuMemcpyDtoDAsync_v2_ptsz", "cuMemcpyDtoDAsync_v2", 3020},
+        {"cuMemcpyHtoDAsync_v2", "cuMemcpyHtoDAsync_v2_ptsz", "cuMemcpyHtoDAsync_v2", 0},
+        {"cuMemcpyDtoHAsync_v2", "cuMemcpyDtoHAsync_v2_ptsz", "cuMemcpyDtoHAsync_v2", 0},
+        {"cuMemcpyDtoDAsync_v2", "cuMemcpyDtoDAsync_v2_ptsz", "cuMemcpyDtoDAsync_v2", 0},
+        {"cuMemsetD8Async", "cuMemsetD8Async_ptsz", "cuMemsetD8Async", 0},
+        {"cuMemsetD2D8Async", "cuMemsetD2D8Async_ptsz", "cuMemsetD2D8Async", 0},
+        {"cuMemsetD16Async", "cuMemsetD16Async_ptsz", "cuMemsetD16Async", 0},
+        {"cuMemsetD2D16Async", "cuMemsetD2D16Async_ptsz", "cuMemsetD2D16Async", 0},
+        {"cuMemsetD32Async", "cuMemsetD32Async_ptsz", "cuMemsetD32Async", 0},
+        {"cuMemsetD2D32Async", "cuMemsetD2D32Async_ptsz", "cuMemsetD2D32Async", 0},
+        {"cuLaunchKernel", "cuLaunchKernel_ptsz", "cuLaunchKernel", 0}
     };
     for (size_t i = 0; i < sizeof(hooks) / sizeof(hooks[0]); i++) {
         int named_per_thread = strcmp(symbol, hooks[i].per_thread) == 0;
@@ -405,8 +431,9 @@ static int resolve_stream_proc(const char *symbol, void **pfn, int version, cuui
             : CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress, symbol, pfn, version, flags);
         if (*result == CUDA_SUCCESS && *pfn != NULL &&
             (!v2 || status == NULL || *status == CU_GET_PROC_ADDRESS_SUCCESS)) {
+            if (!named_per_thread && version < hooks[i].min_version) return 1;
             const char *name = named_per_thread || (flags & CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM)
-                ? hooks[i].per_thread : hooks[i].base;
+                ? hooks[i].per_thread : (hooks[i].legacy != NULL ? hooks[i].legacy : hooks[i].base);
             void *hook = __dlsym_hook_section(NULL, name);
             if (hook != NULL) *pfn = hook;
         }

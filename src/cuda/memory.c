@@ -842,3 +842,62 @@ CUresult cuDestroyExternalSemaphore(CUexternalSemaphore extSem) {
     LOG_DEBUG("cuDestroyExternalSemaphore");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuDestroyExternalSemaphore,extSem);
 }
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuMemcpyHtoDAsync_v2_ptsz(CUdeviceptr dst, const void *src, size_t size, CUstream stream) {
+    return cuMemcpyHtoDAsync_v2(dst, src, size, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuMemcpyDtoHAsync_v2_ptsz(void *dst, CUdeviceptr src, size_t size, CUstream stream) {
+    return cuMemcpyDtoHAsync_v2(dst, src, size, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuMemcpyDtoDAsync_v2_ptsz(CUdeviceptr dst, CUdeviceptr src, size_t size, CUstream stream) {
+    return cuMemcpyDtoDAsync_v2(dst, src, size, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuMemsetD8Async_ptsz(CUdeviceptr ptr, unsigned char value, size_t count, CUstream stream) {
+    return cuMemsetD8Async(ptr, value, count, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuMemsetD2D8Async_ptsz(CUdeviceptr ptr, size_t pitch, unsigned char value, size_t width,
+    size_t height, CUstream stream) {
+    return cuMemsetD2D8Async(ptr, pitch, value, width, height,
+        stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuMemsetD16Async_ptsz(CUdeviceptr ptr, uint16_t value, size_t count, CUstream stream) {
+    return cuMemsetD16Async(ptr, value, count, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuMemsetD2D16Async_ptsz(CUdeviceptr ptr, size_t pitch, uint16_t value, size_t width, size_t height,
+    CUstream stream) {
+    return cuMemsetD2D16Async(ptr, pitch, value, width, height,
+        stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuMemsetD32Async_ptsz(CUdeviceptr ptr, unsigned int value, size_t count, CUstream stream) {
+    return cuMemsetD32Async(ptr, value, count, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuMemsetD2D32Async_ptsz(CUdeviceptr ptr, size_t pitch, unsigned int value, size_t width,
+    size_t height, CUstream stream) {
+    return cuMemsetD2D32Async(ptr, pitch, value, width, height,
+        stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuLaunchKernel_ptsz(CUfunction function, unsigned int gx, unsigned int gy, unsigned int gz,
+                              unsigned int bx, unsigned int by, unsigned int bz, unsigned int shared,
+                              CUstream stream, void **params, void **extra) {
+    return cuLaunchKernel(function, gx, gy, gz, bx, by, bz, shared,
+        stream == NULL ? CU_STREAM_PER_THREAD : stream, params, extra);
+}

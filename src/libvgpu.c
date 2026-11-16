@@ -230,6 +230,16 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemcpyPeerAsync);
     DLSYM_HOOK_FUNC(cuMemcpyAsync);
     DLSYM_HOOK_FUNC(cuMemcpyAsync_ptsz);
+    DLSYM_HOOK_FUNC(cuMemcpyHtoDAsync_v2_ptsz);
+    DLSYM_HOOK_FUNC(cuMemcpyDtoHAsync_v2_ptsz);
+    DLSYM_HOOK_FUNC(cuMemcpyDtoDAsync_v2_ptsz);
+    DLSYM_HOOK_FUNC(cuMemsetD8Async_ptsz);
+    DLSYM_HOOK_FUNC(cuMemsetD2D8Async_ptsz);
+    DLSYM_HOOK_FUNC(cuMemsetD16Async_ptsz);
+    DLSYM_HOOK_FUNC(cuMemsetD2D16Async_ptsz);
+    DLSYM_HOOK_FUNC(cuMemsetD32Async_ptsz);
+    DLSYM_HOOK_FUNC(cuMemsetD2D32Async_ptsz);
+    DLSYM_HOOK_FUNC(cuLaunchKernel_ptsz);
     DLSYM_HOOK_FUNC(cuMemcpyAtoD_v2);
     DLSYM_HOOK_FUNC(cuMemcpyDtoA_v2);
     DLSYM_HOOK_FUNC(cuMemcpyDtoD_v2);

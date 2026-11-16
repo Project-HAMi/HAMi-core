@@ -21,6 +21,11 @@ static int calls, completions, legacy_calls, checks;
 static int launches, capture_starts, capture_ends;
 static CUstream expected_stream;
 static CUDA_GRAPH_INSTANTIATE_PARAMS *expected_params;
+int pidfound = 1;
+static int preparations, limits;
+void pre_launch_kernel(void) { preparations++; }
+/** Require the existing quota throttle for the kernel dimensions. */
+void rate_limiter(int64_t grid, int64_t block) { REQUIRE(grid == 24 && block == 120); limits++; }
 
 void ensure_initialized(void) {}
 void ensure_hostpid(void) {}
@@ -102,6 +107,86 @@ static CUresult legacy_params(CUgraphExec *exec, CUgraph graph, CUDA_GRAPH_INSTA
     (void)exec; (void)graph; (void)params; legacy_calls++; return native_result;
 }
 
+
+/** Check the host-copy arguments delivered to native CUDA. */
+static CUresult native_htod(CUdeviceptr dst, const void *src, size_t size, CUstream stream) {
+    REQUIRE(dst == 101 && src == (const void *)202 && size == 32); return record_stream(stream);
+}
+
+/** Check the host-readback arguments delivered to native CUDA. */
+static CUresult native_dtoh(void *dst, CUdeviceptr src, size_t size, CUstream stream) {
+    REQUIRE(dst == (void *)101 && src == 202 && size == 32); return record_stream(stream);
+}
+
+/** Check the memset arguments delivered to native CUDA. */
+static CUresult native_set8(CUdeviceptr ptr, unsigned char value, size_t count, CUstream stream) {
+    REQUIRE(ptr == 101 && value == 7 && count == 32); return record_stream(stream);
+}
+
+/** Check the pitched memset arguments delivered to native CUDA. */
+static CUresult native_set2d8(CUdeviceptr ptr, size_t pitch, unsigned char value,
+                                  size_t width, size_t height, CUstream stream) {
+    REQUIRE(ptr == 101 && pitch == 128 && value == 7 && width == 16 && height == 2);
+    return record_stream(stream);
+}
+
+/** Check the memset arguments delivered to native CUDA. */
+static CUresult native_set16(CUdeviceptr ptr, uint16_t value, size_t count, CUstream stream) {
+    REQUIRE(ptr == 101 && value == 7 && count == 32); return record_stream(stream);
+}
+
+/** Check the pitched memset arguments delivered to native CUDA. */
+static CUresult native_set2d16(CUdeviceptr ptr, size_t pitch, uint16_t value,
+                                  size_t width, size_t height, CUstream stream) {
+    REQUIRE(ptr == 101 && pitch == 128 && value == 7 && width == 16 && height == 2);
+    return record_stream(stream);
+}
+
+/** Check the memset arguments delivered to native CUDA. */
+static CUresult native_set32(CUdeviceptr ptr, unsigned int value, size_t count, CUstream stream) {
+    REQUIRE(ptr == 101 && value == 7 && count == 32); return record_stream(stream);
+}
+
+/** Check the pitched memset arguments delivered to native CUDA. */
+static CUresult native_set2d32(CUdeviceptr ptr, size_t pitch, unsigned int value,
+                                  size_t width, size_t height, CUstream stream) {
+    REQUIRE(ptr == 101 && pitch == 128 && value == 7 && width == 16 && height == 2);
+    return record_stream(stream);
+}
+
+/** Check kernel arguments and require the existing compute-limit path. */
+static CUresult native_kernel(CUfunction function, unsigned int gx, unsigned int gy, unsigned int gz,
+                               unsigned int bx, unsigned int by, unsigned int bz, unsigned int shared,
+                               CUstream stream, void **params, void **extra) {
+    REQUIRE(function == (CUfunction)8 && gx == 2 && gy == 3 && gz == 4);
+    REQUIRE(bx == 4 && by == 5 && bz == 6 && shared == 32 && params == NULL && extra == NULL);
+    REQUIRE(preparations == 1 && limits == 1);
+    return record_stream(stream);
+}
+
+/** Exercise added copy, memset, and kernel aliases with every stream and native result. */
+static void check_submission_wrappers(CUstream stream) {
+    CUstream expected = stream == NULL ? CU_STREAM_PER_THREAD : stream;
+    for (int op = 0; op < 10; op++) {
+        calls = preparations = limits = 0;
+        CUresult result = CUDA_ERROR_UNKNOWN;
+        switch (op) {
+            case 0: result = cuMemcpyHtoDAsync_v2_ptsz(101, (const void *)202, 32, stream); break;
+            case 1: result = cuMemcpyDtoHAsync_v2_ptsz((void *)101, 202, 32, stream); break;
+            case 2: result = cuMemcpyDtoDAsync_v2_ptsz(101, 202, 32, stream); break;
+            case 3: result = cuMemsetD8Async_ptsz(101, 7, 32, stream); break;
+            case 4: result = cuMemsetD16Async_ptsz(101, 7, 32, stream); break;
+            case 5: result = cuMemsetD32Async_ptsz(101, 7, 32, stream); break;
+            case 6: result = cuMemsetD2D8Async_ptsz(101, 128, 7, 16, 2, stream); break;
+            case 7: result = cuMemsetD2D16Async_ptsz(101, 128, 7, 16, 2, stream); break;
+            case 8: result = cuMemsetD2D32Async_ptsz(101, 128, 7, 16, 2, stream); break;
+            case 9: result = cuLaunchKernel_ptsz((CUfunction)8, 2, 3, 4, 4, 5, 6, 32, stream, NULL, NULL); break;
+        }
+        REQUIRE(result == native_result && calls == 1 && seen_stream == expected);
+        checks++;
+    }
+}
+
 /** Invoke each actual wrapper and check the stream delivered to its dependencies. */
 static void check_wrappers(CUstream stream) {
     CUstream expected = stream == NULL ? CU_STREAM_PER_THREAD : stream;
@@ -156,6 +241,16 @@ static void check_instantiation(CUstream stream) {
 int main(void) {
     log_utils_init();
     cuda_library_entry[OVERRIDE_cuMemcpyAsync].fn_ptr = native_copy;
+    cuda_library_entry[OVERRIDE_cuMemcpyHtoDAsync_v2].fn_ptr = native_htod;
+    cuda_library_entry[OVERRIDE_cuMemcpyDtoHAsync_v2].fn_ptr = native_dtoh;
+    cuda_library_entry[OVERRIDE_cuMemcpyDtoDAsync_v2].fn_ptr = native_copy;
+    cuda_library_entry[OVERRIDE_cuLaunchKernel].fn_ptr = native_kernel;
+    cuda_library_entry[OVERRIDE_cuMemsetD8Async].fn_ptr = native_set8;
+    cuda_library_entry[OVERRIDE_cuMemsetD2D8Async].fn_ptr = native_set2d8;
+    cuda_library_entry[OVERRIDE_cuMemsetD16Async].fn_ptr = native_set16;
+    cuda_library_entry[OVERRIDE_cuMemsetD2D16Async].fn_ptr = native_set2d16;
+    cuda_library_entry[OVERRIDE_cuMemsetD32Async].fn_ptr = native_set32;
+    cuda_library_entry[OVERRIDE_cuMemsetD2D32Async].fn_ptr = native_set2d32;
     cuda_library_entry[OVERRIDE_cuStreamSynchronize].fn_ptr = record_stream;
     cuda_library_entry[OVERRIDE_cuGraphLaunch].fn_ptr = native_submit;
     cuda_library_entry[OVERRIDE_cuGraphUpload].fn_ptr = native_submit;
@@ -169,6 +264,7 @@ int main(void) {
         for (size_t i = 0; i < sizeof(streams) / sizeof(streams[0]); i++) {
             check_wrappers(streams[i]);
             check_instantiation(streams[i]);
+            check_submission_wrappers(streams[i]);
         }
     }
     printf("PASS: %d production wrapper calls preserve stream semantics and results\n", checks);

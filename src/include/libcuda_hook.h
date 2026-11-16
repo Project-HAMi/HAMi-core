@@ -122,6 +122,16 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuMemGetAddressRange_v2),
     CUDA_OVERRIDE_ENUM(cuMemcpyAsync),
     CUDA_OVERRIDE_ENUM(cuMemcpyAsync_ptsz),
+    CUDA_OVERRIDE_ENUM(cuMemcpyHtoDAsync_v2_ptsz),
+    CUDA_OVERRIDE_ENUM(cuMemcpyDtoHAsync_v2_ptsz),
+    CUDA_OVERRIDE_ENUM(cuMemcpyDtoDAsync_v2_ptsz),
+    CUDA_OVERRIDE_ENUM(cuMemsetD8Async_ptsz),
+    CUDA_OVERRIDE_ENUM(cuMemsetD2D8Async_ptsz),
+    CUDA_OVERRIDE_ENUM(cuMemsetD16Async_ptsz),
+    CUDA_OVERRIDE_ENUM(cuMemsetD2D16Async_ptsz),
+    CUDA_OVERRIDE_ENUM(cuMemsetD32Async_ptsz),
+    CUDA_OVERRIDE_ENUM(cuMemsetD2D32Async_ptsz),
+    CUDA_OVERRIDE_ENUM(cuLaunchKernel_ptsz),
     CUDA_OVERRIDE_ENUM(cuMemcpyAtoD_v2),
     CUDA_OVERRIDE_ENUM(cuMemcpyDtoA_v2),
     CUDA_OVERRIDE_ENUM(cuMemcpyDtoD_v2),
@@ -321,3 +331,19 @@ CUresult cuGraphInstantiate(CUgraphExec *phGraphExec, CUgraph hGraph, CUgraphNod
 CUresult cuStreamBeginCapture_v2(CUstream stream, CUstreamCaptureMode mode);
 #undef cuStreamEndCapture
 CUresult cuStreamEndCapture(CUstream stream, CUgraph *graph);
+
+CUresult cuMemcpyHtoDAsync_v2_ptsz(CUdeviceptr dst, const void *src, size_t size, CUstream stream);
+CUresult cuMemcpyDtoHAsync_v2_ptsz(void *dst, CUdeviceptr src, size_t size, CUstream stream);
+CUresult cuMemcpyDtoDAsync_v2_ptsz(CUdeviceptr dst, CUdeviceptr src, size_t size, CUstream stream);
+CUresult cuMemsetD8Async_ptsz(CUdeviceptr ptr, unsigned char value, size_t count, CUstream stream);
+CUresult cuMemsetD2D8Async_ptsz(CUdeviceptr ptr, size_t pitch, unsigned char value, size_t width,
+    size_t height, CUstream stream);
+CUresult cuMemsetD16Async_ptsz(CUdeviceptr ptr, uint16_t value, size_t count, CUstream stream);
+CUresult cuMemsetD2D16Async_ptsz(CUdeviceptr ptr, size_t pitch, uint16_t value, size_t width, size_t height,
+    CUstream stream);
+CUresult cuMemsetD32Async_ptsz(CUdeviceptr ptr, unsigned int value, size_t count, CUstream stream);
+CUresult cuMemsetD2D32Async_ptsz(CUdeviceptr ptr, size_t pitch, unsigned int value, size_t width,
+    size_t height, CUstream stream);
+CUresult cuLaunchKernel_ptsz(CUfunction function, unsigned int gx, unsigned int gy, unsigned int gz,
+                              unsigned int bx, unsigned int by, unsigned int bz, unsigned int shared,
+                              CUstream stream, void **params, void **extra);
