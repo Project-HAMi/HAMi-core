@@ -117,7 +117,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle"
-            OR TEST_TARGET_NAME STREQUAL "test_graph_pool_lifetimes")
+            OR TEST_TARGET_NAME STREQUAL "test_graph_pool_lifetimes"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_submission_accounting")
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/allocator/allocator.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/graph.c
@@ -127,9 +128,14 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         target_compile_options(${TEST_TARGET_NAME} PRIVATE -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
-        if (TEST_TARGET_NAME STREQUAL "test_graph_pool_lifetimes")
+        if (TEST_TARGET_NAME STREQUAL "test_graph_pool_lifetimes"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_submission_accounting")
             target_sources(${TEST_TARGET_NAME} PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/context.c)
+        endif()
+        if (TEST_TARGET_NAME STREQUAL "test_graph_submission_accounting")
+            target_sources(${TEST_TARGET_NAME} PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/stream.c)
         endif()
     elseif (TEST_TARGET_NAME STREQUAL "test_device_total_mem")
         add_executable(${TEST_TARGET_NAME}
@@ -281,7 +287,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat"
             OR TEST_TARGET_NAME STREQUAL "test_device_total_mem"
             OR TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle"
-            OR TEST_TARGET_NAME STREQUAL "test_graph_pool_lifetimes")
+            OR TEST_TARGET_NAME STREQUAL "test_graph_pool_lifetimes"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_submission_accounting")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_sm_limiter_step")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
@@ -462,3 +469,6 @@ set_tests_properties(graph_capture_lifecycle PROPERTIES TIMEOUT 15)
 
 add_test(NAME graph_pool_lifetimes COMMAND test_graph_pool_lifetimes)
 set_tests_properties(graph_pool_lifetimes PROPERTIES TIMEOUT 15)
+
+add_test(NAME graph_submission_accounting COMMAND test_graph_submission_accounting)
+set_tests_properties(graph_submission_accounting PROPERTIES TIMEOUT 20)

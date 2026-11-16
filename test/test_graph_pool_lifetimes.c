@@ -114,6 +114,16 @@ int main(void) {
     DRIVER(cuStreamBeginCapture_v2, driver_begin_capture);
     DRIVER(cuStreamEndCapture, driver_end_capture);
     DRIVER(cuCtxGetDevice, driver_device);
+    DRIVER(cuEventCreate, driver_event_create);
+    DRIVER(cuEventRecord, driver_event_record);
+    DRIVER(cuEventQuery, driver_event_query);
+    DRIVER(cuEventDestroy_v2, driver_event_destroy);
+    DRIVER(cuStreamGetId, driver_stream_id);
+    DRIVER(cuStreamGetCtx, driver_stream_ctx);
+    DRIVER(cuCtxGetCurrent, driver_current);
+    DRIVER(cuCtxGetId, driver_context_id);
+    DRIVER(cuCtxPushCurrent_v2, driver_push);
+    DRIVER(cuCtxPopCurrent_v2, driver_pop);
     test_serial_pool(); test_output_replay(); test_peak_removal();
     test_query_failure(); test_graph_handle_reuse(); test_capture_queries();
     puts("PASS: graph pool reuse, retained backing, cached peaks, and output lifetimes");
