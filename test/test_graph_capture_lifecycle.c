@@ -67,6 +67,10 @@ static CUresult native_begin(CUstream stream, CUstreamCaptureMode mode) {
     return CUDA_SUCCESS;
 }
 
+static CUresult native_begin_original(CUstream stream) {
+    return native_begin(stream, CU_STREAM_CAPTURE_MODE_GLOBAL);
+}
+
 /** Simulate terminal and nonterminal native capture results. */
 static CUresult native_end(CUstream stream, CUgraph *graph) {
     (void)stream;
@@ -198,6 +202,12 @@ int main(void) {
     cuda_library_entry[OVERRIDE_cuMemAllocAsync].fn_ptr = native_allocate;
     cuda_library_entry[OVERRIDE_cuDeviceGetMemPool].fn_ptr = native_pool;
     cuda_library_entry[OVERRIDE_cuMemPoolGetAttribute].fn_ptr = native_attribute;
+    cuda_library_entry[OVERRIDE_cuStreamBeginCapture].fn_ptr = native_begin_original;
+    CUgraph graph;
+    REQUIRE(cuStreamBeginCapture((CUstream)10) == CUDA_SUCCESS);
+    REQUIRE(cuStreamEndCapture((CUstream)10, &graph) == CUDA_SUCCESS);
+    REQUIRE(cuStreamBeginCapture_ptsz(NULL) == CUDA_SUCCESS);
+    REQUIRE(cuStreamEndCapture(CU_STREAM_PER_THREAD, &graph) == CUDA_SUCCESS);
     check_failed_end(); check_thread_identity(); check_transition_serialization();
     puts("PASS: capture identity, terminal errors, and allocation transition ordering");
     return 0;

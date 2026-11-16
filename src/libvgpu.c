@@ -273,6 +273,8 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemCreate);
     DLSYM_HOOK_FUNC(cuMemRelease);
     DLSYM_HOOK_FUNC(cuMemMap);
+    DLSYM_HOOK_FUNC(cuStreamBeginCapture);
+    DLSYM_HOOK_FUNC(cuStreamBeginCapture_ptsz);
     DLSYM_HOOK_FUNC(cuStreamBeginCapture_v2);
     DLSYM_HOOK_FUNC(cuStreamEndCapture);
     DLSYM_HOOK_FUNC(cuMemUnmap);

@@ -174,6 +174,8 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuMemCreate),
     CUDA_OVERRIDE_ENUM(cuMemRelease),
     CUDA_OVERRIDE_ENUM(cuMemMap),
+    CUDA_OVERRIDE_ENUM(cuStreamBeginCapture),
+    CUDA_OVERRIDE_ENUM(cuStreamBeginCapture_ptsz),
     CUDA_OVERRIDE_ENUM(cuStreamBeginCapture_v2),
     CUDA_OVERRIDE_ENUM(cuStreamEndCapture),
     CUDA_OVERRIDE_ENUM(cuMemUnmap),
@@ -295,3 +297,7 @@ CUresult cuGetProcAddress( const char* symbol, void** pfn, int  cudaVersion, cuu
 #undef cuGraphInstantiate
 CUresult cuGraphInstantiate(CUgraphExec *phGraphExec, CUgraph hGraph, CUgraphNode *phErrorNode, char *logBuffer, size_t bufferSize);
 
+
+#undef cuStreamBeginCapture
+CUresult cuStreamBeginCapture(CUstream stream);
+CUresult cuStreamBeginCapture_ptsz(CUstream stream);
