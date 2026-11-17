@@ -656,14 +656,20 @@ static CUresult graph_add_node(cuda_sym_t add, int edges, CUgraphNode *node, CUg
             params->alloc.bytesize, id, id != 0, &entry);
         if (res != CUDA_SUCCESS) return res;
     }
+#if CUDA_VERSION >= 13000
+    if (child != NULL) {
+        CUresult res = graph_child_begin(graph, child);
+        if (res != CUDA_SUCCESS) return res;
+    }
+#endif
     CUresult res = edges ? add(node, graph, deps, data, count, params)
                          : add(node, graph, deps, count, params);
+#if CUDA_VERSION >= 13000
+    if (child != NULL) graph_child_end(graph, child, res);
+#endif
     graph_alloc_end(entry, res == CUDA_SUCCESS && charge ? params->alloc.dptr : 0, res);
     if (res == CUDA_SUCCESS && params != NULL && params->type == CU_GRAPH_NODE_TYPE_MEM_FREE)
         graph_mark_free(graph, params->free.dptr);
-#if CUDA_VERSION >= 13000
-    if (res == CUDA_SUCCESS && child != NULL) graph_child_moved(graph, child);
-#endif
     return res;
 }
 

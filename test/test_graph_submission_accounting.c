@@ -123,6 +123,43 @@ static void test_owned_children(void) {
     gpu_done = 1;
     destroy(root, x); destroy(other, y); clean();
 }
+/** Reject combined child demand before native graph mutation and restore failed moves. */
+static void test_owned_child_admission(void) {
+    CUgraph child = make_graph(), parent = make_graph(), root = make_graph();
+    REQUIRE(add(child, 400, 1, NULL) == CUDA_SUCCESS);
+    move_child(parent, child); move_child(root, parent);
+    int before = nodes;
+    REQUIRE(add(root, 400, 1, NULL) == CUDA_ERROR_OUT_OF_MEMORY);
+    REQUIRE(nodes == before && used == 656 * MIB);
+    REQUIRE(add(root, 300, 1, NULL) == CUDA_SUCCESS);
+    before = nodes;
+    REQUIRE(add(root, 100, 1, NULL) == CUDA_ERROR_OUT_OF_MEMORY);
+    REQUIRE(nodes == before && used == 956 * MIB);
+    REQUIRE(cuGraphDestroy(root) == CUDA_SUCCESS); clean();
+
+    child = make_graph(); parent = make_graph();
+    REQUIRE(add(child, 400, 1, NULL) == CUDA_SUCCESS);
+    REQUIRE(add(parent, 400, 1, NULL) == CUDA_SUCCESS);
+    CUgraphNodeParams params = {0}; CUgraphNode node;
+    params.type = CU_GRAPH_NODE_TYPE_GRAPH; params.graph.graph = child;
+    params.graph.ownership = CU_GRAPH_CHILD_GRAPH_OWNERSHIP_MOVE;
+    uintptr_t serial_before = serial;
+    REQUIRE(cuGraphAddNode_v2(&node, parent, NULL, NULL, 0, &params) == CUDA_ERROR_OUT_OF_MEMORY);
+    REQUIRE(serial == serial_before && used == 656 * MIB);
+    REQUIRE(cuGraphDestroy(child) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(parent) == CUDA_SUCCESS); clean();
+
+    child = make_graph(); parent = make_graph();
+    REQUIRE(add(child, 300, 1, NULL) == CUDA_SUCCESS);
+    REQUIRE(add(parent, 400, 1, NULL) == CUDA_SUCCESS);
+    params.graph.graph = child;
+    add_result = CUDA_ERROR_INVALID_VALUE;
+    REQUIRE(cuGraphAddNode_v2(&node, parent, NULL, NULL, 0, &params) == add_result);
+    add_result = CUDA_SUCCESS;
+    REQUIRE(used == 656 * MIB);
+    REQUIRE(cuGraphDestroy(child) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(parent) == CUDA_SUCCESS); clean();
+}
 #endif
 
 static int block_destroy, destroy_entered, reused_ready, reused_done;
@@ -653,6 +690,12 @@ int main(void) {
             test_stream_destroy_race();
         } else if (strcmp(focus, "pending-free") == 0) {
             test_pending_allocation_free();
+        } else if (strcmp(focus, "child-admission") == 0) {
+#if CUDA_VERSION >= 13000
+            test_owned_child_admission();
+#else
+            REQUIRE(0);
+#endif
         } else if (strcmp(focus, "child") == 0) {
 #if CUDA_VERSION >= 13000
             test_owned_children();
@@ -670,6 +713,7 @@ int main(void) {
     test_pending_allocation_free();
 #if CUDA_VERSION >= 13000
     test_owned_children();
+    test_owned_child_admission();
 #endif
     test_stream_destroy_race();
     test_external_capture_queries();

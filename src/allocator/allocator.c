@@ -542,15 +542,25 @@ static void graph_group_put(graph_group *group) {
     free(group);
 }
 
-/** Add a pending allocation and update the cached peak for its device. */
+/** Sum pending allocations owned by the same root graph. */
+static size_t graph_pending_total(CUgraph owner, int dev) {
+    size_t total = 0;
+    for (graph_group *g = graph_groups; g != NULL; g = g->next) {
+        if (g->owner == owner) total += g->pending[dev];
+    }
+    return total;
+}
+
+/** Add a pending allocation and update its owning root's cached demand. */
 static void graph_pending_add(graph_group *group, int dev, size_t bytes) {
     group->pending[dev] += bytes;
-    if (group->pending[dev] > graph_pending_peak[dev]) graph_pending_peak[dev] = group->pending[dev];
+    size_t total = graph_pending_total(group->owner, dev);
+    if (total > graph_pending_peak[dev]) graph_pending_peak[dev] = total;
 }
 
 /** Remove a pending allocation and invalidate its cached peak when needed. */
 static void graph_pending_remove(graph_group *group, int dev, size_t bytes) {
-    if (group->pending[dev] == graph_pending_peak[dev]) graph_pending_dirty |= 1u << dev;
+    if (graph_pending_total(group->owner, dev) == graph_pending_peak[dev]) graph_pending_dirty |= 1u << dev;
     group->pending[dev] -= bytes;
 }
 
@@ -718,7 +728,8 @@ static void graph_update_cache(void) {
         if (!(graph_pending_dirty & (1u << dev))) continue;
         graph_pending_peak[dev] = 0;
         for (graph_group *g = graph_groups; g != NULL; g = g->next) {
-            if (g->pending[dev] > graph_pending_peak[dev]) graph_pending_peak[dev] = g->pending[dev];
+            size_t total = graph_pending_total(g->owner, dev);
+            if (total > graph_pending_peak[dev]) graph_pending_peak[dev] = total;
         }
     }
     graph_pending_dirty = 0;
@@ -1134,12 +1145,32 @@ static CUresult graph_exec_collect_frees(graph_exec_state *s, CUgraph graph) {
     return res;
 }
 
-/** Associate moved child allocations with their new owning root. */
-void graph_child_moved(CUgraph parent, CUgraph child) {
+/** Reserve combined pending demand before moving a child into its parent. */
+int graph_child_begin(CUgraph parent, CUgraph child) {
     pthread_mutex_lock(&graph_mutex);
-    for (graph_group *g = graph_groups; g != NULL; g = g->next) {
-        if (g->owner == child) g->owner = parent;
+    graph_refresh();
+    graph_update_cache();
+    for (int dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
+        size_t total = graph_pending_total(parent, dev);
+        if (parent != child) total += graph_pending_total(child, dev);
+        if (total > graph_pending_peak[dev]) graph_pending_peak[dev] = total;
     }
+    int ret = graph_rebalance(1);
+    if (ret != CUDA_SUCCESS) {
+        graph_pending_dirty = (1u << CUDA_DEVICE_MAX_COUNT) - 1;
+        graph_rebalance(0);
+        pthread_mutex_unlock(&graph_mutex);
+    }
+    return ret;
+}
+
+/** Commit child ownership or restore the reservation after native failure. */
+void graph_child_end(CUgraph parent, CUgraph child, CUresult result) {
+    for (graph_group *g = graph_groups; g != NULL; g = g->next) {
+        if (result == CUDA_SUCCESS && g->owner == child) g->owner = parent;
+    }
+    graph_pending_dirty = (1u << CUDA_DEVICE_MAX_COUNT) - 1;
+    graph_rebalance(0);
     pthread_mutex_unlock(&graph_mutex);
 }
 
