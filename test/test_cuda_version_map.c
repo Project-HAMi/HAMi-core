@@ -341,13 +341,17 @@ static int check_stream_procs(void) {
 /** Preserve the original copy ABI when the requested CUDA version predates size_t counts. */
 static int check_legacy_copy_abi(void) {
     const char *names[] = {"cuMemcpyHtoDAsync", "cuMemcpyDtoHAsync", "cuMemcpyDtoDAsync"};
-    g_present[0] = "cuMemcpyHtoDAsync_v2"; g_present[1] = "cuMemcpyHtoDAsync_v2_ptsz";
-    g_present[2] = NULL;
+    const char *hooks[][2] = {
+        {"cuMemcpyHtoDAsync_v2", "cuMemcpyHtoDAsync_v2_ptsz"},
+        {"cuMemcpyDtoHAsync_v2", "cuMemcpyDtoHAsync_v2_ptsz"},
+        {"cuMemcpyDtoDAsync_v2", "cuMemcpyDtoDAsync_v2_ptsz"}
+    };
     lookup_result = CUDA_SUCCESS; lookup_status = CU_GET_PROC_ADDRESS_SUCCESS;
     lookup_pointer = (void *)"native";
     cuda_library_entry[OVERRIDE_cuGetProcAddress].fn_ptr = stub_get_proc_address;
     cuda_library_entry[OVERRIDE_cuGetProcAddress_v2].fn_ptr = stub_get_proc_address_v2;
     for (int n = 0; n < 3; n++) {
+        g_present[0] = hooks[n][0]; g_present[1] = hooks[n][1]; g_present[2] = NULL;
         void *pfn = NULL;
         if (cuGetProcAddress(names[n], &pfn, 3000, 0) != CUDA_SUCCESS || pfn != lookup_pointer) return 1;
     }
