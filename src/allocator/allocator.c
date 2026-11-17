@@ -425,6 +425,7 @@ int free_raw_async(CUdeviceptr dptr, CUstream hStream) {
 typedef struct graph_group {
     CUgraph graph;
     CUgraph owner;
+    uint64_t root;
     int refs;
     size_t total[CUDA_DEVICE_MAX_COUNT];
     size_t temporary[CUDA_DEVICE_MAX_COUNT];
@@ -536,6 +537,7 @@ static unsigned int graph_pending_dirty;
 static int graph_active_dirty;
 static uint64_t graph_thread_serial, graph_stream_epoch;
 static uint64_t graph_submit_serial;
+static uint64_t graph_root_serial;
 static _Thread_local uint64_t graph_thread_id;
 static CUcontext graph_primary_ctx[CUDA_DEVICE_MAX_COUNT];
 static cuuint64_t graph_primary_ctx_id[CUDA_DEVICE_MAX_COUNT];
@@ -553,11 +555,20 @@ static void graph_group_put(graph_group *group) {
     free(group);
 }
 
-/** Sum pending allocations owned by the same root graph. */
-static size_t graph_pending_total(CUgraph owner, int dev) {
+/** Resolve a live root without reusing a retired graph handle's identity. */
+static uint64_t graph_root_id(CUgraph owner) {
+    if (owner == NULL) return 0;
+    for (graph_group *g = graph_groups; g != NULL; g = g->next) {
+        if (g->owner == owner) return g->root;
+    }
+    return 0;
+}
+
+/** Sum pending allocations sharing a stable root identity. */
+static size_t graph_pending_total(uint64_t root, int dev) {
     size_t total = 0;
     for (graph_group *g = graph_groups; g != NULL; g = g->next) {
-        if (g->owner == owner) total += g->pending[dev];
+        if (g->root == root) total += g->pending[dev];
     }
     return total;
 }
@@ -565,13 +576,13 @@ static size_t graph_pending_total(CUgraph owner, int dev) {
 /** Add a pending allocation and update its owning root's cached demand. */
 static void graph_pending_add(graph_group *group, int dev, size_t bytes) {
     group->pending[dev] += bytes;
-    size_t total = graph_pending_total(group->owner, dev);
+    size_t total = graph_pending_total(group->root, dev);
     if (total > graph_pending_peak[dev]) graph_pending_peak[dev] = total;
 }
 
 /** Remove a pending allocation and invalidate its cached peak when needed. */
 static void graph_pending_remove(graph_group *group, int dev, size_t bytes) {
-    if (graph_pending_total(group->owner, dev) == graph_pending_peak[dev]) graph_pending_dirty |= 1u << dev;
+    if (graph_pending_total(group->root, dev) == graph_pending_peak[dev]) graph_pending_dirty |= 1u << dev;
     group->pending[dev] -= bytes;
 }
 
@@ -753,7 +764,7 @@ static void graph_update_cache(void) {
         if (!(graph_pending_dirty & (1u << dev))) continue;
         graph_pending_peak[dev] = 0;
         for (graph_group *g = graph_groups; g != NULL; g = g->next) {
-            size_t total = graph_pending_total(g->owner, dev);
+            size_t total = graph_pending_total(g->root, dev);
             if (total > graph_pending_peak[dev]) graph_pending_peak[dev] = total;
         }
     }
@@ -924,6 +935,8 @@ int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, cuuint64_t capid
         }
         group->graph = graph;
         group->owner = graph;
+        group->root = graph_root_id(graph);
+        if (group->root == 0) group->root = ++graph_root_serial;
         group->next = graph_groups;
         graph_groups = group;
     }
@@ -1203,9 +1216,10 @@ int graph_child_begin(CUgraph parent, CUgraph child) {
     pthread_mutex_lock(&graph_mutex);
     graph_refresh();
     graph_update_cache();
+    uint64_t parent_root = graph_root_id(parent), child_root = graph_root_id(child);
     for (int dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
-        size_t total = graph_pending_total(parent, dev);
-        if (parent != child) total += graph_pending_total(child, dev);
+        size_t total = graph_pending_total(parent_root, dev);
+        if (parent_root != child_root) total += graph_pending_total(child_root, dev);
         if (total > graph_pending_peak[dev]) graph_pending_peak[dev] = total;
     }
     int ret = graph_rebalance(1);
@@ -1219,8 +1233,13 @@ int graph_child_begin(CUgraph parent, CUgraph child) {
 
 /** Commit child ownership or restore the reservation after native failure. */
 void graph_child_end(CUgraph parent, CUgraph child, CUresult result) {
+    uint64_t root = graph_root_id(parent);
     for (graph_group *g = graph_groups; g != NULL; g = g->next) {
-        if (result == CUDA_SUCCESS && g->owner == child) g->owner = parent;
+        if (result == CUDA_SUCCESS && g->owner == child) {
+            if (root == 0) root = ++graph_root_serial;
+            g->owner = parent;
+            g->root = root;
+        }
     }
     graph_pending_dirty = (1u << CUDA_DEVICE_MAX_COUNT) - 1;
     graph_rebalance(0);
@@ -1652,6 +1671,18 @@ cuuint64_t graph_context_id(CUcontext ctx) {
     return id;
 }
 
+/** Account confirmed external frees before context teardown invalidates their events. */
+void graph_context_prepare_destroy(CUcontext ctx, cuuint64_t id) {
+    if (ctx == NULL) return;
+    pthread_mutex_lock(&graph_mutex);
+    for (graph_exec_state *s = graph_states; s != NULL; s = s->next) {
+        if (!s->pending && s->free_event_ctx == ctx && s->free_event_ctx_id == id)
+            graph_complete_frees(s, 0);
+    }
+    graph_rebalance(0);
+    pthread_mutex_unlock(&graph_mutex);
+}
+
 /** Retire charges and tracking associated with the destroyed context generation. */
 void graph_context_destroyed(CUcontext ctx, cuuint64_t id) {
     if (ctx == NULL) return;
@@ -1703,6 +1734,16 @@ void graph_primary_context(CUdevice dev, CUcontext ctx) {
     graph_primary_ctx[dev] = ctx;
     graph_primary_ctx_id[dev] = id;
     pthread_mutex_unlock(&graph_mutex);
+}
+
+/** Preserve completed frees before primary-context release or reset. */
+void graph_primary_context_prepare_release(CUdevice dev) {
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) return;
+    pthread_mutex_lock(&graph_mutex);
+    CUcontext ctx = graph_primary_ctx[dev];
+    cuuint64_t id = graph_primary_ctx_id[dev];
+    pthread_mutex_unlock(&graph_mutex);
+    graph_context_prepare_destroy(ctx, id);
 }
 
 /** Retire primary-context accounting after release or reset. */

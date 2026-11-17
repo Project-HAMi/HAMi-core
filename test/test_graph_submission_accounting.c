@@ -5,6 +5,116 @@
 
 #include "test/graph_accounting_fixture.h"
 
+size_t context_size;
+int ctx_activate[16];
+static CUresult context_destroy_result;
+static int primary_active;
+static void add_external_free(CUgraph graph, CUdeviceptr ptr, int generic);
+
+/** Invalidate only events belonging to the context being destroyed. */
+static CUresult driver_context_destroy(CUcontext ctx) {
+    if (context_destroy_result != CUDA_SUCCESS) return context_destroy_result;
+    for (int i = 0; i < 8192; i++) {
+        if (events[i].ctx == ctx) events[i].alive = 0;
+    }
+    return CUDA_SUCCESS;
+}
+
+/** Model primary-context release or reset without invalidating failed calls. */
+static CUresult driver_primary_destroy(CUdevice dev) {
+    REQUIRE(dev == 0);
+    return primary_active ? CUDA_SUCCESS : driver_context_destroy((CUcontext)2);
+}
+
+/** Return whether the simulated primary context still has another reference. */
+static CUresult driver_primary_state(CUdevice dev, unsigned int *flags, int *active) {
+    REQUIRE(dev == 0); *flags = 0; *active = primary_active;
+    return CUDA_SUCCESS;
+}
+
+/** Keep independent retired roots separate while rebuilding pending demand. */
+static void test_retired_roots(void) {
+    CUgraph graphs[2]; CUgraphExec execs[2];
+    for (int i = 0; i < 2; i++) {
+        graphs[i] = make_graph();
+        REQUIRE(add(graphs[i], 400, 1, NULL) == CUDA_SUCCESS);
+        execs[i] = instantiate(graphs[i]);
+        REQUIRE(cuGraphDestroy(graphs[i]) == CUDA_SUCCESS);
+    }
+    CUgraph other = make_graph();
+    REQUIRE(add(other, 500, 1, NULL) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(other) == CUDA_SUCCESS);
+    REQUIRE(used == 656 * MIB);
+    REQUIRE(reserve_device_memory(0, 300 * MIB) == CUDA_SUCCESS);
+    release_device_memory(0, 300 * MIB);
+    REQUIRE(add(graphs[0], 200, 1, NULL) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(graphs[0]) == CUDA_SUCCESS);
+    REQUIRE(used == 656 * MIB);
+    for (int i = 0; i < 2; i++) REQUIRE(cuGraphExecDestroy(execs[i]) == CUDA_SUCCESS);
+    clean();
+}
+
+/** Apply only completed external frees before any supported context teardown. */
+static void test_context_external_free(int mode, int completed, int newer) {
+    CUgraph a = make_graph(), b = make_graph(); CUdeviceptr ptr;
+    REQUIRE(add(a, 600, 0, &ptr) == CUDA_SUCCESS);
+    add_external_free(b, ptr, 0);
+    CUgraphExec x = instantiate(a), y = instantiate(b);
+    REQUIRE(cuGraphLaunch(x, (CUstream)10) == CUDA_SUCCESS);
+    REQUIRE(cuGraphLaunch(y, (CUstream)30) == CUDA_SUCCESS);
+    if (newer) REQUIRE(cuGraphLaunch(x, (CUstream)10) == CUDA_SUCCESS);
+    if (mode == 1 || mode == 2) graph_primary_context(0, (CUcontext)2);
+    completed_stream = completed ? (CUstream)30 : NULL;
+    if (mode == 0) {
+        REQUIRE(cuCtxDestroy_v2((CUcontext)2) == CUDA_SUCCESS);
+    } else if (mode == 1) {
+        REQUIRE(cuDevicePrimaryCtxRelease_v2(0) == CUDA_SUCCESS);
+    } else if (mode == 2) {
+        REQUIRE(cuDevicePrimaryCtxReset_v2(0) == CUDA_SUCCESS);
+    } else {
+#if CUDA_VERSION >= 12040
+        REQUIRE(cuGreenCtxDestroy((CUgreenCtx)2) == CUDA_SUCCESS);
+#else
+        REQUIRE(0);
+#endif
+    }
+    REQUIRE(reserve_device_memory(0, 300 * MIB) ==
+        (completed && !newer ? CUDA_SUCCESS : CUDA_ERROR_OUT_OF_MEMORY));
+    if (completed && !newer) release_device_memory(0, 300 * MIB);
+    else graph_ptr_freed(ptr);
+    completed_stream = NULL;
+    destroy(a, x); destroy(b, y); clean();
+}
+
+/** Preserve capture safety and live metadata when native context destruction fails. */
+static void test_context_cleanup_guards(int failure) {
+    CUgraph a = make_graph(), b = make_graph(), captured = NULL; CUdeviceptr ptr;
+    REQUIRE(add(a, 600, 0, &ptr) == CUDA_SUCCESS);
+    add_external_free(b, ptr, 0);
+    CUgraphExec x = instantiate(a), y = instantiate(b);
+    REQUIRE(cuGraphLaunch(x, (CUstream)10) == CUDA_SUCCESS);
+    REQUIRE(cuGraphLaunch(y, (CUstream)30) == CUDA_SUCCESS);
+    if (!failure) REQUIRE(cuStreamBeginCapture_v2((CUstream)10, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);
+    completed_stream = (CUstream)30;
+    int queries = event_queries;
+    context_destroy_result = failure ? CUDA_ERROR_UNKNOWN : CUDA_SUCCESS;
+    REQUIRE(cuCtxDestroy_v2((CUcontext)2) == context_destroy_result);
+    context_destroy_result = CUDA_SUCCESS;
+    if (failure) {
+        REQUIRE(reserve_device_memory(0, 300 * MIB) == CUDA_SUCCESS);
+        release_device_memory(0, 300 * MIB);
+        REQUIRE(cuGraphLaunch(x, (CUstream)10) == CUDA_SUCCESS);
+        REQUIRE(reserve_device_memory(0, 300 * MIB) == CUDA_ERROR_OUT_OF_MEMORY);
+    } else {
+        REQUIRE(event_queries == queries && used == 856 * MIB);
+        REQUIRE(cuStreamEndCapture((CUstream)10, &captured) == CUDA_SUCCESS);
+        REQUIRE(cuGraphDestroy(captured) == CUDA_SUCCESS);
+    }
+    graph_ptr_freed(ptr);
+    completed_stream = NULL;
+    destroy(a, x); destroy(b, y); clean();
+}
+
 /** Add an external free through either native node-creation ABI. */
 static void add_external_free(CUgraph graph, CUdeviceptr ptr, int generic) {
     CUgraphNode node;
@@ -150,6 +260,31 @@ static void move_child(CUgraph parent, CUgraph child) {
     params.graph.graph = child;
     params.graph.ownership = CU_GRAPH_CHILD_GRAPH_OWNERSHIP_MOVE;
     REQUIRE(cuGraphAddNode_v2(&node, parent, NULL, NULL, 0, &params) == CUDA_SUCCESS);
+}
+
+/** Preserve combined child demand after its owning root is destroyed. */
+static void test_retired_owned_roots(void) {
+    CUgraph parents[2]; CUgraphExec execs[2];
+    for (int i = 0; i < 2; i++) {
+        parents[i] = make_graph();
+        REQUIRE(add(parents[i], 100, 1, NULL) == CUDA_SUCCESS);
+        for (int j = 0; j < 2; j++) {
+            CUgraph child = make_graph();
+            REQUIRE(add(child, 150, 1, NULL) == CUDA_SUCCESS);
+            move_child(parents[i], child);
+        }
+        execs[i] = instantiate(parents[i]);
+        REQUIRE(cuGraphDestroy(parents[i]) == CUDA_SUCCESS);
+    }
+    CUgraph other = make_graph();
+    REQUIRE(add(other, 500, 1, NULL) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(other) == CUDA_SUCCESS);
+    REQUIRE(used == 656 * MIB);
+    REQUIRE(reserve_device_memory(0, 300 * MIB) == CUDA_SUCCESS);
+    release_device_memory(0, 300 * MIB);
+    REQUIRE(reserve_device_memory(0, 500 * MIB) == CUDA_ERROR_OUT_OF_MEMORY);
+    for (int i = 0; i < 2; i++) REQUIRE(cuGraphExecDestroy(execs[i]) == CUDA_SUCCESS);
+    clean();
 }
 
 /** Include moved and nested children in overlap admission and parent destruction. */
@@ -737,6 +872,14 @@ int main(void) {
     DRIVER(cuCtxGetId, driver_context_id);
     DRIVER(cuCtxPushCurrent_v2, driver_push);
     DRIVER(cuCtxPopCurrent_v2, driver_pop);
+    DRIVER(cuCtxDestroy_v2, driver_context_destroy);
+    DRIVER(cuDevicePrimaryCtxRelease_v2, driver_primary_destroy);
+    DRIVER(cuDevicePrimaryCtxReset_v2, driver_primary_destroy);
+    DRIVER(cuDevicePrimaryCtxGetState, driver_primary_state);
+#if CUDA_VERSION >= 12040
+    DRIVER(cuCtxFromGreenCtx, driver_green_context);
+    DRIVER(cuGreenCtxDestroy, driver_green_destroy);
+#endif
     DRIVER(cuStreamGetCaptureInfo_v3, driver_capture);
     DRIVER(cuStreamBeginCapture_v2, driver_begin_capture);
     DRIVER(cuStreamEndCapture, driver_end_capture);
@@ -766,6 +909,20 @@ int main(void) {
 #else
             REQUIRE(0);
 #endif
+        } else if (strcmp(focus, "retired-root") == 0) {
+            test_retired_roots();
+#if CUDA_VERSION >= 13000
+            test_retired_owned_roots();
+#endif
+        } else if (strcmp(focus, "context-free") == 0) {
+            for (int mode = 0; mode < 3 + (CUDA_VERSION >= 12040); mode++) {
+                for (int completed = 0; completed < 2; completed++)
+                    for (int newer = 0; newer <= completed; newer++)
+                        test_context_external_free(mode, completed, newer);
+            }
+            test_context_cleanup_guards(0); test_context_cleanup_guards(1);
+            primary_active = 1; test_context_external_free(1, 1, 0); primary_active = 0;
+            graph_primary_context_released(0, 0);
         } else {
             REQUIRE(0);
         }
@@ -778,10 +935,20 @@ int main(void) {
     test_upload_after_external_free();
     test_invalid_capture_free_reference();
     test_pending_allocation_free();
+    test_retired_roots();
 #if CUDA_VERSION >= 13000
     test_owned_children();
     test_owned_child_admission();
+    test_retired_owned_roots();
 #endif
+    for (int mode = 0; mode < 3 + (CUDA_VERSION >= 12040); mode++) {
+        for (int completed = 0; completed < 2; completed++)
+            for (int newer = 0; newer <= completed; newer++)
+                test_context_external_free(mode, completed, newer);
+    }
+    test_context_cleanup_guards(0); test_context_cleanup_guards(1);
+    primary_active = 1; test_context_external_free(1, 1, 0); primary_active = 0;
+    graph_primary_context_released(0, 0);
     test_stream_destroy_race();
     test_external_capture_queries();
     test_capture_context_failure(); test_event_failure(); test_serial_and_overlap();

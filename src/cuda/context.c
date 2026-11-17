@@ -78,6 +78,7 @@ CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
         rm_gpu_device_memory_usage(getpid(),dev,context_size,0);
     }
     ctx_activate[dev] = 0;
+    graph_primary_context_prepare_release(dev);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRelease_v2,dev);
     if (res == CUDA_SUCCESS) {
         unsigned int flags;
@@ -96,6 +97,7 @@ CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
 CUresult cuDevicePrimaryCtxReset_v2(CUdevice dev) {
     pthread_mutex_t *legacy = legacy_context_lock();
     pthread_mutex_t *guard = primary_context_lock(dev);
+    graph_primary_context_prepare_release(dev);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuDevicePrimaryCtxReset_v2, dev);
     if (res == CUDA_SUCCESS) graph_primary_context_released(dev, 1);
     if (guard != NULL) pthread_mutex_unlock(guard);
@@ -144,6 +146,7 @@ CUresult cuGreenCtxDestroy(CUgreenCtx green) {
     CUcontext ctx = NULL;
     CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxFromGreenCtx, &ctx, green);
     cuuint64_t id = graph_context_id(ctx);
+    graph_context_prepare_destroy(ctx, id);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGreenCtxDestroy, green);
     if (res == CUDA_SUCCESS && ctx != NULL) graph_context_destroyed(ctx, id);
     return res;
@@ -166,6 +169,7 @@ CUresult cuCtxDestroy_v2 ( CUcontext ctx ){
     pthread_mutex_t *legacy = legacy_context_lock();
     cuuint64_t id = graph_context_id(ctx);
     LOG_DEBUG("into cuCtxDestroy_v2 ctx=%p",ctx);
+    graph_context_prepare_destroy(ctx, id);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxDestroy_v2, ctx);
     if (res == CUDA_SUCCESS) graph_context_destroyed(ctx, id);
     if (legacy != NULL) pthread_mutex_unlock(legacy);
