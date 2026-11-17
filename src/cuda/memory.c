@@ -643,6 +643,10 @@ static CUresult graph_add_node(cuda_sym_t add, int edges, CUgraphNode *node, CUg
                                 const CUgraphNode *deps, const CUgraphEdgeData *data,
                                 size_t count, CUgraphNodeParams *params) {
     if (add == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+#if CUDA_VERSION >= 13000
+    CUgraph child = params != NULL && params->type == CU_GRAPH_NODE_TYPE_GRAPH &&
+        params->graph.ownership == CU_GRAPH_CHILD_GRAPH_OWNERSHIP_MOVE ? params->graph.graph : NULL;
+#endif
     int charge = params != NULL && params->type == CU_GRAPH_NODE_TYPE_MEM_ALLOC &&
         params->alloc.poolProps.location.type == CU_MEM_LOCATION_TYPE_DEVICE;
     graph_charge_entry *entry = NULL;
@@ -652,8 +656,17 @@ static CUresult graph_add_node(cuda_sym_t add, int edges, CUgraphNode *node, CUg
             params->alloc.bytesize, id, id != 0, &entry);
         if (res != CUDA_SUCCESS) return res;
     }
+#if CUDA_VERSION >= 13000
+    if (child != NULL) {
+        CUresult res = graph_child_begin(graph, child);
+        if (res != CUDA_SUCCESS) return res;
+    }
+#endif
     CUresult res = edges ? add(node, graph, deps, data, count, params)
                          : add(node, graph, deps, count, params);
+#if CUDA_VERSION >= 13000
+    if (child != NULL) graph_child_end(graph, child, res);
+#endif
     graph_alloc_end(entry, res == CUDA_SUCCESS && charge ? params->alloc.dptr : 0, res);
     if (res == CUDA_SUCCESS && params != NULL && params->type == CU_GRAPH_NODE_TYPE_MEM_FREE)
         graph_mark_free(graph, params->free.dptr);
@@ -861,4 +874,246 @@ CUresult cuWaitExternalSemaphoresAsync(const CUexternalSemaphore *extSemArray, c
 CUresult cuDestroyExternalSemaphore(CUexternalSemaphore extSem) {
     LOG_DEBUG("cuDestroyExternalSemaphore");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuDestroyExternalSemaphore,extSem);
+}
+
+/** Allocate asynchronously with per-thread semantics for a NULL stream. */
+CUresult cuMemAllocAsync_ptsz(CUdeviceptr *dptr, size_t bytesize, CUstream stream) {
+    return cuMemAllocAsync(dptr, bytesize, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+
+/** Allocate from a pool with per-thread semantics for a NULL stream. */
+CUresult cuMemAllocFromPoolAsync_ptsz(CUdeviceptr *dptr, size_t bytesize, CUmemoryPool pool, CUstream stream) {
+    return cuMemAllocFromPoolAsync(dptr, bytesize, pool, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+
+/** Free asynchronously with per-thread semantics for a NULL stream. */
+CUresult cuMemFreeAsync_ptsz(CUdeviceptr dptr, CUstream stream) {
+    return cuMemFreeAsync(dptr, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+
+/** Copy asynchronously with per-thread semantics for a NULL stream. */
+CUresult cuMemcpyAsync_ptsz(CUdeviceptr dst, CUdeviceptr src, size_t size, CUstream stream) {
+    return cuMemcpyAsync(dst, src, size, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuMemcpyHtoDAsync_v2_ptsz(CUdeviceptr dst, const void *src, size_t size, CUstream stream) {
+    return cuMemcpyHtoDAsync_v2(dst, src, size, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuMemcpyDtoHAsync_v2_ptsz(void *dst, CUdeviceptr src, size_t size, CUstream stream) {
+    return cuMemcpyDtoHAsync_v2(dst, src, size, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuMemcpyDtoDAsync_v2_ptsz(CUdeviceptr dst, CUdeviceptr src, size_t size, CUstream stream) {
+    return cuMemcpyDtoDAsync_v2(dst, src, size, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuMemsetD8Async_ptsz(CUdeviceptr ptr, unsigned char value, size_t count, CUstream stream) {
+    return cuMemsetD8Async(ptr, value, count, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuMemsetD2D8Async_ptsz(CUdeviceptr ptr, size_t pitch, unsigned char value, size_t width,
+    size_t height, CUstream stream) {
+    return cuMemsetD2D8Async(ptr, pitch, value, width, height,
+        stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuMemsetD16Async_ptsz(CUdeviceptr ptr, uint16_t value, size_t count, CUstream stream) {
+    return cuMemsetD16Async(ptr, value, count, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuMemsetD2D16Async_ptsz(CUdeviceptr ptr, size_t pitch, uint16_t value, size_t width, size_t height,
+    CUstream stream) {
+    return cuMemsetD2D16Async(ptr, pitch, value, width, height,
+        stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuMemsetD32Async_ptsz(CUdeviceptr ptr, unsigned int value, size_t count, CUstream stream) {
+    return cuMemsetD32Async(ptr, value, count, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuMemsetD2D32Async_ptsz(CUdeviceptr ptr, size_t pitch, unsigned int value, size_t width,
+    size_t height, CUstream stream) {
+    return cuMemsetD2D32Async(ptr, pitch, value, width, height,
+        stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve per-thread stream semantics through the existing CUDA hook. */
+CUresult cuLaunchKernel_ptsz(CUfunction function, unsigned int gx, unsigned int gy, unsigned int gz,
+                              unsigned int bx, unsigned int by, unsigned int bz, unsigned int shared,
+                              CUstream stream, void **params, void **extra) {
+    return cuLaunchKernel(function, gx, gy, gz, bx, by, bz, shared,
+        stream == NULL ? CU_STREAM_PER_THREAD : stream, params, extra);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemcpy2DAsync_v2_ptsz(const CUDA_MEMCPY2D *copy, CUstream stream) {
+    return cuMemcpy2DAsync_v2(copy, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemcpy3DAsync_v2_ptsz(const CUDA_MEMCPY3D *copy, CUstream stream) {
+    return cuMemcpy3DAsync_v2(copy, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemcpy3DPeerAsync_ptsz(const CUDA_MEMCPY3D_PEER *copy, CUstream stream) {
+    return cuMemcpy3DPeerAsync(copy, stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemcpyPeerAsync_ptsz(CUdeviceptr dst, CUcontext dst_ctx, CUdeviceptr src, CUcontext src_ctx,
+                                 size_t size, CUstream stream) {
+    return cuMemcpyPeerAsync(dst, dst_ctx, src, src_ctx, size,
+        stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemPrefetchAsync_ptsz(CUdeviceptr ptr, size_t count, CUdevice dev, CUstream stream) {
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemPrefetchAsync_ptsz, ptr, count, dev,
+        stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemPrefetchAsync_v2_ptsz(CUdeviceptr ptr, size_t count, CUmemLocation location, unsigned int flags,
+                                    CUstream stream) {
+    return cuMemPrefetchAsync_v2(ptr, count, location, flags,
+        stream == NULL ? CU_STREAM_PER_THREAD : stream);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuLaunchCooperativeKernel_ptsz(CUfunction function, unsigned int gx, unsigned int gy, unsigned int gz,
+                                        unsigned int bx, unsigned int by, unsigned int bz,
+                                        unsigned int shared, CUstream stream, void **params) {
+    return cuLaunchCooperativeKernel(function, gx, gy, gz, bx, by, bz, shared,
+        stream == NULL ? CU_STREAM_PER_THREAD : stream, params);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemcpy_ptds(CUdeviceptr dst, CUdeviceptr src, size_t size) {
+    ENSURE_RUNNING();
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuMemcpy_ptds) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemcpy_ptds, dst, src, size);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemcpyHtoD_v2_ptds(CUdeviceptr dst, const void *src, size_t size) {
+    ENSURE_RUNNING();
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuMemcpyHtoD_v2_ptds) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemcpyHtoD_v2_ptds, dst, src, size);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemcpyDtoH_v2_ptds(void *dst, CUdeviceptr src, size_t size) {
+    ENSURE_RUNNING();
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuMemcpyDtoH_v2_ptds) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemcpyDtoH_v2_ptds, dst, src, size);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemcpyDtoD_v2_ptds(CUdeviceptr dst, CUdeviceptr src, size_t size) {
+    ENSURE_RUNNING();
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuMemcpyDtoD_v2_ptds) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemcpyDtoD_v2_ptds, dst, src, size);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemcpyPeer_ptds(CUdeviceptr dst, CUcontext dst_ctx, CUdeviceptr src, CUcontext src_ctx, size_t size) {
+    ENSURE_RUNNING();
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuMemcpyPeer_ptds) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemcpyPeer_ptds, dst, dst_ctx, src, src_ctx, size);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemcpy2D_v2_ptds(const CUDA_MEMCPY2D *copy) {
+    ENSURE_RUNNING();
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuMemcpy2D_v2_ptds) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemcpy2D_v2_ptds, copy);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemcpy2DUnaligned_v2_ptds(const CUDA_MEMCPY2D *copy) {
+    ENSURE_RUNNING();
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuMemcpy2DUnaligned_v2_ptds) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemcpy2DUnaligned_v2_ptds, copy);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemcpy3D_v2_ptds(const CUDA_MEMCPY3D *copy) {
+    ENSURE_RUNNING();
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuMemcpy3D_v2_ptds) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemcpy3D_v2_ptds, copy);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemcpy3DPeer_ptds(const CUDA_MEMCPY3D_PEER *copy) {
+    ENSURE_RUNNING();
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuMemcpy3DPeer_ptds) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemcpy3DPeer_ptds, copy);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemsetD8_v2_ptds(CUdeviceptr ptr, unsigned char value, size_t count) {
+    ENSURE_RUNNING();
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuMemsetD8_v2_ptds) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemsetD8_v2_ptds, ptr, value, count);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemsetD2D8_v2_ptds(CUdeviceptr ptr, size_t pitch, unsigned char value, size_t width, size_t height) {
+    ENSURE_RUNNING();
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuMemsetD2D8_v2_ptds) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemsetD2D8_v2_ptds, ptr, pitch, value, width, height);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemsetD16_v2_ptds(CUdeviceptr ptr, uint16_t value, size_t count) {
+    ENSURE_RUNNING();
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuMemsetD16_v2_ptds) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemsetD16_v2_ptds, ptr, value, count);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemsetD2D16_v2_ptds(CUdeviceptr ptr, size_t pitch, uint16_t value, size_t width, size_t height) {
+    ENSURE_RUNNING();
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuMemsetD2D16_v2_ptds) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemsetD2D16_v2_ptds, ptr, pitch, value, width, height);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemsetD32_v2_ptds(CUdeviceptr ptr, unsigned int value, size_t count) {
+    ENSURE_RUNNING();
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuMemsetD32_v2_ptds) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemsetD32_v2_ptds, ptr, value, count);
+}
+
+/** Preserve native per-thread stream behavior and return values. */
+CUresult cuMemsetD2D32_v2_ptds(CUdeviceptr ptr, size_t pitch, unsigned int value, size_t width, size_t height) {
+    ENSURE_RUNNING();
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuMemsetD2D32_v2_ptds) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemsetD2D32_v2_ptds, ptr, pitch, value, width, height);
+}
+
+/** Copy the launch configuration while retaining the existing compute limiter. */
+CUresult cuLaunchKernelEx_ptsz(const CUlaunchConfig *config, CUfunction function, void **params, void **extra) {
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuLaunchKernelEx) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    if (config == NULL) {
+        if (CUDA_FIND_ENTRY(cuda_library_entry, cuLaunchKernelEx_ptsz) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+        return CUDA_OVERRIDE_CALL(cuda_library_entry, cuLaunchKernelEx_ptsz, config, function, params, extra);
+    }
+    CUlaunchConfig copy = *config;
+    if (copy.hStream == NULL) copy.hStream = CU_STREAM_PER_THREAD;
+    return cuLaunchKernelEx(&copy, function, params, extra);
 }

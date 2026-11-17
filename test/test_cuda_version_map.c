@@ -15,6 +15,7 @@ void *find_symbols_in_table_by_cudaversion(const char *symbol, int cudaVersion);
 CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion,
                               cuuint64_t flags,
                               CUdriverProcAddressQueryResult *symbolStatus);
+CUresult _cuGetProcAddress(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags);
 
 /* Native symbol-loader dependency supplied by the regression fixture. */
 typedef void *(*fp_dlsym)(void *, const char *);
@@ -23,6 +24,7 @@ fp_dlsym real_dlsym;
 /* Set per case to the hook spellings the build under test exports. */
 static const char *g_present[4];
 
+/** Return the configured exported hook for a procedure lookup. */
 void *__dlsym_hook_section(void *handle, const char *symbol) {
     (void)handle;
     for (int i = 0; g_present[i] != NULL; i++) {
@@ -70,15 +72,26 @@ static int check_cases(const char *base, const char *const *present,
 #define STATUS_POISON ((CUdriverProcAddressQueryResult)0x5A5A)
 
 static CUdriverProcAddressQueryResult *seen_status;
+static CUresult lookup_result;
+static CUdriverProcAddressQueryResult lookup_status;
+static void *lookup_pointer = (void *)"native";
 
+/** Return the configured native procedure lookup pointer and result. */
+static CUresult stub_get_proc_address(const char *symbol, void **pfn, int version, cuuint64_t flags) {
+    (void)symbol; (void)version; (void)flags;
+    if (pfn != NULL) *pfn = lookup_pointer;
+    return lookup_result;
+}
+
+/** Return the configured native procedure lookup pointer, result, and version status. */
 static CUresult stub_get_proc_address_v2(const char *symbol, void **pfn,
                                          int cudaVersion, cuuint64_t flags,
                                          CUdriverProcAddressQueryResult *status) {
     (void)symbol; (void)cudaVersion; (void)flags;
     seen_status = status;
-    if (pfn != NULL) *pfn = NULL;
-    if (status != NULL) *status = CU_GET_PROC_ADDRESS_SUCCESS;
-    return CUDA_SUCCESS;
+    if (pfn != NULL) *pfn = lookup_pointer;
+    if (status != NULL) *status = lookup_status;
+    return lookup_result;
 }
 
 static int check_symbol_status(void) {
@@ -108,10 +121,244 @@ static int check_symbol_status(void) {
     return 0;
 }
 
+/** Check per-thread graph and capture hooks across procedure lookup entry points. */
+static int check_graph_stream_flags(void) {
+    const char *names[] = {"cuGraphLaunch", "cuGraphUpload", "cuGraphInstantiateWithParams",
+                           "cuStreamBeginCapture", "cuStreamEndCapture", "cuStreamBeginCapture_v2"};
+    const char *legacy[] = {"cuGraphLaunch", "cuGraphUpload", "cuGraphInstantiateWithParams",
+                            "cuStreamBeginCapture_v2", "cuStreamEndCapture", "cuStreamBeginCapture_v2"};
+    const char *ptsz[] = {"cuGraphLaunch_ptsz", "cuGraphUpload_ptsz", "cuGraphInstantiateWithParams_ptsz",
+                          "cuStreamBeginCapture_v2_ptsz", "cuStreamEndCapture_ptsz", "cuStreamBeginCapture_v2_ptsz"};
+    cuda_library_entry[CUDA_OVERRIDE_ENUM(cuGetProcAddress)].fn_ptr = (void *)stub_get_proc_address;
+    for (int i = 0; i < 6; i++) {
+        g_present[0] = legacy[i]; g_present[1] = ptsz[i]; g_present[2] = NULL;
+        for (int per_thread = 0; per_thread < 2; per_thread++) {
+            cuuint64_t flags = per_thread ? CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM
+                                          : CU_GET_PROC_ADDRESS_LEGACY_STREAM;
+            const char *expected = per_thread ? ptsz[i] : legacy[i];
+            for (int entry = 0; entry < 4; entry++) {
+                void *pfn = NULL;
+                CUdriverProcAddressQueryResult status = STATUS_POISON;
+                CUresult res;
+                if (entry == 0) res = cuGetProcAddress(names[i], &pfn, 13000, flags);
+                else if (entry == 1) res = _cuGetProcAddress(names[i], &pfn, 13000, flags);
+                else if (entry == 2) res = cuGetProcAddress_v2(names[i], &pfn, 13000, flags, &status);
+                else res = _cuGetProcAddress_v2(names[i], &pfn, 13000, flags, &status);
+                if (res != CUDA_SUCCESS || pfn == NULL || strcmp(pfn, expected) != 0 ||
+                    (entry >= 2 && status != CU_GET_PROC_ADDRESS_SUCCESS)) {
+                    printf("FAIL stream flags: %s flags=%llu entry=%d\n", names[i], flags, entry);
+                    return 1;
+                }
+            }
+        }
+    }
+    puts("ok   graph stream flags: legacy and per-thread lookup paths");
+    return 0;
+}
+
+/** Check that graph hook lookup preserves native failures, NULL results, and version status. */
+static int check_graph_lookup_failures(void) {
+    const char *names[] = {"cuGraphLaunch", "cuGraphUpload", "cuGraphInstantiateWithParams",
+                           "cuStreamBeginCapture", "cuStreamEndCapture"};
+    const char *hooks[] = {"cuGraphLaunch_ptsz", "cuGraphUpload_ptsz", "cuGraphInstantiateWithParams_ptsz",
+                           "cuStreamBeginCapture_v2_ptsz", "cuStreamEndCapture_ptsz"};
+    for (int i = 0; i < 5; i++) {
+        g_present[0] = hooks[i]; g_present[1] = NULL;
+        for (int failure = 0; failure < 3; failure++) {
+            lookup_result = failure == 0 ? CUDA_ERROR_NOT_FOUND : CUDA_SUCCESS;
+            lookup_status = failure == 1 ? CU_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT
+                                         : CU_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND;
+            lookup_pointer = NULL;
+            for (int entry = 0; entry < 4; entry++) {
+                void *pfn = (void *)"poison";
+                CUdriverProcAddressQueryResult status = STATUS_POISON;
+                cuuint64_t flags = CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM;
+                CUresult result;
+                if (entry == 0) result = cuGetProcAddress(names[i], &pfn, 10000, flags);
+                else if (entry == 1) result = _cuGetProcAddress(names[i], &pfn, 10000, flags);
+                else if (entry == 2) result = cuGetProcAddress_v2(names[i], &pfn, 10000, flags, &status);
+                else result = _cuGetProcAddress_v2(names[i], &pfn, 10000, flags, &status);
+                if (result != lookup_result || pfn != NULL || (entry >= 2 && status != lookup_status)) {
+                    printf("FAIL lookup preservation: %s entry=%d failure=%d\n", names[i], entry, failure);
+                    return 1;
+                }
+            }
+        }
+    }
+    lookup_result = CUDA_SUCCESS;
+    lookup_status = CU_GET_PROC_ADDRESS_SUCCESS;
+    lookup_pointer = (void *)"native";
+    g_present[0] = "cuStreamBeginCapture_v2";
+    g_present[1] = "cuStreamBeginCapture_v2_ptsz";
+    g_present[2] = NULL;
+    void *pfn = NULL;
+    CUresult result = cuGetProcAddress("cuStreamBeginCapture", &pfn, 10000,
+                                      CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM);
+    if (result != CUDA_SUCCESS || pfn != lookup_pointer) {
+        puts("FAIL CUDA 10.0 capture ABI passthrough");
+        return 1;
+    }
+    g_present[0] = "cuStreamBeginCapture";
+    g_present[1] = "cuStreamBeginCapture_ptsz";
+    for (int pt = 0; pt < 2; pt++) for (int entry = 0; entry < 4; entry++) {
+        const char *expected = g_present[pt];
+        CUdriverProcAddressQueryResult status = STATUS_POISON;
+        cuuint64_t flags = pt ? CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM : CU_GET_PROC_ADDRESS_LEGACY_STREAM;
+        if (entry == 0) result = cuGetProcAddress("cuStreamBeginCapture", &pfn, 10000, flags);
+        else if (entry == 1) result = _cuGetProcAddress("cuStreamBeginCapture", &pfn, 10000, flags);
+        else if (entry == 2) result = cuGetProcAddress_v2("cuStreamBeginCapture", &pfn, 10000, flags, &status);
+        else result = _cuGetProcAddress_v2("cuStreamBeginCapture", &pfn, 10000, flags, &status);
+        if (result != CUDA_SUCCESS || pfn != (void *)expected ||
+            (entry >= 2 && status != CU_GET_PROC_ADDRESS_SUCCESS)) {
+            puts("FAIL CUDA 10.0 capture ABI selection");
+            return 1;
+        }
+    }
+    puts("ok   graph lookup failures preserve native results and pointers");
+    return 0;
+}
+
+static CUresult stream_proc_result;
+static CUdriverProcAddressQueryResult stream_proc_status;
+static int stream_proc_pointer, stream_proc_version;
+static cuuint64_t stream_proc_flags;
+static const char *stream_proc_name;
+static void native_marker(void) {}
+
+/** Return the configured native lookup result and record the request. */
+static CUresult stream_get_proc(const char *symbol, void **pfn, int version, cuuint64_t flags) {
+    stream_proc_name = symbol; stream_proc_version = version; stream_proc_flags = flags;
+    *pfn = stream_proc_result == CUDA_SUCCESS && stream_proc_pointer ? (void *)native_marker : NULL;
+    return stream_proc_result;
+}
+
+/** Return the configured native lookup result and v2 symbol status. */
+static CUresult stream_get_proc_v2(const char *symbol, void **pfn, int version, cuuint64_t flags,
+                                   CUdriverProcAddressQueryResult *status) {
+    CUresult result = stream_get_proc(symbol, pfn, version, flags);
+    if (status != NULL) *status = stream_proc_status;
+    if (stream_proc_status != CU_GET_PROC_ADDRESS_SUCCESS) *pfn = NULL;
+    return result;
+}
+
+/** Check stream hook selection and native lookup outcomes across both APIs. */
+static int check_stream_procs(void) {
+    static const char *const names[][3] = {
+        {"cuMemAllocAsync", "cuMemAllocAsync_ptsz"},
+        {"cuMemAllocFromPoolAsync", "cuMemAllocFromPoolAsync_ptsz"},
+        {"cuMemFreeAsync", "cuMemFreeAsync_ptsz"},
+        {"cuMemcpyAsync", "cuMemcpyAsync_ptsz"},
+        {"cuStreamSynchronize", "cuStreamSynchronize_ptsz"},
+        {"cuMemcpyHtoDAsync", "cuMemcpyHtoDAsync_v2_ptsz", "cuMemcpyHtoDAsync_v2"},
+        {"cuMemcpyDtoHAsync", "cuMemcpyDtoHAsync_v2_ptsz", "cuMemcpyDtoHAsync_v2"},
+        {"cuMemcpyDtoDAsync", "cuMemcpyDtoDAsync_v2_ptsz", "cuMemcpyDtoDAsync_v2"},
+        {"cuMemcpyHtoDAsync_v2", "cuMemcpyHtoDAsync_v2_ptsz", "cuMemcpyHtoDAsync_v2"},
+        {"cuMemcpyDtoHAsync_v2", "cuMemcpyDtoHAsync_v2_ptsz", "cuMemcpyDtoHAsync_v2"},
+        {"cuMemcpyDtoDAsync_v2", "cuMemcpyDtoDAsync_v2_ptsz", "cuMemcpyDtoDAsync_v2"},
+        {"cuMemsetD8Async", "cuMemsetD8Async_ptsz", "cuMemsetD8Async"},
+        {"cuMemsetD2D8Async", "cuMemsetD2D8Async_ptsz", "cuMemsetD2D8Async"},
+        {"cuMemsetD16Async", "cuMemsetD16Async_ptsz", "cuMemsetD16Async"},
+        {"cuMemsetD2D16Async", "cuMemsetD2D16Async_ptsz", "cuMemsetD2D16Async"},
+        {"cuMemsetD32Async", "cuMemsetD32Async_ptsz", "cuMemsetD32Async"},
+        {"cuMemsetD2D32Async", "cuMemsetD2D32Async_ptsz", "cuMemsetD2D32Async"},
+        {"cuLaunchKernel", "cuLaunchKernel_ptsz", "cuLaunchKernel"},
+        {"cuMemcpy2DAsync", "cuMemcpy2DAsync_v2_ptsz", "cuMemcpy2DAsync_v2"},
+        {"cuMemcpy2DAsync_v2", "cuMemcpy2DAsync_v2_ptsz", "cuMemcpy2DAsync_v2"},
+        {"cuMemcpy3DAsync", "cuMemcpy3DAsync_v2_ptsz", "cuMemcpy3DAsync_v2"},
+        {"cuMemcpy3DAsync_v2", "cuMemcpy3DAsync_v2_ptsz", "cuMemcpy3DAsync_v2"},
+        {"cuMemcpy3DPeerAsync", "cuMemcpy3DPeerAsync_ptsz", "cuMemcpy3DPeerAsync"},
+        {"cuMemcpyPeerAsync", "cuMemcpyPeerAsync_ptsz", "cuMemcpyPeerAsync"},
+        {"cuMemPrefetchAsync", "cuMemPrefetchAsync_v2_ptsz", "cuMemPrefetchAsync_v2"},
+        {"cuMemPrefetchAsync_v2", "cuMemPrefetchAsync_v2_ptsz", "cuMemPrefetchAsync_v2"},
+        {"cuLaunchCooperativeKernel", "cuLaunchCooperativeKernel_ptsz", "cuLaunchCooperativeKernel"},
+        {"cuMemcpy", "cuMemcpy_ptds", "cuMemcpy"},
+        {"cuMemcpyHtoD", "cuMemcpyHtoD_v2_ptds", "cuMemcpyHtoD_v2"},
+        {"cuMemcpyHtoD_v2", "cuMemcpyHtoD_v2_ptds", "cuMemcpyHtoD_v2"},
+        {"cuMemcpyDtoH", "cuMemcpyDtoH_v2_ptds", "cuMemcpyDtoH_v2"},
+        {"cuMemcpyDtoH_v2", "cuMemcpyDtoH_v2_ptds", "cuMemcpyDtoH_v2"},
+        {"cuMemcpyDtoD", "cuMemcpyDtoD_v2_ptds", "cuMemcpyDtoD_v2"},
+        {"cuMemcpyDtoD_v2", "cuMemcpyDtoD_v2_ptds", "cuMemcpyDtoD_v2"},
+        {"cuMemcpyPeer", "cuMemcpyPeer_ptds", "cuMemcpyPeer"},
+        {"cuMemcpy2D", "cuMemcpy2D_v2_ptds", "cuMemcpy2D_v2"},
+        {"cuMemcpy2D_v2", "cuMemcpy2D_v2_ptds", "cuMemcpy2D_v2"},
+        {"cuMemcpy2DUnaligned", "cuMemcpy2DUnaligned_v2_ptds", "cuMemcpy2DUnaligned_v2"},
+        {"cuMemcpy2DUnaligned_v2", "cuMemcpy2DUnaligned_v2_ptds", "cuMemcpy2DUnaligned_v2"},
+        {"cuMemcpy3D", "cuMemcpy3D_v2_ptds", "cuMemcpy3D_v2"},
+        {"cuMemcpy3D_v2", "cuMemcpy3D_v2_ptds", "cuMemcpy3D_v2"},
+        {"cuMemcpy3DPeer", "cuMemcpy3DPeer_ptds", "cuMemcpy3DPeer"},
+        {"cuMemsetD8", "cuMemsetD8_v2_ptds", "cuMemsetD8_v2"},
+        {"cuMemsetD8_v2", "cuMemsetD8_v2_ptds", "cuMemsetD8_v2"},
+        {"cuMemsetD2D8", "cuMemsetD2D8_v2_ptds", "cuMemsetD2D8_v2"},
+        {"cuMemsetD2D8_v2", "cuMemsetD2D8_v2_ptds", "cuMemsetD2D8_v2"},
+        {"cuMemsetD16", "cuMemsetD16_v2_ptds", "cuMemsetD16_v2"},
+        {"cuMemsetD16_v2", "cuMemsetD16_v2_ptds", "cuMemsetD16_v2"},
+        {"cuMemsetD2D16", "cuMemsetD2D16_v2_ptds", "cuMemsetD2D16_v2"},
+        {"cuMemsetD2D16_v2", "cuMemsetD2D16_v2_ptds", "cuMemsetD2D16_v2"},
+        {"cuMemsetD32", "cuMemsetD32_v2_ptds", "cuMemsetD32_v2"},
+        {"cuMemsetD32_v2", "cuMemsetD32_v2_ptds", "cuMemsetD32_v2"},
+        {"cuMemsetD2D32", "cuMemsetD2D32_v2_ptds", "cuMemsetD2D32_v2"},
+        {"cuMemsetD2D32_v2", "cuMemsetD2D32_v2_ptds", "cuMemsetD2D32_v2"},
+        {"cuLaunchKernelEx", "cuLaunchKernelEx_ptsz", "cuLaunchKernelEx"}
+    };
+    static const cuuint64_t flags[] = {CU_GET_PROC_ADDRESS_DEFAULT, CU_GET_PROC_ADDRESS_LEGACY_STREAM,
+                                      CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM};
+    cuda_library_entry[CUDA_OVERRIDE_ENUM(cuGetProcAddress)].fn_ptr = (void *)stream_get_proc;
+    cuda_library_entry[CUDA_OVERRIDE_ENUM(cuGetProcAddress_v2)].fn_ptr = (void *)stream_get_proc_v2;
+    int failures = 0;
+    size_t count = sizeof(names) / sizeof(names[0]);
+    for (size_t n = 0; n < count; n++) for (int explicit_pt = 0; explicit_pt < 2; explicit_pt++)
+        for (int api = 0; api < 4; api++) for (int f = 0; f < 3; f++) for (int state = 0; state < 4; state++) {
+            g_present[0] = names[n][2] != NULL ? names[n][2] : names[n][0];
+            g_present[1] = names[n][1]; g_present[2] = NULL;
+            stream_proc_result = state == 1 ? CUDA_ERROR_NOT_FOUND : CUDA_SUCCESS;
+            stream_proc_pointer = state != 2;
+            stream_proc_status = state == 3 ? CU_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT : CU_GET_PROC_ADDRESS_SUCCESS;
+            stream_proc_name = NULL;
+            void *pfn = NULL;
+            CUdriverProcAddressQueryResult status = STATUS_POISON;
+            const char *symbol = names[n][explicit_pt];
+            CUresult result;
+            if (api == 0) result = cuGetProcAddress(symbol, &pfn, 13030, flags[f]);
+            else if (api == 1) result = _cuGetProcAddress(symbol, &pfn, 13030, flags[f]);
+            else if (api == 2) result = cuGetProcAddress_v2(symbol, &pfn, 13030, flags[f], &status);
+            else result = _cuGetProcAddress_v2(symbol, &pfn, 13030, flags[f], &status);
+            int available = stream_proc_result == CUDA_SUCCESS && stream_proc_pointer && (api < 2 || state != 3);
+            int per_thread = explicit_pt || f == 2;
+            void *expected = available ? (void *)g_present[per_thread] : NULL;
+            if (result != stream_proc_result || pfn != expected || stream_proc_name != symbol ||
+                stream_proc_flags != flags[f] || stream_proc_version != 13030 ||
+                (api >= 2 && status != stream_proc_status)) {
+                printf("FAIL stream lookup %s api=%d flags=%u state=%d\n", symbol, api,
+                       (unsigned int)flags[f], state);
+                failures++;
+            }
+        }
+    return failures;
+}
+
 #include "test/graph_node_proc_fixture.h"
 #include "test/graph_loader_fixture.h"
+/** Preserve the original copy ABI when the requested CUDA version predates size_t counts. */
+static int check_legacy_copy_abi(void) {
+    const char *names[] = {"cuMemcpyHtoDAsync", "cuMemcpyDtoHAsync", "cuMemcpyDtoDAsync"};
+    const char *hooks[][2] = {
+        {"cuMemcpyHtoDAsync_v2", "cuMemcpyHtoDAsync_v2_ptsz"},
+        {"cuMemcpyDtoHAsync_v2", "cuMemcpyDtoHAsync_v2_ptsz"},
+        {"cuMemcpyDtoDAsync_v2", "cuMemcpyDtoDAsync_v2_ptsz"}
+    };
+    lookup_result = CUDA_SUCCESS; lookup_status = CU_GET_PROC_ADDRESS_SUCCESS;
+    lookup_pointer = (void *)"native";
+    cuda_library_entry[OVERRIDE_cuGetProcAddress].fn_ptr = stub_get_proc_address;
+    cuda_library_entry[OVERRIDE_cuGetProcAddress_v2].fn_ptr = stub_get_proc_address_v2;
+    for (int n = 0; n < 3; n++) {
+        g_present[0] = hooks[n][0]; g_present[1] = hooks[n][1]; g_present[2] = NULL;
+        void *pfn = NULL;
+        if (cuGetProcAddress(names[n], &pfn, 3000, 0) != CUDA_SUCCESS || pfn != lookup_pointer) return 1;
+    }
+    return 0;
+}
 
-/** Run version selection and generic-node procedure lookup regressions. */
+/** Run CUDA version mapping and graph procedure lookup regressions. */
 int main(void) {
     /* Boundaries from cudaTypedefs.h: cuCtxCreate _v2 / _v3 from 11040 / _v4
        from 12050, cuMemAdvise and cuMemPrefetchAsync _v2 from 12020. A CUDA
@@ -158,6 +405,10 @@ int main(void) {
     failures += check_cases("cuMemPrefetchAsync", prefetch13, "cuda13 build",
                             prefetch_on13, 3);
     failures += check_symbol_status();
+    failures += check_graph_stream_flags();
+    failures += check_graph_lookup_failures();
+    failures += check_stream_procs();
+    failures += check_legacy_copy_abi();
     failures += check_graph_node_procs();
     failures += check_graph_pool_procs();
 

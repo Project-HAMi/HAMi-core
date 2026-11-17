@@ -56,17 +56,74 @@ static int launch_preloaded(char **argv) {
     return 1;
 }
 
-/** Add an output allocation without a graph free node. */
-static CUresult create_output(CUgraph *graph, CUdeviceptr *ptr) {
+/** Add a graph allocation and optionally its matching free node. */
+static CUresult create_allocation(CUgraph *graph, CUdeviceptr *ptr, size_t mib, int temporary) {
     CUresult result = cuGraphCreate(graph, 0);
     if (result != CUDA_SUCCESS) return result;
     CUDA_MEM_ALLOC_NODE_PARAMS params = {0}; CUgraphNode node;
     params.poolProps.allocType = CU_MEM_ALLOCATION_TYPE_PINNED;
     params.poolProps.location.type = CU_MEM_LOCATION_TYPE_DEVICE; params.poolProps.location.id = 0;
-    params.bytesize = 512 * MIB;
+    params.bytesize = mib * MIB;
     result = cuGraphAddMemAllocNode(&node, *graph, NULL, 0, &params);
     if (result == CUDA_SUCCESS) *ptr = params.dptr;
+    if (result == CUDA_SUCCESS && temporary) {
+        CUgraphNode free_node;
+        result = cuGraphAddMemFreeNode(&free_node, *graph, &node, 1, params.dptr);
+    }
     return result;
+}
+
+/** Wait for GPU work without advancing HAMi's accounting poll. */
+static CUresult native_stream_sync(CUstream stream) {
+    const char *versions[] = {"GLIBC_2.34", "GLIBC_2.17", "GLIBC_2.2.5"};
+    void *(*lookup)(void *, const char *) = NULL;
+    for (size_t i = 0; i < sizeof(versions) / sizeof(versions[0]) && lookup == NULL; i++)
+        lookup = dlvsym(RTLD_NEXT, "dlsym", versions[i]);
+    if (lookup == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    void *driver = dlopen("libcuda.so.1", RTLD_NOW | RTLD_LOCAL);
+    if (driver == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    CUresult (*sync)(CUstream) = lookup(driver, "cuStreamSynchronize");
+    CUresult result = sync == NULL || sync == cuStreamSynchronize ? CUDA_ERROR_NOT_SUPPORTED : sync(stream);
+    dlclose(driver);
+    return result;
+}
+
+/** Check retired roots remain independent after the pending cache is rebuilt. */
+static int check_retired_roots(void) {
+    CUgraph graphs[2], other; CUgraphExec execs[2]; CUdeviceptr ptr, ordinary;
+    for (int i = 0; i < 2; i++) {
+        CHECK(create_allocation(&graphs[i], &ptr, 400, 1));
+        CHECK(cuGraphInstantiateWithFlags(&execs[i], graphs[i], 0));
+        CHECK(cuGraphDestroy(graphs[i]));
+    }
+    CHECK(create_allocation(&other, &ptr, 500, 1)); CHECK(cuGraphDestroy(other));
+    CHECK(cuMemAlloc_v2(&ordinary, 300 * MIB)); CHECK(cuMemFree_v2(ordinary));
+    for (int i = 0; i < 2; i++) CHECK(cuGraphExecDestroy(execs[i]));
+    puts("PASS: retired roots permit a valid ordinary allocation");
+    return 0;
+}
+
+/** Retain proof of a completed external free before its context destroys the event. */
+static int check_context_free(CUstream origin_stream) {
+    CUcontext origin, other; CUgraph a, b; CUgraphExec x, y; CUdeviceptr ptr, ordinary;
+    CHECK(cuCtxGetCurrent(&origin));
+    CHECK(create_allocation(&a, &ptr, 600, 0)); CHECK(cuGraphInstantiateWithFlags(&x, a, 0));
+    CHECK(cuGraphLaunch(x, origin_stream)); CHECK(native_stream_sync(origin_stream));
+#if CUDA_VERSION >= 13000
+    CHECK(cuCtxCreate(&other, NULL, 0, 0));
+#else
+    CHECK(cuCtxCreate(&other, 0, 0));
+#endif
+    CUstream free_stream; CUgraphNode node;
+    CHECK(cuStreamCreate(&free_stream, CU_STREAM_NON_BLOCKING)); CHECK(cuGraphCreate(&b, 0));
+    CHECK(cuGraphAddMemFreeNode(&node, b, NULL, 0, ptr)); CHECK(cuGraphInstantiateWithFlags(&y, b, 0));
+    CHECK(cuGraphLaunch(y, free_stream)); CHECK(native_stream_sync(free_stream));
+    CHECK(cuCtxDestroy_v2(other)); CHECK(cuCtxSetCurrent(origin)); CHECK(cuDeviceGraphMemTrim(0));
+    CHECK(cuMemAlloc_v2(&ordinary, 300 * MIB)); CHECK(cuMemFree_v2(ordinary));
+    CHECK(cuGraphExecDestroy(y)); CHECK(cuGraphDestroy(b));
+    CHECK(cuGraphExecDestroy(x)); CHECK(cuGraphDestroy(a));
+    puts("PASS: context teardown preserves the completed external free");
+    return 0;
 }
 
 /** Exercise persistent quota admission and retry against a real CUDA driver. */
@@ -85,8 +142,13 @@ int main(int argc, char **argv) {
     CUcontext ctx; CUstream stream;
     CHECK(cuDevicePrimaryCtxRetain(&ctx, 0)); CHECK(cuCtxSetCurrent(ctx));
     CHECK(cuStreamCreate(&stream, CU_STREAM_NON_BLOCKING));
+    if (strcmp(argv[1], "retired-root") == 0 || strcmp(argv[1], "context-free") == 0) {
+        int result = strcmp(argv[1], "retired-root") == 0 ? check_retired_roots() : check_context_free(stream);
+        CHECK(cuStreamDestroy_v2(stream));
+        return result;
+    }
     CUgraph graphs[2]; CUgraphExec execs[2] = {NULL, NULL}; CUdeviceptr ptrs[2];
-    for (int i = 0; i < 2; i++) CHECK(create_output(&graphs[i], &ptrs[i]));
+    for (int i = 0; i < 2; i++) CHECK(create_allocation(&graphs[i], &ptrs[i], 512, 0));
     CUresult second;
     if (mode == 2) {
         CUDA_GRAPH_INSTANTIATE_PARAMS params = {0};

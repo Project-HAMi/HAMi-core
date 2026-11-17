@@ -12,9 +12,6 @@ static void test_serial_pool(void) {
     REQUIRE(cuGraphLaunch(x, (CUstream)10) == CUDA_SUCCESS);
     REQUIRE(cuGraphLaunch(y, (CUstream)10) == CUDA_SUCCESS);
     REQUIRE(used == 556 * MIB);
-    int queries = pool_queries;
-    for (int i = 0; i < 1000; i++) REQUIRE(cuGraphLaunch(y, (CUstream)10) == CUDA_SUCCESS);
-    REQUIRE(pool_queries == queries);
     REQUIRE(reserve_device_memory(0, 300 * MIB) == CUDA_SUCCESS);
     release_device_memory(0, 300 * MIB);
     reserved = 640 * MIB;
@@ -83,7 +80,7 @@ static void test_graph_handle_reuse(void) {
     REQUIRE(cuGraphLaunch(old_exec, NULL) == CUDA_SUCCESS);
     destroy(graph, old_exec);
     REQUIRE(add(graph, 300, 1, NULL) == CUDA_SUCCESS);
-    REQUIRE(used == 956 * MIB);
+    REQUIRE(used == 656 * MIB);
     REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
     graph_ptr_freed(old_ptr);
     clean();
@@ -102,19 +99,39 @@ static void test_capture_queries(void) {
     clean();
 }
 
-/** Include live outputs when admitting another graph's pending allocation demand. */
+/** Reserve overlapping output and temporary demand before native submission. */
 static void test_persistent_and_pending(void) {
     CUgraph a = make_graph(), b = make_graph(); CUdeviceptr ptr;
     REQUIRE(add(a, 400, 0, &ptr) == CUDA_SUCCESS);
     CUgraphExec exec = instantiate(a);
     REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
-    int before = nodes;
-    REQUIRE(add(b, 400, 1, NULL) == CUDA_ERROR_OUT_OF_MEMORY);
-    REQUIRE(nodes == before && used == 656 * MIB);
-    REQUIRE(add(b, 300, 1, NULL) == CUDA_SUCCESS);
+    REQUIRE(add(b, 400, 1, NULL) == CUDA_SUCCESS);
+    CUgraphExec other = instantiate(b);
+    int before = submissions;
+    REQUIRE(cuGraphLaunch(other, NULL) == CUDA_ERROR_OUT_OF_MEMORY);
+    REQUIRE(submissions == before && used == 656 * MIB);
+    destroy(b, other); b = make_graph();
+    REQUIRE(add(b, 300, 1, NULL) == CUDA_SUCCESS); other = instantiate(b);
+    REQUIRE(cuGraphLaunch(other, NULL) == CUDA_SUCCESS);
     REQUIRE(used == 956 * MIB);
-    REQUIRE(cuGraphDestroy(b) == CUDA_SUCCESS);
-    destroy(a, exec); graph_ptr_freed(ptr); clean();
+    destroy(b, other); destroy(a, exec); graph_ptr_freed(ptr); clean();
+}
+
+/** Preserve cached backing across rebuilds and trim it only for a refused reservation. */
+static void test_trim_pressure(void) {
+    int before = trim_calls;
+    for (int i = 0; i < 8; i++) {
+        CUgraph graph = make_graph();
+        REQUIRE(add(graph, 300, 1, NULL) == CUDA_SUCCESS);
+        CUgraphExec exec = instantiate(graph);
+        REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+        reserved = 300 * MIB; gpu_done = 1;
+        destroy(graph, exec);
+        REQUIRE(used == 556 * MIB && trim_calls == before);
+    }
+    REQUIRE(reserve_device_memory(0, 600 * MIB) == CUDA_SUCCESS);
+    REQUIRE(trim_calls == before + 1 && used == 856 * MIB);
+    release_device_memory(0, 600 * MIB); clean();
 }
 
 /** Reject a second live output before Launch, Upload, or parameter-based upload. */
@@ -184,23 +201,6 @@ static void test_output_host_lifetime(void) {
     graph_ptr_freed(ptr); clean();
 }
 
-/** Preserve cached backing across rebuilds and trim it only for a refused reservation. */
-static void test_trim_pressure(void) {
-    int before = trim_calls;
-    for (int i = 0; i < 8; i++) {
-        CUgraph graph = make_graph();
-        REQUIRE(add(graph, 300, 1, NULL) == CUDA_SUCCESS);
-        CUgraphExec exec = instantiate(graph);
-        REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
-        reserved = 300 * MIB; gpu_done = 1;
-        destroy(graph, exec);
-        REQUIRE(used == 556 * MIB && trim_calls == before);
-    }
-    REQUIRE(reserve_device_memory(0, 600 * MIB) == CUDA_SUCCESS);
-    REQUIRE(trim_calls == before + 1 && used == 856 * MIB);
-    release_device_memory(0, 600 * MIB); clean();
-}
-
 /** Skip futile eviction while retaining trims that cover only the quota shortfall. */
 static void test_futile_trim(void) {
     CUgraph graph = make_graph();
@@ -220,6 +220,7 @@ static void test_futile_trim(void) {
 
 /** Exercise pooled quota and pointer lifetimes through production CUDA wrappers. */
 int main(void) {
+    setup_graph_queries();
 #define DRIVER(name, fn) cuda_library_entry[CUDA_OVERRIDE_ENUM(name)].fn_ptr = (void *)(fn)
     DRIVER(cuGraphAddMemAllocNode, driver_add);
     DRIVER(cuGraphAddMemFreeNode, driver_free_node);
@@ -237,6 +238,16 @@ int main(void) {
     DRIVER(cuStreamEndCapture, driver_end_capture);
     DRIVER(cuCtxGetDevice, driver_device);
     DRIVER(cuDeviceGetCount, driver_device_count);
+    DRIVER(cuEventCreate, driver_event_create);
+    DRIVER(cuEventRecord, driver_event_record);
+    DRIVER(cuEventQuery, driver_event_query);
+    DRIVER(cuEventDestroy_v2, driver_event_destroy);
+    DRIVER(cuStreamGetId, driver_stream_id);
+    DRIVER(cuStreamGetCtx, driver_stream_ctx);
+    DRIVER(cuCtxGetCurrent, driver_current);
+    DRIVER(cuCtxGetId, driver_context_id);
+    DRIVER(cuCtxPushCurrent_v2, driver_push);
+    DRIVER(cuCtxPopCurrent_v2, driver_pop);
     test_persistent_and_pending(); test_trim_pressure(); test_futile_trim();
     for (int mode = 0; mode < 3; mode++) test_output_admission(mode);
     test_output_submission_failure(); test_output_host_lifetime();

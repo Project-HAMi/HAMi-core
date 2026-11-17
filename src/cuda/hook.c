@@ -61,6 +61,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuStreamCreate"},
     {.name = "cuStreamDestroy_v2"},
     {.name = "cuStreamSynchronize"},
+    {.name = "cuStreamSynchronize_ptsz"},
     /* Memory Part */
     {.name = "cuArray3DCreate_v2"},
     {.name = "cuArrayCreate_v2"},
@@ -81,6 +82,16 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuDeviceGetGraphMemAttribute"},
     {.name = "cuThreadExchangeStreamCaptureMode"},
     {.name = "cuDeviceGraphMemTrim"},
+    {.name = "cuDevicePrimaryCtxReset_v2"},
+    {.name = "cuCtxGetId"},
+    {.name = "cuEventRecord"},
+    {.name = "cuEventQuery"},
+    {.name = "cuStreamGetId"},
+    {.name = "cuStreamGetCtx"},
+    {.name = "cuGreenCtxDestroy"},
+    {.name = "cuCtxFromGreenCtx"},
+    {.name = "cuStreamBeginCapture"},
+    {.name = "cuStreamBeginCapture_ptsz"},
     {.name = "cuMemGetInfo_v2"},
     {.name = "cuMemcpy"},
     {.name = "cuPointerGetAttribute"},
@@ -91,6 +102,40 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuIpcOpenMemHandle_v2"},
     {.name = "cuMemGetAddressRange_v2"},
     {.name = "cuMemcpyAsync"},
+    {.name = "cuMemcpyAsync_ptsz"},
+    {.name = "cuMemcpyHtoDAsync_v2_ptsz"},
+    {.name = "cuMemcpyDtoHAsync_v2_ptsz"},
+    {.name = "cuMemcpyDtoDAsync_v2_ptsz"},
+    {.name = "cuMemsetD8Async_ptsz"},
+    {.name = "cuMemsetD2D8Async_ptsz"},
+    {.name = "cuMemsetD16Async_ptsz"},
+    {.name = "cuMemsetD2D16Async_ptsz"},
+    {.name = "cuMemsetD32Async_ptsz"},
+    {.name = "cuMemsetD2D32Async_ptsz"},
+    {.name = "cuLaunchKernel_ptsz"},
+    {.name = "cuMemcpy2DAsync_v2_ptsz"},
+    {.name = "cuMemcpy3DAsync_v2_ptsz"},
+    {.name = "cuMemcpy3DPeerAsync_ptsz"},
+    {.name = "cuMemcpyPeerAsync_ptsz"},
+    {.name = "cuMemPrefetchAsync_ptsz"},
+    {.name = "cuMemPrefetchAsync_v2_ptsz"},
+    {.name = "cuLaunchCooperativeKernel_ptsz"},
+    {.name = "cuMemcpy_ptds"},
+    {.name = "cuMemcpyHtoD_v2_ptds"},
+    {.name = "cuMemcpyDtoH_v2_ptds"},
+    {.name = "cuMemcpyDtoD_v2_ptds"},
+    {.name = "cuMemcpyPeer_ptds"},
+    {.name = "cuMemcpy2D_v2_ptds"},
+    {.name = "cuMemcpy2DUnaligned_v2_ptds"},
+    {.name = "cuMemcpy3D_v2_ptds"},
+    {.name = "cuMemcpy3DPeer_ptds"},
+    {.name = "cuMemsetD8_v2_ptds"},
+    {.name = "cuMemsetD2D8_v2_ptds"},
+    {.name = "cuMemsetD16_v2_ptds"},
+    {.name = "cuMemsetD2D16_v2_ptds"},
+    {.name = "cuMemsetD32_v2_ptds"},
+    {.name = "cuMemsetD2D32_v2_ptds"},
+    {.name = "cuLaunchKernelEx_ptsz"},
     {.name = "cuMemcpyAtoD_v2"},
     {.name = "cuMemcpyDtoA_v2"},
     {.name = "cuMemcpyDtoD_v2"},
@@ -142,8 +187,6 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemCreate"},
     {.name = "cuMemRelease"},
     {.name = "cuMemMap"},
-    {.name = "cuStreamBeginCapture"},
-    {.name = "cuStreamBeginCapture_ptsz"},
     {.name = "cuStreamBeginCapture_v2"},
     {.name = "cuStreamEndCapture"},
     {.name = "cuStreamEndCapture_ptsz"},
@@ -151,7 +194,9 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemRetainAllocationHandle"},
     {.name = "cuMemImportFromShareableHandle"},
     {.name = "cuMemAllocAsync"},
+    {.name = "cuMemAllocAsync_ptsz"},
     {.name = "cuMemFreeAsync"},
+    {.name = "cuMemFreeAsync_ptsz"},
     {.name = "cuStreamGetCaptureInfo_v2"},
     {.name = "cuStreamGetCaptureInfo_v3"},
     {.name = "cuGraphAddMemAllocNode"},
@@ -170,6 +215,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemPoolCreate"},
     {.name = "cuMemPoolDestroy"},
     {.name = "cuMemAllocFromPoolAsync"},
+    {.name = "cuMemAllocFromPoolAsync_ptsz"},
     {.name = "cuMemPoolExportToShareableHandle"},
     {.name = "cuMemPoolImportFromShareableHandle"},
     {.name = "cuMemPoolExportPointer"},
@@ -228,6 +274,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuGraphClone"},
     {.name = "cuGraphNodeFindInClone"},
     {.name = "cuGraphNodeGetType"},
+    {.name = "cuGraphMemFreeNodeGetParams"},
     {.name = "cuGraphGetNodes"},
     {.name = "cuGraphGetRootNodes"},
     {.name = "cuGraphGetEdges"},
@@ -244,8 +291,12 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuGraphInstantiate"},
     {.name = "cuGraphInstantiateWithFlags"},
     {.name = "cuGraphInstantiateWithParams"},
+    {.name = "cuGraphInstantiateWithParams_ptsz"},
     {.name = "cuGraphUpload"},
+    {.name = "cuGraphUpload_ptsz"},
     {.name = "cuGraphLaunch"},
+    {.name = "cuGraphLaunch_ptsz"},
+    {.name = "cuStreamBeginCapture_v2_ptsz"},
     {.name = "cuGraphExecDestroy"},
     {.name = "cuGraphDestroy"},
 
@@ -321,6 +372,7 @@ const char* get_real_func_name(const char* base_name,int cuda_version) {
   return NULL; // if not found
 }
 
+/** Find exported hooks while keeping untracked graph APIs native. */
 void *find_symbols_in_table(const char *symbol) {
     char symbol_v[500];
     void *pfn;
@@ -332,9 +384,12 @@ void *find_symbols_in_table(const char *symbol) {
         strcmp(symbol, "cuGraphInstantiate") != 0 &&
         strcmp(symbol, "cuGraphInstantiateWithFlags") != 0 &&
         strcmp(symbol, "cuGraphInstantiateWithParams") != 0 &&
-        strcmp(symbol, "cuGraphExecDestroy") != 0 &&
+        strcmp(symbol, "cuGraphInstantiateWithParams_ptsz") != 0 &&
         strcmp(symbol, "cuGraphLaunch") != 0 &&
+        strcmp(symbol, "cuGraphLaunch_ptsz") != 0 &&
         strcmp(symbol, "cuGraphUpload") != 0 &&
+        strcmp(symbol, "cuGraphUpload_ptsz") != 0 &&
+        strcmp(symbol, "cuGraphExecDestroy") != 0 &&
         strcmp(symbol, "cuGraphDestroy") != 0) {
         return NULL;
     }
@@ -390,11 +445,144 @@ static int resolve_graph_add_proc(const char *symbol, void **pfn, int version, c
     return 1;
 }
 
-/** Preserve native generic-node lookup results and ABI selection. */
+/** Select graph and capture hooks according to CUDA version and stream flags. */
+static void *find_symbols_with_flags(const char *symbol, int cudaVersion, cuuint64_t flags) {
+    if (strcmp(symbol, "cuStreamBeginCapture") == 0 && cudaVersion < 10010) {
+        const char *name = flags & CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM
+            ? "cuStreamBeginCapture_ptsz" : "cuStreamBeginCapture";
+        return __dlsym_hook_section(NULL, name);
+    }
+    if (flags & CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM) {
+        if (strcmp(symbol, "cuGraphLaunch") == 0)
+            return __dlsym_hook_section(NULL, "cuGraphLaunch_ptsz");
+        if (strcmp(symbol, "cuGraphUpload") == 0)
+            return __dlsym_hook_section(NULL, "cuGraphUpload_ptsz");
+        if (strcmp(symbol, "cuGraphInstantiateWithParams") == 0)
+            return __dlsym_hook_section(NULL, "cuGraphInstantiateWithParams_ptsz");
+        if (strcmp(symbol, "cuStreamBeginCapture") == 0 || strcmp(symbol, "cuStreamBeginCapture_v2") == 0)
+            return __dlsym_hook_section(NULL, "cuStreamBeginCapture_v2_ptsz");
+        if (strcmp(symbol, "cuStreamEndCapture") == 0)
+            return __dlsym_hook_section(NULL, "cuStreamEndCapture_ptsz");
+    }
+    return find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
+}
+
+/** Resolve known stream hooks while preserving native availability and stream semantics. */
+static int resolve_stream_proc(const char *symbol, void **pfn, int version, cuuint64_t flags,
+                                CUdriverProcAddressQueryResult *status, int v2, CUresult *result) {
+    static const struct {
+        const char *base, *per_thread, *legacy;
+        int min_version, max_version;
+    } hooks[] = {
+        {"cuMemAllocAsync", "cuMemAllocAsync_ptsz"},
+        {"cuMemAllocFromPoolAsync", "cuMemAllocFromPoolAsync_ptsz"},
+        {"cuMemFreeAsync", "cuMemFreeAsync_ptsz"},
+        {"cuMemcpyAsync", "cuMemcpyAsync_ptsz"},
+        {"cuStreamSynchronize", "cuStreamSynchronize_ptsz"},
+        {"cuMemcpyHtoDAsync", "cuMemcpyHtoDAsync_v2_ptsz", "cuMemcpyHtoDAsync_v2", 3020},
+        {"cuMemcpyDtoHAsync", "cuMemcpyDtoHAsync_v2_ptsz", "cuMemcpyDtoHAsync_v2", 3020},
+        {"cuMemcpyDtoDAsync", "cuMemcpyDtoDAsync_v2_ptsz", "cuMemcpyDtoDAsync_v2", 3020},
+        {"cuMemcpyHtoDAsync_v2", "cuMemcpyHtoDAsync_v2_ptsz", "cuMemcpyHtoDAsync_v2", 0},
+        {"cuMemcpyDtoHAsync_v2", "cuMemcpyDtoHAsync_v2_ptsz", "cuMemcpyDtoHAsync_v2", 0},
+        {"cuMemcpyDtoDAsync_v2", "cuMemcpyDtoDAsync_v2_ptsz", "cuMemcpyDtoDAsync_v2", 0},
+        {"cuMemsetD8Async", "cuMemsetD8Async_ptsz", "cuMemsetD8Async", 0},
+        {"cuMemsetD2D8Async", "cuMemsetD2D8Async_ptsz", "cuMemsetD2D8Async", 0},
+        {"cuMemsetD16Async", "cuMemsetD16Async_ptsz", "cuMemsetD16Async", 0},
+        {"cuMemsetD2D16Async", "cuMemsetD2D16Async_ptsz", "cuMemsetD2D16Async", 0},
+        {"cuMemsetD32Async", "cuMemsetD32Async_ptsz", "cuMemsetD32Async", 0},
+        {"cuMemsetD2D32Async", "cuMemsetD2D32Async_ptsz", "cuMemsetD2D32Async", 0},
+        {"cuLaunchKernel", "cuLaunchKernel_ptsz", "cuLaunchKernel", 0},
+        {"cuMemcpy2DAsync", "cuMemcpy2DAsync_v2_ptsz", "cuMemcpy2DAsync_v2", 3020, 0},
+        {"cuMemcpy2DAsync_v2", "cuMemcpy2DAsync_v2_ptsz", "cuMemcpy2DAsync_v2", 0, 0},
+        {"cuMemcpy3DAsync", "cuMemcpy3DAsync_v2_ptsz", "cuMemcpy3DAsync_v2", 3020, 0},
+        {"cuMemcpy3DAsync_v2", "cuMemcpy3DAsync_v2_ptsz", "cuMemcpy3DAsync_v2", 0, 0},
+        {"cuMemcpy3DPeerAsync", "cuMemcpy3DPeerAsync_ptsz", "cuMemcpy3DPeerAsync", 0, 0},
+        {"cuMemcpyPeerAsync", "cuMemcpyPeerAsync_ptsz", "cuMemcpyPeerAsync", 0, 0},
+        {"cuMemPrefetchAsync", "cuMemPrefetchAsync_ptsz", "cuMemPrefetchAsync", 0, 12019},
+        {"cuMemPrefetchAsync", "cuMemPrefetchAsync_v2_ptsz", "cuMemPrefetchAsync_v2", 12020, 0},
+        {"cuMemPrefetchAsync_v2", "cuMemPrefetchAsync_v2_ptsz", "cuMemPrefetchAsync_v2", 0, 0},
+        {"cuLaunchCooperativeKernel", "cuLaunchCooperativeKernel_ptsz", "cuLaunchCooperativeKernel", 0, 0},
+        {"cuMemcpy", "cuMemcpy_ptds", "cuMemcpy", 0, 0},
+        {"cuMemcpyHtoD", "cuMemcpyHtoD_v2_ptds", "cuMemcpyHtoD_v2", 3020, 0},
+        {"cuMemcpyHtoD_v2", "cuMemcpyHtoD_v2_ptds", "cuMemcpyHtoD_v2", 0, 0},
+        {"cuMemcpyDtoH", "cuMemcpyDtoH_v2_ptds", "cuMemcpyDtoH_v2", 3020, 0},
+        {"cuMemcpyDtoH_v2", "cuMemcpyDtoH_v2_ptds", "cuMemcpyDtoH_v2", 0, 0},
+        {"cuMemcpyDtoD", "cuMemcpyDtoD_v2_ptds", "cuMemcpyDtoD_v2", 3020, 0},
+        {"cuMemcpyDtoD_v2", "cuMemcpyDtoD_v2_ptds", "cuMemcpyDtoD_v2", 0, 0},
+        {"cuMemcpyPeer", "cuMemcpyPeer_ptds", "cuMemcpyPeer", 0, 0},
+        {"cuMemcpy2D", "cuMemcpy2D_v2_ptds", "cuMemcpy2D_v2", 3020, 0},
+        {"cuMemcpy2D_v2", "cuMemcpy2D_v2_ptds", "cuMemcpy2D_v2", 0, 0},
+        {"cuMemcpy2DUnaligned", "cuMemcpy2DUnaligned_v2_ptds", "cuMemcpy2DUnaligned_v2", 3020, 0},
+        {"cuMemcpy2DUnaligned_v2", "cuMemcpy2DUnaligned_v2_ptds", "cuMemcpy2DUnaligned_v2", 0, 0},
+        {"cuMemcpy3D", "cuMemcpy3D_v2_ptds", "cuMemcpy3D_v2", 3020, 0},
+        {"cuMemcpy3D_v2", "cuMemcpy3D_v2_ptds", "cuMemcpy3D_v2", 0, 0},
+        {"cuMemcpy3DPeer", "cuMemcpy3DPeer_ptds", "cuMemcpy3DPeer", 0, 0},
+        {"cuMemsetD8", "cuMemsetD8_v2_ptds", "cuMemsetD8_v2", 3020, 0},
+        {"cuMemsetD8_v2", "cuMemsetD8_v2_ptds", "cuMemsetD8_v2", 0, 0},
+        {"cuMemsetD2D8", "cuMemsetD2D8_v2_ptds", "cuMemsetD2D8_v2", 3020, 0},
+        {"cuMemsetD2D8_v2", "cuMemsetD2D8_v2_ptds", "cuMemsetD2D8_v2", 0, 0},
+        {"cuMemsetD16", "cuMemsetD16_v2_ptds", "cuMemsetD16_v2", 3020, 0},
+        {"cuMemsetD16_v2", "cuMemsetD16_v2_ptds", "cuMemsetD16_v2", 0, 0},
+        {"cuMemsetD2D16", "cuMemsetD2D16_v2_ptds", "cuMemsetD2D16_v2", 3020, 0},
+        {"cuMemsetD2D16_v2", "cuMemsetD2D16_v2_ptds", "cuMemsetD2D16_v2", 0, 0},
+        {"cuMemsetD32", "cuMemsetD32_v2_ptds", "cuMemsetD32_v2", 3020, 0},
+        {"cuMemsetD32_v2", "cuMemsetD32_v2_ptds", "cuMemsetD32_v2", 0, 0},
+        {"cuMemsetD2D32", "cuMemsetD2D32_v2_ptds", "cuMemsetD2D32_v2", 3020, 0},
+        {"cuMemsetD2D32_v2", "cuMemsetD2D32_v2_ptds", "cuMemsetD2D32_v2", 0, 0},
+        {"cuLaunchKernelEx", "cuLaunchKernelEx_ptsz", "cuLaunchKernelEx", 0, 0}
+    };
+    for (size_t i = 0; i < sizeof(hooks) / sizeof(hooks[0]); i++) {
+        int named_per_thread = strcmp(symbol, hooks[i].per_thread) == 0;
+        if (!named_per_thread && strcmp(symbol, hooks[i].base) != 0) continue;
+        if (!named_per_thread && hooks[i].max_version && version > hooks[i].max_version) continue;
+        *result = v2
+            ? CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress_v2, symbol, pfn, version, flags, status)
+            : CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress, symbol, pfn, version, flags);
+        if (*result == CUDA_SUCCESS && *pfn != NULL &&
+            (!v2 || status == NULL || *status == CU_GET_PROC_ADDRESS_SUCCESS)) {
+            if (!named_per_thread && version < hooks[i].min_version) return 1;
+            const char *name = named_per_thread || (flags & CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM)
+                ? hooks[i].per_thread : (hooks[i].legacy != NULL ? hooks[i].legacy : hooks[i].base);
+            void *hook = __dlsym_hook_section(NULL, name);
+            if (hook != NULL) *pfn = hook;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+/** Resolve graph and capture hooks only when the native driver supports the requested entry point. */
+static int resolve_graph_proc(const char *symbol, void **pfn, int version, cuuint64_t flags,
+                              CUdriverProcAddressQueryResult *status, int v2, CUresult *result) {
+    if (strncmp(symbol, "cuGraph", 7) != 0 && strcmp(symbol, "cuStreamBeginCapture") != 0 &&
+        strcmp(symbol, "cuStreamEndCapture") != 0 &&
+        strcmp(symbol, "cuStreamBeginCapture_ptsz") != 0 &&
+        strcmp(symbol, "cuStreamBeginCapture_v2") != 0 &&
+        strcmp(symbol, "cuStreamBeginCapture_v2_ptsz") != 0 &&
+        strcmp(symbol, "cuStreamEndCapture_ptsz") != 0 &&
+        strcmp(symbol, "cuDevicePrimaryCtxReset") != 0 &&
+        strcmp(symbol, "cuDevicePrimaryCtxReset_v2") != 0 &&
+        strcmp(symbol, "cuGreenCtxDestroy") != 0) return 0;
+    *result = v2
+        ? CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress_v2, symbol, pfn, version, flags, status)
+        : CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress, symbol, pfn, version, flags);
+    if (strcmp(symbol, "cuDevicePrimaryCtxReset") == 0 && version < 11000) return 1;
+    if (*result == CUDA_SUCCESS && *pfn != NULL &&
+        (!v2 || status == NULL || *status == CU_GET_PROC_ADDRESS_SUCCESS)) {
+        void *hook = find_symbols_with_flags(symbol, version, flags);
+        if (hook != NULL) *pfn = hook;
+    }
+    return 1;
+}
+
+
+/** Resolve indirect lookups with native graph availability and stream semantics. */
 CUresult _cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ) {
     LOG_INFO("into _cuGetProcAddress symbol=%s:%d",symbol,cudaVersion);
     CUresult result;
     if (resolve_graph_add_proc(symbol, pfn, cudaVersion, flags, NULL, 0, &result)) return result;
+    if (resolve_graph_proc(symbol, pfn, cudaVersion, flags, NULL, 0, &result)) return result;
+    if (resolve_stream_proc(symbol, pfn, cudaVersion, flags, NULL, 0, &result)) return result;
     *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
     if (*pfn==NULL){
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress,symbol,pfn,cudaVersion,flags);
@@ -405,11 +593,13 @@ CUresult _cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, c
     }
 }
 
-/** Preserve native generic-node lookup results and ABI selection. */
+/** Resolve lookups with native graph availability and stream semantics. */
 CUresult cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ) {
     LOG_INFO("into cuGetProcAddress symbol=%s:%d",symbol,cudaVersion);
     CUresult result;
     if (resolve_graph_add_proc(symbol, pfn, cudaVersion, flags, NULL, 0, &result)) return result;
+    if (resolve_graph_proc(symbol, pfn, cudaVersion, flags, NULL, 0, &result)) return result;
+    if (resolve_stream_proc(symbol, pfn, cudaVersion, flags, NULL, 0, &result)) return result;
     *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
     if (strcmp(symbol,"cuGetProcAddress")==0) {
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress,symbol,pfn,cudaVersion,flags); 
@@ -427,11 +617,13 @@ CUresult cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cu
     }
 }
 
-/** Preserve native generic-node lookup results and ABI selection. */
+/** Preserve native graph status during indirect versioned lookups. */
 CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags, CUdriverProcAddressQueryResult *symbolStatus){
     LOG_INFO("into _cuGetProcAddress_v2 symbol=%s:%d",symbol,cudaVersion);
     CUresult result;
     if (resolve_graph_add_proc(symbol, pfn, cudaVersion, flags, symbolStatus, 1, &result)) return result;
+    if (resolve_graph_proc(symbol, pfn, cudaVersion, flags, symbolStatus, 1, &result)) return result;
+    if (resolve_stream_proc(symbol, pfn, cudaVersion, flags, symbolStatus, 1, &result)) return result;
     *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
     if (*pfn==NULL){
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress_v2,symbol,pfn,cudaVersion,flags,symbolStatus);
@@ -447,11 +639,13 @@ CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, c
     }
 }
 
-/** Preserve native generic-node lookup results and ABI selection. */
+/** Preserve native graph status during versioned lookups. */
 CUresult cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags, CUdriverProcAddressQueryResult *symbolStatus){
     LOG_INFO("into cuGetProcAddress_v2 symbol=%s:%d",symbol,cudaVersion);
     CUresult result;
     if (resolve_graph_add_proc(symbol, pfn, cudaVersion, flags, symbolStatus, 1, &result)) return result;
+    if (resolve_graph_proc(symbol, pfn, cudaVersion, flags, symbolStatus, 1, &result)) return result;
+    if (resolve_stream_proc(symbol, pfn, cudaVersion, flags, symbolStatus, 1, &result)) return result;
     *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
     if (strcmp(symbol,"cuGetProcAddress_v2")==0) {
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress_v2,symbol,pfn,cudaVersion,flags,symbolStatus); 
