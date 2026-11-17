@@ -45,6 +45,10 @@ int pidfound;
 int ctx_activate[32];
 
 static shared_region_info_t region_info = {0, -1, PTHREAD_ONCE_INIT, NULL, 0, NULL};
+/* Identity of the file behind region_info.fd. A forked child inherits it and
+   uses it to tell whether the inherited fd number still refers to that file. */
+static dev_t region_file_dev;
+static ino_t region_file_ino;
 static atomic_flag postinit_local_lock = ATOMIC_FLAG_INIT;
 static _Thread_local int postinit_lock_held;
 int env_utilization_switch;
@@ -1225,8 +1229,32 @@ void try_create_shrreg() {
         }
     }
 
+    /* A forked child re-enters here still holding the parent's fd and mapping.
+       Drop them before locking the new fd, since closing any fd on the file
+       releases this process's lockf locks. Clear the pointer before unmapping
+       so the inherited SIGUSR1 and SIGUSR2 handlers never read unmapped memory.
+       The program may have closed the inherited fd and reused its number, so
+       close it only if it still refers to the cache file. */
+    if (region_info.shared_region != NULL) {
+        shared_region_t* inherited = region_info.shared_region;
+        region_info.shared_region = NULL;
+        munmap(inherited, SHARED_REGION_SIZE_MAGIC);
+    }
+    if (region_info.fd != -1) {
+        struct stat inherited_file;
+        if (fstat(region_info.fd, &inherited_file) == 0 &&
+            inherited_file.st_dev == region_file_dev &&
+            inherited_file.st_ino == region_file_ino) {
+            close(region_info.fd);
+        }
+    }
+
     env_utilization_switch = set_env_utilization_switch();
-    pthread_atfork(NULL, NULL, child_reinit_flag);
+    static int atfork_registered;
+    if (!atfork_registered) {
+        pthread_atfork(NULL, NULL, child_reinit_flag);
+        atfork_registered = 1;
+    }
 
     region_info.pid = getpid();
     region_info.fd = -1;
@@ -1297,6 +1325,11 @@ void try_create_shrreg() {
         goto fail;
     }
     region_info.fd = fd;
+    struct stat region_file;
+    if (fstat(fd, &region_file) == 0) {
+        region_file_dev = region_file.st_dev;
+        region_file_ino = region_file.st_ino;
+    }
     off_t offset = lseek(fd, SHARED_REGION_SIZE_MAGIC, SEEK_SET);
     if (offset != SHARED_REGION_SIZE_MAGIC) {
         LOG_ERROR("Fail to init shrreg %s: errno=%d", shr_reg_file, errno);
