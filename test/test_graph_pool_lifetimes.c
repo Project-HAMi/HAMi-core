@@ -201,6 +201,23 @@ static void test_trim_pressure(void) {
     release_device_memory(0, 600 * MIB); clean();
 }
 
+/** Skip futile eviction while retaining trims that cover only the quota shortfall. */
+static void test_futile_trim(void) {
+    CUgraph graph = make_graph();
+    REQUIRE(add(graph, 300, 1, NULL) == CUDA_SUCCESS);
+    CUgraphExec exec = instantiate(graph);
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    reserved = 640 * MIB; gpu_done = 1;
+    int before = trim_calls;
+    REQUIRE(oom_check(0, 500 * MIB) != 0);
+    REQUIRE(reserve_device_memory(0, 500 * MIB) == CUDA_ERROR_OUT_OF_MEMORY);
+    REQUIRE(trim_calls == before && used == 896 * MIB);
+    REQUIRE(reserve_device_memory(0, 400 * MIB) == CUDA_SUCCESS);
+    REQUIRE(trim_calls == before + 1 && used == 956 * MIB);
+    release_device_memory(0, 400 * MIB);
+    destroy(graph, exec); clean();
+}
+
 /** Exercise pooled quota and pointer lifetimes through production CUDA wrappers. */
 int main(void) {
 #define DRIVER(name, fn) cuda_library_entry[CUDA_OVERRIDE_ENUM(name)].fn_ptr = (void *)(fn)
@@ -220,7 +237,7 @@ int main(void) {
     DRIVER(cuStreamEndCapture, driver_end_capture);
     DRIVER(cuCtxGetDevice, driver_device);
     DRIVER(cuDeviceGetCount, driver_device_count);
-    test_persistent_and_pending(); test_trim_pressure();
+    test_persistent_and_pending(); test_trim_pressure(); test_futile_trim();
     for (int mode = 0; mode < 3; mode++) test_output_admission(mode);
     test_output_submission_failure(); test_output_host_lifetime();
     test_serial_pool(); test_output_replay(); test_peak_removal();
