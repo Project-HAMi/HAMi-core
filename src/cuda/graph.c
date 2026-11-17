@@ -283,6 +283,7 @@ CUresult cuGraphInstantiateWithFlags(CUgraphExec *phGraphExec, CUgraph hGraph, u
 /** Instantiate a graph with parameters and reserve quota for any requested upload. */
 static CUresult instantiate_with_params(cuda_sym_t instantiate, CUgraphExec *exec, CUgraph graph,
                                         CUDA_GRAPH_INSTANTIATE_PARAMS *params, int per_thread) {
+    if (instantiate == NULL) return CUDA_ERROR_NOT_SUPPORTED;
     graph_exec_state *state;
     CUresult res = graph_exec_prepare(graph, &state);
     if (res != CUDA_SUCCESS) return res;

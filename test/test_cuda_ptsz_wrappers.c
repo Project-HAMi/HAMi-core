@@ -306,6 +306,11 @@ int main(void) {
             check_extended_streams(streams[i]);
         }
     }
+    cuda_library_entry[OVERRIDE_cuGraphInstantiateWithParams_ptsz].fn_ptr = NULL;
+    calls = completions = launches = 0;
+    CUgraphExec missing = NULL;
+    REQUIRE(cuGraphInstantiateWithParams_ptsz(&missing, (CUgraph)8, NULL) == CUDA_ERROR_NOT_SUPPORTED);
+    REQUIRE(calls == 0 && completions == 0 && launches == 0 && missing == NULL);
     printf("PASS: %d production wrapper calls preserve stream semantics and results\n", checks);
     return 0;
 }
