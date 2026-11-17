@@ -56,7 +56,9 @@ static int check_graph_node_procs(void) {
     puts("ok   generic graph node ABIs and native lookup outcomes: 960 cases");
     cuda_library_entry[OVERRIDE_cuGraphAddNode_v3].fn_ptr = NULL;
     graph_proc_result = CUDA_SUCCESS; graph_proc_pointer = 1; graph_proc_status = CU_GET_PROC_ADDRESS_SUCCESS;
-    for (int entry = 0; entry < 4; entry++) {
+    for (int missing = 0; missing < 2; missing++) for (int entry = 0; entry < 4; entry++) {
+        cuda_library_entry[OVERRIDE_cuGraphAddNode_v3].fn_ptr = missing ? graph_native_marker : NULL;
+        g_present[2] = missing ? NULL : names[2];
         void *pfn = NULL; CUdriverProcAddressQueryResult status = STATUS_POISON;
         CUresult res;
         if (entry == 0) res = cuGetProcAddress(names[0], &pfn, 13060, 0);
