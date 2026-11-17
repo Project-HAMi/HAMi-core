@@ -292,6 +292,8 @@ CUresult cuGraphInstantiateWithParams(CUgraphExec *phGraphExec, CUgraph hGraph,
 /** Preserve per-thread upload semantics while tracking the instantiated graph. */
 CUresult cuGraphInstantiateWithParams_ptsz(CUgraphExec *exec, CUgraph graph,
                                            CUDA_GRAPH_INSTANTIATE_PARAMS *params) {
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuGraphInstantiateWithParams_ptsz) == NULL)
+        return CUDA_ERROR_NOT_SUPPORTED;
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphInstantiateWithParams_ptsz,
                                       exec, graph, params);
     return track_exec(res, graph, exec,
