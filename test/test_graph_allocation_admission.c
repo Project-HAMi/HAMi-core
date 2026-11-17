@@ -23,7 +23,8 @@ static CUresult native_result, competing_result;
 static int v3_calls;
 static uintptr_t serial = 10;
 static CUgraph captured_graph;
-static CUresult end_result;
+static CUresult end_result, capture_query_result, device_count_result;
+static int device_count = 1;
 static allocated_list async_list;
 
 void *__real_calloc(size_t count, size_t size);
@@ -54,6 +55,12 @@ int rm_gpu_device_memory_usage(int32_t pid, int dev, size_t bytes, int type) {
     (void)pid; (void)type; REQUIRE(dev == 0 && used >= bytes); used -= bytes; return 0;
 }
 
+/** Report the visible device count or an injected driver failure. */
+static CUresult native_device_count(int *count) {
+    if (device_count_result != CUDA_SUCCESS) return device_count_result;
+    *count = device_count; return CUDA_SUCCESS;
+}
+
 /** Model another allocation arriving between admission and native completion. */
 static CUresult native_allocate(CUdeviceptr *ptr, size_t size, CUstream stream) {
     (void)size; (void)stream; native_calls++;
@@ -67,7 +74,7 @@ static CUresult native_allocate(CUdeviceptr *ptr, size_t size, CUstream stream) 
 static CUresult native_add(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
                             size_t count, CUDA_MEM_ALLOC_NODE_PARAMS *params) {
     (void)graph; (void)deps; (void)count;
-    if (params->poolProps.location.id < 0 || params->poolProps.location.id >= CUDA_DEVICE_MAX_COUNT) {
+    if (params->poolProps.location.id < 0 || params->poolProps.location.id >= device_count) {
         native_calls++; return CUDA_ERROR_INVALID_VALUE;
     }
     CUresult result = native_allocate(&params->dptr, params->bytesize, NULL);
@@ -83,7 +90,7 @@ static CUresult native_generic(CUgraphNode *node, CUgraph graph, const CUgraphNo
     if (params == NULL) return CUDA_ERROR_INVALID_VALUE;
     if (params->type == CU_GRAPH_NODE_TYPE_MEM_ALLOC) {
         if (params->alloc.poolProps.location.id < 0 ||
-            params->alloc.poolProps.location.id >= CUDA_DEVICE_MAX_COUNT) {
+            params->alloc.poolProps.location.id >= device_count) {
             native_calls++; return CUDA_ERROR_INVALID_VALUE;
         }
         CUresult result = native_allocate(&params->alloc.dptr, params->alloc.bytesize, NULL);
@@ -121,6 +128,9 @@ static CUresult native_undo(CUgraphNode node) {
 static CUresult native_capture(CUstream stream, CUstreamCaptureStatus *status, cuuint64_t *id,
                                 CUgraph *graph, const CUgraphNode **deps, size_t *count) {
     (void)stream; (void)deps; (void)count;
+    if (capture_query_result != CUDA_SUCCESS) {
+        *id = 999; *graph = (CUgraph)999; return capture_query_result;
+    }
     *status = captured_graph ? CU_STREAM_CAPTURE_STATUS_ACTIVE : CU_STREAM_CAPTURE_STATUS_NONE;
     *id = captured_graph ? 123 : 0; *graph = captured_graph;
     return CUDA_SUCCESS;
@@ -168,22 +178,54 @@ static CUresult allocate(int kind, size_t size, CUdeviceptr *ptr) {
     return result;
 }
 
-/** Preserve native validation for allocation-node device ordinals outside the accounting table. */
+/** Preserve native validation for invalid allocation-node device ordinals. */
 static void check_invalid_device(void) {
-    const int devices[] = {-1, CUDA_DEVICE_MAX_COUNT, CUDA_DEVICE_MAX_COUNT + 1};
+    const int devices[] = {-1, device_count, device_count + 1, CUDA_DEVICE_MAX_COUNT, CUDA_DEVICE_MAX_COUNT + 1};
     for (size_t i = 0; i < sizeof(devices) / sizeof(devices[0]); i++) {
         CUDA_MEM_ALLOC_NODE_PARAMS params = {0}; CUgraphNode node;
         params.poolProps.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
         params.poolProps.location.id = devices[i]; params.bytesize = 900 * MIB;
         int before = native_calls;
+        fail_calloc = 1;
         REQUIRE(cuGraphAddMemAllocNode(&node, (CUgraph)2, NULL, 0, &params) == CUDA_ERROR_INVALID_VALUE);
         CUgraphNodeParams generic = {0}; generic.type = CU_GRAPH_NODE_TYPE_MEM_ALLOC;
         generic.alloc.poolProps = params.poolProps; generic.alloc.bytesize = params.bytesize;
         REQUIRE(cuGraphAddNode(&node, (CUgraph)2, NULL, 0, &generic) == CUDA_ERROR_INVALID_VALUE);
         REQUIRE(cuGraphAddNode_v2(&node, (CUgraph)2, NULL, NULL, 0, &generic) == CUDA_ERROR_INVALID_VALUE);
         REQUIRE(cuGraphAddNode_v3(&node, (CUgraph)2, NULL, NULL, 0, &generic) == CUDA_ERROR_INVALID_VALUE);
-        REQUIRE(native_calls == before + 4 && used == 256 * MIB);
+        REQUIRE(native_calls == before + 4 && used == 256 * MIB && fail_calloc == 1);
+        fail_calloc = 0;
     }
+}
+
+/** Recover capture identity after the initial query fails without trusting failed outputs. */
+static void check_capture_id_recovery(int from_pool) {
+    CUstream stream = (CUstream)3;
+    capture_query_result = CUDA_ERROR_UNKNOWN;
+    REQUIRE(cuStreamBeginCapture_v2(stream, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);
+    cuuint64_t id;
+    uint64_t token = graph_capture_token(stream, &id);
+    REQUIRE(token != 0 && id == 0);
+    capture_query_result = CUDA_SUCCESS;
+    CUdeviceptr ptr;
+    REQUIRE(allocate(from_pool ? 2 : 1, 100 * MIB, &ptr) == CUDA_SUCCESS);
+    REQUIRE(graph_capture_token(stream, &id) == token && id == 123 && used == 356 * MIB);
+    capture_query_result = CUDA_ERROR_UNKNOWN;
+    end_result = CUDA_ERROR_STREAM_CAPTURE_INVALIDATED;
+    CUgraph graph;
+    REQUIRE(cuStreamEndCapture(stream, &graph) == end_result);
+    REQUIRE(used == 256 * MIB && graph_capture_token(stream, &id) == 0);
+    capture_query_result = end_result = CUDA_SUCCESS;
+}
+
+/** Stop before native graph mutation when the device-count query fails. */
+static void check_device_query_failure(void) {
+    int before = native_calls;
+    CUdeviceptr ptr;
+    device_count_result = CUDA_ERROR_UNKNOWN;
+    REQUIRE(allocate(0, 100 * MIB, &ptr) == device_count_result);
+    REQUIRE(native_calls == before && used == 256 * MIB);
+    device_count_result = CUDA_SUCCESS;
 }
 
 /** Check quota rejection, native failure, heap failure, and concurrent admission. */
@@ -230,6 +272,7 @@ static void check_admission(int kind) {
 int main(void) {
     log_utils_init();
     device_allocasync = &async_list;
+    cuda_library_entry[OVERRIDE_cuDeviceGetCount].fn_ptr = native_device_count;
     cuda_library_entry[OVERRIDE_cuGraphAddMemAllocNode].fn_ptr = native_add;
     cuda_library_entry[OVERRIDE_cuGraphDestroyNode].fn_ptr = native_undo;
     cuda_library_entry[OVERRIDE_cuGraphAddNode].fn_ptr = native_generic;
@@ -258,7 +301,8 @@ int main(void) {
     cuda_library_entry[OVERRIDE_cuGraphAddNode_v3].fn_ptr = NULL;
     REQUIRE(cuGraphAddNode_v3(&node, (CUgraph)2, NULL, NULL, 0, &empty) == CUDA_ERROR_NOT_SUPPORTED);
     cuda_library_entry[OVERRIDE_cuGraphAddNode_v3].fn_ptr = native_generic_v3;
-    check_invalid_device();
+    check_invalid_device(); check_device_query_failure();
+    check_capture_id_recovery(0); check_capture_id_recovery(1);
     CUdeviceptr ptr;
     CUgraph graph;
     REQUIRE(cuStreamBeginCapture_v2((CUstream)3, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);

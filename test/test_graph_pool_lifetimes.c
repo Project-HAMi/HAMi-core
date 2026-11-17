@@ -150,6 +150,7 @@ int main(void) {
     DRIVER(cuStreamBeginCapture_v2, driver_begin_capture);
     DRIVER(cuStreamEndCapture, driver_end_capture);
     DRIVER(cuCtxGetDevice, driver_device);
+    DRIVER(cuDeviceGetCount, driver_device_count);
     DRIVER(cuEventCreate, driver_event_create);
     DRIVER(cuEventRecord, driver_event_record);
     DRIVER(cuEventQuery, driver_event_query);

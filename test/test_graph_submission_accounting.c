@@ -423,6 +423,7 @@ int main(void) {
     DRIVER(cuStreamGetCtx, driver_stream_ctx);
     DRIVER(cuCtxGetCurrent, driver_current);
     DRIVER(cuCtxGetDevice, driver_device);
+    DRIVER(cuDeviceGetCount, driver_device_count);
     DRIVER(cuCtxSynchronize, driver_context_sync);
     DRIVER(cuStreamSynchronize, driver_stream_sync);
     DRIVER(cuCtxGetId, driver_context_id);

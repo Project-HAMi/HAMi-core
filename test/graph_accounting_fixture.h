@@ -66,6 +66,7 @@ int add_gpu_device_memory_usage(int32_t pid, int dev, size_t bytes, int type) {
 int rm_gpu_device_memory_usage(int32_t pid, int dev, size_t bytes, int type) {
     (void)pid; (void)type; REQUIRE(dev == 0 && used >= bytes); used -= bytes; return 0;
 }
+static CUresult driver_device_count(int *count) { *count = 1; return CUDA_SUCCESS; }
 static CUresult driver_device(CUdevice *dev) { *dev = 0; return CUDA_SUCCESS; }
 
 /** Simulate graph allocation node creation or an injected native failure. */
