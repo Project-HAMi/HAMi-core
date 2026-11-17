@@ -16,7 +16,7 @@ CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion,
                               cuuint64_t flags,
                               CUdriverProcAddressQueryResult *symbolStatus);
 
-/* Referenced by load_cuda_libraries(), which this test never calls. */
+/* Native symbol-loader dependency supplied by the regression fixture. */
 typedef void *(*fp_dlsym)(void *, const char *);
 fp_dlsym real_dlsym;
 
@@ -108,6 +108,10 @@ static int check_symbol_status(void) {
     return 0;
 }
 
+#include "test/graph_node_proc_fixture.h"
+#include "test/graph_loader_fixture.h"
+
+/** Run version selection and generic-node procedure lookup regressions. */
 int main(void) {
     /* Boundaries from cudaTypedefs.h: cuCtxCreate _v2 / _v3 from 11040 / _v4
        from 12050, cuMemAdvise and cuMemPrefetchAsync _v2 from 12020. A CUDA
@@ -154,6 +158,9 @@ int main(void) {
     failures += check_cases("cuMemPrefetchAsync", prefetch13, "cuda13 build",
                             prefetch_on13, 3);
     failures += check_symbol_status();
+    failures += check_graph_node_procs();
+
+    failures += check_graph_loader_abi();
 
     if (failures) {
         printf("%d version map check(s) failed\n", failures);

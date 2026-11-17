@@ -611,14 +611,12 @@ CUresult cuMemFreeAsync(CUdeviceptr dptr, CUstream hStream) {
         return CUDA_SUCCESS;
     }
     CUresult res = free_raw_async(dptr,hStream);
-    if (res == CUDA_SUCCESS) graph_ptr_freed_async(dptr, hStream);
     LOG_DEBUG("after free_raw_async dptr=%p res=%d",(void *)dptr,res);
     return res;
 }
 
-/* Graph memory is charged at node creation. See graph_record() for when it is
- * released. A graph exec that outlives its graph, and cuGraphClone, are not
- * tracked. */
+/* Executables outliving their graph and cuGraphClone remain untracked. */
+/** Reserve graph bookkeeping and quota before recording an allocation node. */
 CUresult cuGraphAddMemAllocNode(CUgraphNode *phGraphNode, CUgraph hGraph,
         const CUgraphNode *dependencies, size_t numDependencies,
         CUDA_MEM_ALLOC_NODE_PARAMS *nodeParams) {
@@ -627,15 +625,57 @@ CUresult cuGraphAddMemAllocNode(CUgraphNode *phGraphNode, CUgraph hGraph,
         nodeParams->poolProps.location.type == CU_MEM_LOCATION_TYPE_DEVICE;
     CUdevice dev = charge ? nodeParams->poolProps.location.id : 0;
     size_t size = charge ? nodeParams->bytesize : 0;
+    graph_charge_entry *entry = NULL;
+    if (charge) {
+        cuuint64_t id = graph_capture_id_of(hGraph);
+        CUresult res = graph_alloc_begin(hGraph, dev, size, id, id != 0, &entry);
+        if (res != CUDA_SUCCESS) return res;
+    }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphAddMemAllocNode,
         phGraphNode, hGraph, dependencies, numDependencies, nodeParams);
-    if (charge && res == CUDA_SUCCESS &&
-            graph_record(hGraph, dev, size, nodeParams->dptr, graph_capture_id_of(hGraph)) != 0) {
-        /* Over the limit, or untracked graph memory would escape it: undo the node. */
-        CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphDestroyNode, *phGraphNode);
-        return CUDA_ERROR_OUT_OF_MEMORY;
-    }
+    graph_alloc_end(entry, res == CUDA_SUCCESS && charge ? nodeParams->dptr : 0, res);
     return res;
+}
+
+
+/** Reserve allocation demand and preserve native generic-node parameters and edge data. */
+static CUresult graph_add_node(cuda_sym_t add, int edges, CUgraphNode *node, CUgraph graph,
+                                const CUgraphNode *deps, const CUgraphEdgeData *data,
+                                size_t count, CUgraphNodeParams *params) {
+    if (add == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    int charge = params != NULL && params->type == CU_GRAPH_NODE_TYPE_MEM_ALLOC &&
+        params->alloc.poolProps.location.type == CU_MEM_LOCATION_TYPE_DEVICE;
+    graph_charge_entry *entry = NULL;
+    if (charge) {
+        cuuint64_t id = graph_capture_id_of(graph);
+        CUresult res = graph_alloc_begin(graph, params->alloc.poolProps.location.id,
+            params->alloc.bytesize, id, id != 0, &entry);
+        if (res != CUDA_SUCCESS) return res;
+    }
+    CUresult res = edges ? add(node, graph, deps, data, count, params)
+                         : add(node, graph, deps, count, params);
+    graph_alloc_end(entry, res == CUDA_SUCCESS && charge ? params->alloc.dptr : 0, res);
+    if (res == CUDA_SUCCESS && params != NULL && params->type == CU_GRAPH_NODE_TYPE_MEM_FREE)
+        graph_mark_free(graph, params->free.dptr);
+    return res;
+}
+
+CUresult cuGraphAddNode(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
+                        size_t count, CUgraphNodeParams *params) {
+    return graph_add_node((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuGraphAddNode),
+        0, node, graph, deps, NULL, count, params);
+}
+
+CUresult cuGraphAddNode_v2(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
+                           const CUgraphEdgeData *data, size_t count, CUgraphNodeParams *params) {
+    return graph_add_node((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuGraphAddNode_v2),
+        1, node, graph, deps, data, count, params);
+}
+
+CUresult cuGraphAddNode_v3(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
+                           const CUgraphEdgeData *data, size_t count, CUgraphNodeParams *params) {
+    return graph_add_node((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuGraphAddNode_v3),
+        1, node, graph, deps, data, count, params);
 }
 
 CUresult cuGraphAddMemFreeNode(CUgraphNode *phGraphNode, CUgraph hGraph,

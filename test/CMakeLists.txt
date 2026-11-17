@@ -108,7 +108,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             set_property(TARGET ${TEST_TARGET_NAME} APPEND_STRING PROPERTY
                 LINK_FLAGS " -Wl,--wrap=hostpid_broker_query_trusted,--wrap=hostpid_fallback_lock_acquire_until,--wrap=hostpid_fallback_lock_acquire_shared_until")
         endif()
-    elseif (TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat")
+    elseif (TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_allocation_admission")
         add_executable(${TEST_TARGET_NAME}
             ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/memory.c
@@ -122,6 +123,10 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         # pull in unrelated driver/accounting dependencies.
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+        if (TEST_TARGET_NAME STREQUAL "test_graph_allocation_admission")
+            target_sources(${TEST_TARGET_NAME} PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/graph.c)
+        endif()
     elseif (TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle")
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/allocator/allocator.c
@@ -236,7 +241,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
-            LINK_FLAGS "-Wl,--gc-sections")
+            LINK_FLAGS "-Wl,--gc-sections,--wrap=dlopen,--wrap=dlclose")
     elseif (TEST_TARGET_NAME STREQUAL "test_rate_limiter_recent_kernel")
         # Includes the watcher source to reach its static limit state and
         # stubs the driver and shared region, so it needs no GPU.
@@ -280,6 +285,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_utilization_nvml_index"
             OR TEST_TARGET_NAME STREQUAL "test_rate_limiter_recent_kernel"
             OR TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_allocation_admission"
             OR TEST_TARGET_NAME STREQUAL "test_device_total_mem"
             OR TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
@@ -463,3 +469,7 @@ set_tests_properties(sm_limiter_step PROPERTIES TIMEOUT 10)
 
 add_test(NAME graph_capture_lifecycle COMMAND test_graph_capture_lifecycle)
 set_tests_properties(graph_capture_lifecycle PROPERTIES TIMEOUT 15)
+
+add_test(NAME graph_allocation_admission COMMAND test_graph_allocation_admission)
+set_tests_properties(graph_allocation_admission PROPERTIES TIMEOUT 15)
+target_link_options(test_graph_allocation_admission PRIVATE "-Wl,--wrap=calloc")

@@ -152,6 +152,9 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuStreamGetCaptureInfo_v2"},
     {.name = "cuStreamGetCaptureInfo_v3"},
     {.name = "cuGraphAddMemAllocNode"},
+    {.name = "cuGraphAddNode"},
+    {.name = "cuGraphAddNode_v2"},
+    {.name = "cuGraphAddNode_v3"},
     {.name = "cuGraphAddMemFreeNode"},
     /* memory APIs */
     {.name = "cuMemHostGetDevicePointer_v2"},
@@ -259,6 +262,7 @@ int prior_function(char tmp[500]) {
     return 0;
 }
 
+/** Load native entries without falling back across incompatible generic-node ABIs. */
 void load_cuda_libraries() {
     void *table = NULL;
     int i = 0;
@@ -279,6 +283,7 @@ void load_cuda_libraries() {
             cuda_library_entry[i].fn_ptr=real_dlsym(RTLD_NEXT,cuda_library_entry[i].name);
             if (!cuda_library_entry[i].fn_ptr){
                 LOG_INFO("can't find function %s in %s", cuda_library_entry[i].name,cuda_filename);
+                if (i == OVERRIDE_cuGraphAddNode_v2 || i == OVERRIDE_cuGraphAddNode_v3) continue;
                 snprintf(tmpfunc, sizeof(tmpfunc), "%s", cuda_library_entry[i].name);
                 while (prior_function(tmpfunc)) {
                     cuda_library_entry[i].fn_ptr=real_dlsym(RTLD_NEXT,tmpfunc);
@@ -354,8 +359,38 @@ void *find_symbols_in_table_by_cudaversion(const char *symbol,int  cudaVersion) 
 }
 
 
+
+/** Preserve native availability while selecting the generic Graph-node ABI. */
+static int resolve_graph_add_proc(const char *symbol, void **pfn, int version, cuuint64_t flags,
+                                  CUdriverProcAddressQueryResult *status, int v2, CUresult *result) {
+    int current = strcmp(symbol, "cuGraphAddNode_v2") == 0;
+    int latest = strcmp(symbol, "cuGraphAddNode_v3") == 0;
+    if (!current && !latest && strcmp(symbol, "cuGraphAddNode") != 0) return 0;
+    *result = v2
+        ? CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress_v2, symbol, pfn, version, flags, status)
+        : CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress, symbol, pfn, version, flags);
+    if (*result == CUDA_SUCCESS && *pfn != NULL &&
+        (!v2 || status == NULL || *status == CU_GET_PROC_ADDRESS_SUCCESS)) {
+        const char *name = latest || (!current && version >= 13040) ? "cuGraphAddNode_v3"
+            : (current || version >= 12030 ? "cuGraphAddNode_v2" : "cuGraphAddNode");
+        void *hook = __dlsym_hook_section(NULL, name);
+        if (strcmp(symbol, "cuGraphAddNode") == 0 && version > 13050 &&
+            (*pfn != CUDA_FIND_ENTRY(cuda_library_entry, cuGraphAddNode_v3) || hook == NULL)) {
+            *pfn = NULL;
+            *result = CUDA_ERROR_NOT_SUPPORTED;
+            if (v2 && status != NULL) *status = CU_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT;
+            return 1;
+        }
+        if (hook != NULL) *pfn = hook;
+    }
+    return 1;
+}
+
+/** Preserve native generic-node lookup results and ABI selection. */
 CUresult _cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ) {
     LOG_INFO("into _cuGetProcAddress symbol=%s:%d",symbol,cudaVersion);
+    CUresult result;
+    if (resolve_graph_add_proc(symbol, pfn, cudaVersion, flags, NULL, 0, &result)) return result;
     *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
     if (*pfn==NULL){
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress,symbol,pfn,cudaVersion,flags);
@@ -366,8 +401,11 @@ CUresult _cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, c
     }
 }
 
+/** Preserve native generic-node lookup results and ABI selection. */
 CUresult cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cuuint64_t flags ) {
     LOG_INFO("into cuGetProcAddress symbol=%s:%d",symbol,cudaVersion);
+    CUresult result;
+    if (resolve_graph_add_proc(symbol, pfn, cudaVersion, flags, NULL, 0, &result)) return result;
     *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
     if (strcmp(symbol,"cuGetProcAddress")==0) {
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress,symbol,pfn,cudaVersion,flags); 
@@ -385,8 +423,11 @@ CUresult cuGetProcAddress ( const char* symbol, void** pfn, int  cudaVersion, cu
     }
 }
 
+/** Preserve native generic-node lookup results and ABI selection. */
 CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags, CUdriverProcAddressQueryResult *symbolStatus){
     LOG_INFO("into _cuGetProcAddress_v2 symbol=%s:%d",symbol,cudaVersion);
+    CUresult result;
+    if (resolve_graph_add_proc(symbol, pfn, cudaVersion, flags, symbolStatus, 1, &result)) return result;
     *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
     if (*pfn==NULL){
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress_v2,symbol,pfn,cudaVersion,flags,symbolStatus);
@@ -402,8 +443,11 @@ CUresult _cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, c
     }
 }
 
+/** Preserve native generic-node lookup results and ABI selection. */
 CUresult cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags, CUdriverProcAddressQueryResult *symbolStatus){
     LOG_INFO("into cuGetProcAddress_v2 symbol=%s:%d",symbol,cudaVersion);
+    CUresult result;
+    if (resolve_graph_add_proc(symbol, pfn, cudaVersion, flags, symbolStatus, 1, &result)) return result;
     *pfn = find_symbols_in_table_by_cudaversion(symbol, cudaVersion);
     if (strcmp(symbol,"cuGetProcAddress_v2")==0) {
         CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuGetProcAddress_v2,symbol,pfn,cudaVersion,flags,symbolStatus); 
