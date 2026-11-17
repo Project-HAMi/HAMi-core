@@ -76,14 +76,16 @@ typedef struct graph_exec_state graph_exec_state;
 int graph_exec_prepare(CUgraph graph, graph_exec_state **state) {
     REQUIRE(graph == (CUgraph)8); *state = (graph_exec_state *)4; return 0;
 }
-int graph_exec_reserve(graph_exec_state *state, CUstream stream) {
+int graph_exec_reserve(graph_exec_state *state, CUstream stream, int upload) {
+    REQUIRE(upload);
     (void)state; REQUIRE(stream == expected_stream); return 0;
 }
 void graph_exec_commit(graph_exec_state *state, CUgraphExec exec) {
     (void)state; REQUIRE(exec == (CUgraphExec)9); completions++;
 }
 void graph_exec_discard(graph_exec_state *state) { (void)state; }
-int graph_exec_begin(CUgraphExec exec, CUstream stream, graph_exec_state **state) {
+int graph_exec_begin(CUgraphExec exec, CUstream stream, int upload, graph_exec_state **state) {
+    (void)upload;
     REQUIRE(exec == (CUgraphExec)9); REQUIRE(stream == expected_stream);
     *state = (graph_exec_state *)5; return 0;
 }

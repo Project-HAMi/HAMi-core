@@ -475,7 +475,12 @@ struct graph_exec_state {
     CUcontext event_ctx;
     cuuint64_t event_ctx_id;
     CUevent prepared_event;
+    CUevent free_event, prepared_free_event;
+    CUcontext free_event_ctx;
+    cuuint64_t free_event_ctx_id;
+    int free_recorded, upload;
     graph_stream_key key, saved_key;
+    graph_stream_key free_key;
     graph_group *group;
     graph_exec_link *entries;
     graph_exec_link *updates;
@@ -492,6 +497,7 @@ struct graph_exec_state {
     int pending;
     int retired;
     uint64_t submitted;
+    uint64_t free_submitted;
     size_t temporary[CUDA_DEVICE_MAX_COUNT];
     struct graph_exec_state *active_next;
     struct graph_exec_state *next;
@@ -532,6 +538,8 @@ static CUcontext graph_primary_ctx[CUDA_DEVICE_MAX_COUNT];
 static cuuint64_t graph_primary_ctx_id[CUDA_DEVICE_MAX_COUNT];
 
 static void graph_exec_maybe_free(graph_exec_state *s);
+static int graph_query_begin(CUstreamCaptureMode *mode);
+static void graph_query_end(CUstreamCaptureMode mode);
 
 /** Release a graph group after its final reference is dropped. */
 static void graph_group_put(graph_group *group) {
@@ -582,9 +590,23 @@ static void graph_entry_update(graph_charge_entry *e) {
 }
 
 /** Retire confirmed external frees without releasing a newer allocation generation. */
-static int graph_complete_frees(graph_exec_state *s) {
+static int graph_complete_frees(graph_exec_state *s, int completed) {
+    int pending = 0;
     for (graph_exec_link *l = s->updates; l != NULL; l = l->update_next) {
-        if (l->is_free && !l->free_done && l->entry->launching) return 0;
+        if (!l->is_free || l->free_done) continue;
+        if (l->entry->launching) return 0;
+        pending = 1;
+    }
+    if (pending && !completed) {
+        if (!s->free_recorded) return 0;
+        for (capture_link *l = capture_links; l != NULL; l = l->next) {
+            if (l->mode == CU_STREAM_CAPTURE_MODE_GLOBAL || l->thread == graph_thread_id) return 0;
+        }
+        CUstreamCaptureMode mode;
+        if (!graph_query_begin(&mode)) return 0;
+        CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuEventQuery, s->free_event);
+        graph_query_end(mode);
+        if (res != CUDA_SUCCESS) return 0;
     }
     for (graph_exec_link *l = s->updates; l != NULL; l = l->update_next) {
         if (!l->is_free || l->free_done) continue;
@@ -676,7 +698,7 @@ static void graph_poll_active(void) {
         next = s->active_next;
         if (s->active && s->recorded && !s->pending &&
             CUDA_OVERRIDE_CALL(cuda_library_entry, cuEventQuery, s->done) == CUDA_SUCCESS &&
-            graph_complete_frees(s))
+            graph_complete_frees(s, 0))
             graph_active_remove(s);
         graph_exec_maybe_free(s);
     }
@@ -1097,6 +1119,7 @@ static int graph_exec_link_entry(graph_exec_state *s, graph_charge_entry *e, int
     l->entry = e;
     l->has_free = e->has_free;
     l->is_free = is_free;
+    l->free_done = 1;
     l->next = s->entries;
     s->entries = l;
     e->nexec++;
@@ -1270,6 +1293,9 @@ static void graph_exec_maybe_free(graph_exec_state *s) {
     if (s->done != NULL) CUDA_OVERRIDE_CALL(cuda_library_entry, cuEventDestroy_v2, s->done);
     if (s->prepared_event != NULL)
         CUDA_OVERRIDE_CALL(cuda_library_entry, cuEventDestroy_v2, s->prepared_event);
+    if (s->free_event != NULL) CUDA_OVERRIDE_CALL(cuda_library_entry, cuEventDestroy_v2, s->free_event);
+    if (s->prepared_free_event != NULL)
+        CUDA_OVERRIDE_CALL(cuda_library_entry, cuEventDestroy_v2, s->prepared_free_event);
     graph_exec_state **pp = &graph_states;
     while (*pp != s) pp = &(*pp)->next;
     *pp = s->next;
@@ -1354,6 +1380,7 @@ static void graph_prepare_entries(graph_exec_state *s) {
     for (graph_exec_link *l = s->updates; l != NULL; l = l->update_next) {
         graph_charge_entry *e = l->entry;
         if (l->is_free) {
+            if (s->upload) continue;
             l->saved_freed = l->freed;
             l->saved_generation = l->generation;
             l->saved_free_done = l->free_done;
@@ -1372,6 +1399,7 @@ static void graph_prepare_entries(graph_exec_state *s) {
 static void graph_cancel_entries(graph_exec_state *s) {
     for (graph_exec_link *l = s->updates; l != NULL; l = l->update_next) {
         if (l->is_free) {
+            if (s->upload) continue;
             l->freed = l->saved_freed;
             l->generation = l->saved_generation;
             l->free_done = l->saved_free_done;
@@ -1383,7 +1411,7 @@ static void graph_cancel_entries(graph_exec_state *s) {
 }
 
 /** Reserve quota and completion tracking for a pending graph submission. */
-static int graph_exec_reserve_locked(graph_exec_state *s, CUstream stream) {
+static int graph_exec_reserve_locked(graph_exec_state *s, CUstream stream, int upload) {
     int temporary = graph_has_temporary(s) || s->has_frees;
     graph_stream_key key = {0};
     if (temporary) {
@@ -1401,6 +1429,18 @@ static int graph_exec_reserve_locked(graph_exec_state *s, CUstream stream) {
         CUresult res = graph_new_event(key.ctx, &s->prepared_event);
         if (res != CUDA_SUCCESS) return res;
     }
+    if (!upload && s->has_frees && (s->free_event == NULL ||
+        s->free_event_ctx != key.ctx || s->free_event_ctx_id != key.ctx_id)) {
+        CUresult res = graph_new_event(key.ctx, &s->prepared_free_event);
+        if (res != CUDA_SUCCESS) {
+            if (s->prepared_event != NULL) {
+                CUDA_OVERRIDE_CALL(cuda_library_entry, cuEventDestroy_v2, s->prepared_event);
+                s->prepared_event = NULL;
+            }
+            return res;
+        }
+    }
+    s->upload = upload;
     s->pending = 1;
     graph_prepare_entries(s);
     if (s->fast) return 0;
@@ -1421,6 +1461,10 @@ static int graph_exec_reserve_locked(graph_exec_state *s, CUstream stream) {
         if (s->prepared_event != NULL) {
             CUDA_OVERRIDE_CALL(cuda_library_entry, cuEventDestroy_v2, s->prepared_event);
             s->prepared_event = NULL;
+        }
+        if (s->prepared_free_event != NULL) {
+            CUDA_OVERRIDE_CALL(cuda_library_entry, cuEventDestroy_v2, s->prepared_free_event);
+            s->prepared_free_event = NULL;
         }
         graph_rebalance(0);
     }
@@ -1446,12 +1490,12 @@ static void graph_unlock_entries(graph_exec_state *s) {
 }
 
 /** Serialize submissions without holding the global graph lock while waiting. */
-static int graph_exec_lock_and_reserve(graph_exec_state *s, CUstream stream) {
+static int graph_exec_lock_and_reserve(graph_exec_state *s, CUstream stream, int upload) {
     pthread_mutex_lock(&s->submit_mutex);
     for (graph_exec_link *l = s->updates; l != NULL; l = l->update_next)
         pthread_mutex_lock(&l->entry->lifetime_mutex);
     pthread_mutex_lock(&graph_mutex);
-    int ret = s->retired ? CUDA_ERROR_INVALID_HANDLE : graph_exec_reserve_locked(s, stream);
+    int ret = s->retired ? CUDA_ERROR_INVALID_HANDLE : graph_exec_reserve_locked(s, stream, upload);
     pthread_mutex_unlock(&graph_mutex);
     if (ret != 0) {
         graph_unlock_entries(s);
@@ -1462,23 +1506,23 @@ static int graph_exec_lock_and_reserve(graph_exec_state *s, CUstream stream) {
 }
 
 /** Hold an executable-graph reference and reserve its submission quota. */
-int graph_exec_reserve(graph_exec_state *s, CUstream stream) {
+int graph_exec_reserve(graph_exec_state *s, CUstream stream, int upload) {
     if (s == NULL) return 0;
     pthread_mutex_lock(&graph_mutex);
     s->users++;
     pthread_mutex_unlock(&graph_mutex);
-    return graph_exec_lock_and_reserve(s, stream);
+    return graph_exec_lock_and_reserve(s, stream, upload);
 }
 
 /** Find an executable graph and reserve its next submission before native execution. */
-int graph_exec_begin(CUgraphExec exec, CUstream stream, graph_exec_state **out) {
+int graph_exec_begin(CUgraphExec exec, CUstream stream, int upload, graph_exec_state **out) {
     *out = NULL;
     pthread_mutex_lock(&graph_mutex);
     graph_exec_state *s = graph_exec_find(exec);
     if (s != NULL) s->users++;
     pthread_mutex_unlock(&graph_mutex);
     if (s == NULL) return 0;
-    int ret = graph_exec_lock_and_reserve(s, stream);
+    int ret = graph_exec_lock_and_reserve(s, stream, upload);
     if (ret == 0) *out = s;
     return ret;
 }
@@ -1498,7 +1542,7 @@ void graph_exec_end(graph_exec_state *s, CUstream stream, CUresult result) {
             graph_submitted[e->dev] = 1;
             if (l->freed == e->freed) {
                 e->launched = 1;
-                e->generation++;
+                if (!s->upload) e->generation++;
             } else {
                 s->launched = 0;
             }
@@ -1527,6 +1571,21 @@ void graph_exec_end(graph_exec_state *s, CUstream stream, CUresult result) {
             }
             s->recorded = recorded == CUDA_SUCCESS;
             if (!s->recorded) LOG_WARN("Cannot record graph completion; keeping its memory charge");
+            if (!s->upload && s->has_frees) {
+                CUevent free_event = s->prepared_free_event != NULL ? s->prepared_free_event : s->free_event;
+                s->free_recorded = CUDA_OVERRIDE_CALL(cuda_library_entry, cuEventRecord,
+                    free_event, stream) == CUDA_SUCCESS;
+                if (s->prepared_free_event != NULL) {
+                    if (s->free_event != NULL && s->free_event != s->prepared_free_event)
+                        CUDA_OVERRIDE_CALL(cuda_library_entry, cuEventDestroy_v2, s->free_event);
+                    s->free_event = s->prepared_free_event;
+                    s->prepared_free_event = NULL;
+                    s->free_event_ctx = s->key.ctx;
+                    s->free_event_ctx_id = s->key.ctx_id;
+                }
+                s->free_key = s->key;
+                s->free_submitted = s->submitted;
+            }
         } else {
             graph_active_remove(s);
         }
@@ -1537,6 +1596,10 @@ void graph_exec_end(graph_exec_state *s, CUstream stream, CUresult result) {
         if (s->prepared_event != NULL) {
             CUDA_OVERRIDE_CALL(cuda_library_entry, cuEventDestroy_v2, s->prepared_event);
             s->prepared_event = NULL;
+        }
+        if (s->prepared_free_event != NULL) {
+            CUDA_OVERRIDE_CALL(cuda_library_entry, cuEventDestroy_v2, s->prepared_free_event);
+            s->prepared_free_event = NULL;
         }
     }
     s->pending = 0;
@@ -1580,9 +1643,15 @@ void graph_context_destroyed(CUcontext ctx, cuuint64_t id) {
             s->recorded = 0;
             if (!s->pending) graph_active_remove(s);
         }
+        if (s->free_event_ctx == ctx && s->free_event_ctx_id == id) {
+            s->free_event = NULL;
+            s->free_event_ctx = NULL;
+            s->free_recorded = 0;
+        }
         if (s->key.ctx == ctx && s->key.ctx_id == id) {
             s->context_dead = 1;
             s->prepared_event = NULL;
+            s->prepared_free_event = NULL;
             if (!s->pending) graph_active_remove(s);
         }
         graph_exec_maybe_free(s);
@@ -1631,6 +1700,8 @@ CUresult graph_stream_destroy(CUstream stream) {
             }
             if (s->pending && !s->saved_key.native_id && s->saved_key.stream == stream &&
                 s->saved_key.epoch == 0) s->saved_key.epoch = epoch;
+            if (!s->free_key.native_id && s->free_key.stream == stream && s->free_key.epoch == 0)
+                s->free_key.epoch = epoch;
         }
         graph_rebalance(0);
     }
@@ -1662,8 +1733,12 @@ void graph_synchronized(CUcontext ctx, CUstream stream, int whole_context,
         int matches = whole_context ? s->key.ctx == ctx && s->key.ctx_id == id
                                     : graph_stream_equal(&target, &key);
         /* Preserve submissions newer than the synchronization snapshot. */
-        if (matches && !s->pending && s->submitted <= submitted && graph_complete_frees(s))
-            graph_active_remove(s);
+        if (!s->pending) {
+            int frees_covered = s->free_submitted <= submitted && (whole_context ?
+                s->free_key.ctx == ctx && s->free_key.ctx_id == id : graph_stream_equal(&s->free_key, &key));
+            int frees_done = graph_complete_frees(s, frees_covered);
+            if (matches && s->submitted <= submitted && frees_done) graph_active_remove(s);
+        }
         graph_exec_maybe_free(s);
     }
     graph_refresh();

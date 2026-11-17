@@ -29,7 +29,8 @@ static _Thread_local cuuint64_t capture_id = 123;
 static _Thread_local CUstreamCaptureMode capturing_mode;
 static _Atomic int global_captures;
 static CUcontext current_ctx = (CUcontext)1, pushed_ctx;
-static struct { CUcontext ctx; cuuint64_t ctx_id; int alive; } events[8192];
+static struct { CUcontext ctx; cuuint64_t ctx_id; CUstream stream; int alive; } events[8192];
+static CUstream completed_stream;
 static struct {
     CUgraph graph, child;
     CUgraphNodeType type;
@@ -209,6 +210,7 @@ static CUresult driver_event_record(CUevent event, CUstream stream) {
     REQUIRE((uintptr_t)event < 8192);
     if (!events[(uintptr_t)event].alive || events[(uintptr_t)event].ctx != stream_ctx(stream))
         return CUDA_ERROR_INVALID_HANDLE;
+    events[(uintptr_t)event].stream = stream;
     return record_result;
 }
 /** Report simulated GPU completion while rejecting event queries during capture. */
@@ -218,7 +220,8 @@ static CUresult driver_event_query(CUevent event) {
     event_queries++;
     REQUIRE((uintptr_t)event < 8192);
     if (!events[(uintptr_t)event].alive) return CUDA_ERROR_INVALID_HANDLE;
-    return gpu_done ? CUDA_SUCCESS : CUDA_ERROR_NOT_READY;
+    return gpu_done || (completed_stream != NULL && events[(uintptr_t)event].stream == completed_stream)
+        ? CUDA_SUCCESS : CUDA_ERROR_NOT_READY;
 }
 /** Retire a simulated completion event after validating its lifetime. */
 static CUresult driver_event_destroy(CUevent event) {

@@ -289,7 +289,7 @@ static CUresult instantiate_with_params(cuda_sym_t instantiate, CUgraphExec *exe
     int upload = params != NULL && (params->flags & CUDA_GRAPH_INSTANTIATE_FLAG_UPLOAD);
     CUstream stream = upload ? params->hUploadStream : NULL;
     if (per_thread && stream == NULL) stream = CU_STREAM_PER_THREAD;
-    if (upload && (res = graph_exec_reserve(state, stream)) != CUDA_SUCCESS) {
+    if (upload && (res = graph_exec_reserve(state, stream, 1)) != CUDA_SUCCESS) {
         graph_exec_discard(state);
         return res;
     }
@@ -306,10 +306,10 @@ CUresult cuGraphInstantiateWithParams(CUgraphExec *exec, CUgraph graph,
 
 
 /** Reserve graph quota before native launch or upload and finalize the submission. */
-static CUresult submit_graph(cuda_sym_t submit, CUgraphExec exec, CUstream stream, int per_thread) {
+static CUresult submit_graph(cuda_sym_t submit, CUgraphExec exec, CUstream stream, int per_thread, int upload) {
     graph_exec_state *state;
     CUstream accounting_stream = per_thread && stream == NULL ? CU_STREAM_PER_THREAD : stream;
-    CUresult res = graph_exec_begin(exec, accounting_stream, &state);
+    CUresult res = graph_exec_begin(exec, accounting_stream, upload, &state);
     if (res != CUDA_SUCCESS) return res;
     res = submit(exec, stream);
     graph_exec_end(state, accounting_stream, res);
@@ -317,12 +317,12 @@ static CUresult submit_graph(cuda_sym_t submit, CUgraphExec exec, CUstream strea
 }
 
 CUresult cuGraphUpload(CUgraphExec hGraphExec, CUstream hStream) {
-    return submit_graph((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuGraphUpload), hGraphExec, hStream, 0);
+    return submit_graph((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuGraphUpload), hGraphExec, hStream, 0, 1);
 }
 
 
 CUresult cuGraphLaunch(CUgraphExec hGraphExec, CUstream hStream) {
-    return submit_graph((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuGraphLaunch), hGraphExec, hStream, 0);
+    return submit_graph((cuda_sym_t)CUDA_FIND_ENTRY(cuda_library_entry, cuGraphLaunch), hGraphExec, hStream, 0, 0);
 }
 
 /** Preserve the original one-argument capture ABI while protecting allocation admission. */

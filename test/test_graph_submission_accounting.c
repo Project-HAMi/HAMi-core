@@ -72,6 +72,63 @@ static void test_external_free_generations(void) {
     destroy(a, x); destroy(b, y); clean();
 }
 
+/** Preserve live outputs when either upload ABI prepares an external-free graph. */
+static void test_external_free_upload(int mode, int mixed) {
+    CUgraph a = make_graph(), b = make_graph(), c = make_graph(); CUdeviceptr ptr;
+    REQUIRE(add(a, 600, 0, &ptr) == CUDA_SUCCESS);
+    add_external_free(b, ptr, 0);
+    if (mixed) REQUIRE(add(b, 100, 1, NULL) == CUDA_SUCCESS);
+    REQUIRE(add(c, 300, 1, NULL) == CUDA_SUCCESS);
+    CUgraphExec x = instantiate(a), y, z = instantiate(c);
+    REQUIRE(cuGraphLaunch(x, (CUstream)10) == CUDA_SUCCESS);
+    reserved = 600 * MIB;
+    if (mode < 2) {
+        y = instantiate(b);
+        CUresult (*upload)(CUgraphExec, CUstream) = mode ? cuGraphUpload_ptsz : cuGraphUpload;
+        submit_result = CUDA_ERROR_INVALID_VALUE;
+        REQUIRE(upload(y, (CUstream)10) == submit_result);
+        submit_result = CUDA_SUCCESS;
+        REQUIRE(upload(y, (CUstream)10) == CUDA_SUCCESS);
+    } else {
+        CUDA_GRAPH_INSTANTIATE_PARAMS params = {0};
+        params.flags = CUDA_GRAPH_INSTANTIATE_FLAG_UPLOAD;
+        params.hUploadStream = (CUstream)10;
+        CUresult (*instantiate_upload)(CUgraphExec *, CUgraph, CUDA_GRAPH_INSTANTIATE_PARAMS *) =
+            mode == 2 ? cuGraphInstantiateWithParams : cuGraphInstantiateWithParams_ptsz;
+        REQUIRE(instantiate_upload(&y, b, &params) == CUDA_SUCCESS);
+    }
+    gpu_done = 1;
+    int before = submissions;
+    REQUIRE(cuGraphLaunch(z, (CUstream)20) == CUDA_ERROR_OUT_OF_MEMORY);
+    REQUIRE(submissions == before && used == 856 * MIB);
+    gpu_done = 0;
+    REQUIRE(cuGraphLaunch(y, (CUstream)10) == CUDA_SUCCESS);
+    gpu_done = 1;
+    REQUIRE(reserve_device_memory(0, 300 * MIB) == CUDA_SUCCESS);
+    release_device_memory(0, 300 * MIB);
+    destroy(a, x); destroy(b, y); destroy(c, z); clean();
+}
+
+/** Preserve an earlier launch's completion proof across uploads on another stream. */
+static void test_upload_after_external_free(void) {
+    CUgraph a = make_graph(), b = make_graph(); CUdeviceptr ptr;
+    REQUIRE(add(a, 600, 0, &ptr) == CUDA_SUCCESS);
+    add_external_free(b, ptr, 0);
+    CUgraphExec x = instantiate(a), y = instantiate(b);
+    REQUIRE(cuGraphLaunch(x, (CUstream)10) == CUDA_SUCCESS);
+    REQUIRE(cuGraphLaunch(y, (CUstream)10) == CUDA_SUCCESS);
+    REQUIRE(cuGraphUpload(y, (CUstream)20) == CUDA_SUCCESS);
+    completed_stream = (CUstream)20;
+    REQUIRE(cuStreamSynchronize((CUstream)20) == CUDA_SUCCESS);
+    REQUIRE(reserve_device_memory(0, 300 * MIB) == CUDA_ERROR_OUT_OF_MEMORY);
+    REQUIRE(used == 856 * MIB);
+    REQUIRE(cuStreamSynchronize((CUstream)10) == CUDA_SUCCESS);
+    REQUIRE(reserve_device_memory(0, 300 * MIB) == CUDA_SUCCESS);
+    release_device_memory(0, 300 * MIB);
+    completed_stream = NULL; gpu_done = 1;
+    destroy(a, x); destroy(b, y); clean();
+}
+
 /** Keep referenced capture metadata alive until the external-free snapshot is retired. */
 static void test_invalid_capture_free_reference(void) {
     CUgraph b = make_graph(), graph; CUdeviceptr ptr;
@@ -123,6 +180,7 @@ static void test_owned_children(void) {
     gpu_done = 1;
     destroy(root, x); destroy(other, y); clean();
 }
+
 /** Reject combined child demand before native graph mutation and restore failed moves. */
 static void test_owned_child_admission(void) {
     CUgraph child = make_graph(), parent = make_graph(), root = make_graph();
@@ -655,8 +713,10 @@ int main(void) {
     DRIVER(cuGraphAddMemFreeNode, driver_free_node);
     DRIVER(cuGraphInstantiateWithFlags, driver_instantiate);
     DRIVER(cuGraphInstantiateWithParams, driver_params);
+    DRIVER(cuGraphInstantiateWithParams_ptsz, driver_params);
     DRIVER(cuGraphLaunch, driver_submit);
     DRIVER(cuGraphUpload, driver_submit);
+    DRIVER(cuGraphUpload_ptsz, driver_submit);
     DRIVER(cuGraphDestroy, driver_destroy);
     DRIVER(cuGraphExecDestroy, driver_destroy);
     DRIVER(cuEventCreate, driver_event_create);
@@ -690,6 +750,10 @@ int main(void) {
             test_stream_destroy_race();
         } else if (strcmp(focus, "pending-free") == 0) {
             test_pending_allocation_free();
+        } else if (strcmp(focus, "upload") == 0) {
+            for (int mode = 0; mode < 4; mode++)
+                for (int mixed = 0; mixed < 2; mixed++) test_external_free_upload(mode, mixed);
+            test_upload_after_external_free();
         } else if (strcmp(focus, "child-admission") == 0) {
 #if CUDA_VERSION >= 13000
             test_owned_child_admission();
@@ -709,6 +773,9 @@ int main(void) {
         return 0;
     }
     test_cross_graph_free(0); test_cross_graph_free(1); test_external_free_generations();
+    for (int mode = 0; mode < 4; mode++)
+        for (int mixed = 0; mixed < 2; mixed++) test_external_free_upload(mode, mixed);
+    test_upload_after_external_free();
     test_invalid_capture_free_reference();
     test_pending_allocation_free();
 #if CUDA_VERSION >= 13000
