@@ -12,6 +12,9 @@ static void test_serial_pool(void) {
     REQUIRE(cuGraphLaunch(x, (CUstream)10) == CUDA_SUCCESS);
     REQUIRE(cuGraphLaunch(y, (CUstream)10) == CUDA_SUCCESS);
     REQUIRE(used == 556 * MIB);
+    int queries = pool_queries;
+    for (int i = 0; i < 1000; i++) REQUIRE(cuGraphLaunch(y, (CUstream)10) == CUDA_SUCCESS);
+    REQUIRE(pool_queries == queries);
     REQUIRE(reserve_device_memory(0, 300 * MIB) == CUDA_SUCCESS);
     release_device_memory(0, 300 * MIB);
     reserved = 640 * MIB;
@@ -114,6 +117,73 @@ static void test_persistent_and_pending(void) {
     destroy(a, exec); graph_ptr_freed(ptr); clean();
 }
 
+/** Reject a second live output before Launch, Upload, or parameter-based upload. */
+static void test_output_admission(int mode) {
+    CUgraph a = make_graph(), b = make_graph(); CUdeviceptr p, q;
+    REQUIRE(add(a, 512, 0, &p) == CUDA_SUCCESS);
+    REQUIRE(add(b, 512, 0, &q) == CUDA_SUCCESS);
+    CUgraphExec x, y;
+    if (mode == 2) {
+        CUDA_GRAPH_INSTANTIATE_PARAMS params = {0};
+        params.flags = CUDA_GRAPH_INSTANTIATE_FLAG_UPLOAD;
+        REQUIRE(cuGraphInstantiateWithParams(&x, a, &params) == CUDA_SUCCESS);
+        int before = instantiations;
+        REQUIRE(cuGraphInstantiateWithParams(&y, b, &params) == CUDA_ERROR_OUT_OF_MEMORY);
+        REQUIRE(instantiations == before);
+        REQUIRE(cuGraphDestroy(b) == CUDA_SUCCESS);
+    } else {
+        x = instantiate(a); y = instantiate(b);
+        CUresult (*submit)(CUgraphExec, CUstream) = mode ? cuGraphUpload : cuGraphLaunch;
+        REQUIRE(submit(x, NULL) == CUDA_SUCCESS);
+        int before = submissions;
+        REQUIRE(submit(y, NULL) == CUDA_ERROR_OUT_OF_MEMORY);
+        REQUIRE(submissions == before);
+        destroy(b, y);
+    }
+    REQUIRE(used == 768 * MIB);
+    destroy(a, x); graph_ptr_freed(p); graph_ptr_freed(q); clean();
+}
+
+/** Restore the prospective charge when the native submission fails. */
+static void test_output_submission_failure(void) {
+    CUgraph a = make_graph(), b = make_graph(); CUdeviceptr p, q;
+    REQUIRE(add(a, 400, 0, &p) == CUDA_SUCCESS);
+    REQUIRE(add(b, 300, 0, &q) == CUDA_SUCCESS);
+    CUgraphExec x = instantiate(a), y = instantiate(b);
+    REQUIRE(cuGraphLaunch(x, NULL) == CUDA_SUCCESS);
+    submit_result = CUDA_ERROR_INVALID_VALUE;
+    REQUIRE(cuGraphLaunch(y, NULL) == submit_result);
+    submit_result = CUDA_SUCCESS;
+    REQUIRE(used == 656 * MIB);
+    destroy(a, x); destroy(b, y); graph_ptr_freed(p); graph_ptr_freed(q); clean();
+}
+
+/** Return from a deliberately paused native output submission. */
+static void *submit_output(void *exec) {
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    return NULL;
+}
+
+/** Keep a pending output charged while its graph and executable are destroyed. */
+static void test_output_host_lifetime(void) {
+    CUgraph graph = make_graph(); CUdeviceptr ptr;
+    REQUIRE(add(graph, 600, 0, &ptr) == CUDA_SUCCESS);
+    CUgraphExec exec = instantiate(graph); pthread_t thread;
+    block_submit = 1; submit_entered = 0;
+    REQUIRE(pthread_create(&thread, NULL, submit_output, exec) == 0);
+    pthread_mutex_lock(&submit_gate);
+    while (!submit_entered) pthread_cond_wait(&submit_cond, &submit_gate);
+    pthread_mutex_unlock(&submit_gate);
+    destroy(graph, exec);
+    REQUIRE(reserve_device_memory(0, 300 * MIB) == CUDA_ERROR_OUT_OF_MEMORY);
+    pthread_mutex_lock(&submit_gate);
+    block_submit = 0; pthread_cond_broadcast(&submit_cond);
+    pthread_mutex_unlock(&submit_gate);
+    REQUIRE(pthread_join(thread, NULL) == 0);
+    REQUIRE(used == 856 * MIB);
+    graph_ptr_freed(ptr); clean();
+}
+
 /** Preserve cached backing across rebuilds and trim it only for a refused reservation. */
 static void test_trim_pressure(void) {
     int before = trim_calls;
@@ -137,7 +207,9 @@ int main(void) {
     DRIVER(cuGraphAddMemAllocNode, driver_add);
     DRIVER(cuGraphAddMemFreeNode, driver_free_node);
     DRIVER(cuGraphInstantiateWithFlags, driver_instantiate);
+    DRIVER(cuGraphInstantiateWithParams, driver_params);
     DRIVER(cuGraphLaunch, driver_submit);
+    DRIVER(cuGraphUpload, driver_submit);
     DRIVER(cuGraphDestroy, driver_destroy);
     DRIVER(cuGraphExecDestroy, driver_destroy);
     DRIVER(cuDeviceGetGraphMemAttribute, driver_reserved);
@@ -149,6 +221,8 @@ int main(void) {
     DRIVER(cuCtxGetDevice, driver_device);
     DRIVER(cuDeviceGetCount, driver_device_count);
     test_persistent_and_pending(); test_trim_pressure();
+    for (int mode = 0; mode < 3; mode++) test_output_admission(mode);
+    test_output_submission_failure(); test_output_host_lifetime();
     test_serial_pool(); test_output_replay(); test_peak_removal();
     test_query_failure(); test_graph_handle_reuse(); test_capture_queries();
     puts("PASS: graph pool reuse, retained backing, cached peaks, and output lifetimes");

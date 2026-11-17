@@ -441,17 +441,25 @@ struct graph_charge_entry {
     int launching;       /* admitted submissions not yet returned by the driver */
     int resident;
     int held;
+    int temporary;
     uint64_t freed;
     graph_group *group;
     struct graph_charge_entry *next;
 };
 typedef struct graph_exec_link {
-    CUgraphExec exec;
     graph_charge_entry *entry;
+    uint64_t freed;
     struct graph_exec_link *next;
 } graph_exec_link;
+struct graph_exec_state {
+    CUgraphExec exec;
+    graph_exec_link *entries;
+    pthread_mutex_t submit_mutex;
+    int users, retired, changed;
+    struct graph_exec_state *next;
+};
 static graph_charge_entry *graph_charges;
-static graph_exec_link *graph_execs;
+static graph_exec_state *graph_states;
 static graph_group *graph_groups;
 static pthread_mutex_t graph_mutex = PTHREAD_MUTEX_INITIALIZER;
 static size_t graph_charged[CUDA_DEVICE_MAX_COUNT];
@@ -460,6 +468,8 @@ static int graph_submitted[CUDA_DEVICE_MAX_COUNT];
 static size_t graph_total[CUDA_DEVICE_MAX_COUNT];
 static size_t graph_persistent[CUDA_DEVICE_MAX_COUNT];
 static size_t graph_pending_peak[CUDA_DEVICE_MAX_COUNT];
+static size_t graph_temporary_peak[CUDA_DEVICE_MAX_COUNT];
+enum { GRAPH_RECOUNT, GRAPH_SUBMIT, GRAPH_MUTATE };
 static unsigned int graph_pending_dirty;
 
 /* Preserve capture identity until native termination is established. */
@@ -505,6 +515,13 @@ static void graph_pending_remove(graph_group *group, int dev, size_t bytes) {
 static void graph_entry_update(graph_charge_entry *e) {
     int resident = !e->has_free && (e->launched || e->launching);
     int held = resident || e->freed == 0;
+    int temporary = e->has_free && held;
+    if (temporary != e->temporary) {
+        if (temporary) e->group->temporary[e->dev] += e->size;
+        else e->group->temporary[e->dev] -= e->size;
+        graph_pending_dirty |= 1u << e->dev;
+        e->temporary = temporary;
+    }
     if (resident == e->resident && held == e->held) return;
     if (e->held) {
         if (e->resident) graph_persistent[e->dev] -= e->size;
@@ -571,20 +588,22 @@ static void graph_update_cache(void) {
     for (int dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
         if (!(graph_pending_dirty & (1u << dev))) continue;
         graph_pending_peak[dev] = 0;
+        graph_temporary_peak[dev] = 0;
         for (graph_group *g = graph_groups; g != NULL; g = g->next) {
             if (g->pending[dev] > graph_pending_peak[dev]) graph_pending_peak[dev] = g->pending[dev];
+            if (g->temporary[dev] > graph_temporary_peak[dev]) graph_temporary_peak[dev] = g->temporary[dev];
         }
     }
     graph_pending_dirty = 0;
 }
 
-/** Keep pending demand, persistent allocations, and retained backing charged. */
+/** Combine cached pending and submitted graph demand. */
 static size_t graph_wanted(int dev) {
-    size_t want = graph_persistent[dev] + graph_pending_peak[dev];
+    size_t want = graph_persistent[dev] + graph_temporary_peak[dev];
+    if (graph_pending_peak[dev] > want) want = graph_pending_peak[dev];
     if (graph_reserved[dev] > want) want = graph_reserved[dev];
     return want;
 }
-
 
 /** Apply cached demand changes under the shared quota lock. */
 static int graph_rebalance(int check) {
@@ -592,6 +611,8 @@ static int graph_rebalance(int check) {
     int ret = 0;
     for (int dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
         size_t want = graph_wanted(dev);
+        if (check == GRAPH_MUTATE && graph_persistent[dev] + graph_pending_peak[dev] > want)
+            want = graph_persistent[dev] + graph_pending_peak[dev];
         size_t have = graph_charged[dev];
         if (want > have) {
             if (check) {
@@ -618,7 +639,7 @@ static int graph_rebalance(int check) {
 static void graph_reclaim(int trim) {
     pthread_mutex_lock(&graph_mutex);
     graph_refresh_pool(trim);
-    graph_rebalance(0);
+    graph_rebalance(GRAPH_RECOUNT);
     pthread_mutex_unlock(&graph_mutex);
 }
 
@@ -630,14 +651,16 @@ void graph_pool_trimmed(void) {
 
 /** Remove an allocation from cached demand and executable references. */
 static void graph_drop_entry(graph_charge_entry *e) {
-    graph_exec_link **lp = &graph_execs;
-    while (*lp != NULL) {
-        if ((*lp)->entry == e) {
-            graph_exec_link *l = *lp;
-            *lp = l->next;
-            free(l);
-        } else {
-            lp = &(*lp)->next;
+    for (graph_exec_state *s = graph_states; s != NULL; s = s->next) {
+        graph_exec_link **lp = &s->entries;
+        while (*lp != NULL) {
+            if ((*lp)->entry == e) {
+                graph_exec_link *l = *lp;
+                *lp = l->next;
+                free(l);
+            } else {
+                lp = &(*lp)->next;
+            }
         }
     }
     graph_charge_entry **pp = &graph_charges;
@@ -646,7 +669,10 @@ static void graph_drop_entry(graph_charge_entry *e) {
     graph_group *group = e->group;
     group->total[e->dev] -= e->size;
     graph_total[e->dev] -= e->size;
-    if (e->has_free) group->temporary[e->dev] -= e->size;
+    if (e->temporary) {
+        group->temporary[e->dev] -= e->size;
+        graph_pending_dirty |= 1u << e->dev;
+    }
     if (e->held) {
         if (e->resident) graph_persistent[e->dev] -= e->size;
         else graph_pending_remove(group, e->dev, e->size);
@@ -697,11 +723,11 @@ int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, cuuint64_t capid
     g->next = graph_charges;
     graph_charges = g;
     if (!capturing) graph_refresh_pool(0);
-    int ret = graph_rebalance(1);
+    int ret = graph_rebalance(GRAPH_MUTATE);
     if (ret != 0) {
         graph_drop_entry(g);
         if (!capturing) graph_refresh_pool(0);
-        graph_rebalance(0);
+        graph_rebalance(GRAPH_RECOUNT);
     } else {
         *out = g;
     }
@@ -720,7 +746,7 @@ void graph_alloc_end(graph_charge_entry *entry, CUdeviceptr ptr, CUresult result
         int capturing = entry->capturing;
         graph_drop_entry(entry);
         if (!capturing) graph_refresh_pool(0);
-        graph_rebalance(0);
+        graph_rebalance(GRAPH_RECOUNT);
     }
     pthread_mutex_unlock(&graph_mutex);
 }
@@ -740,12 +766,11 @@ void graph_mark_free(CUgraph graph, CUdeviceptr ptr) {
     for (graph_charge_entry *g = graph_charges; g != NULL; g = g->next) {
         if (g->ptr == ptr && g->graph == graph && !g->has_free) {
             g->has_free = 1;
-            g->group->temporary[g->dev] += g->size;
             graph_entry_update(g);
         }
     }
     /* Recording a free node may run during capture, so defer driver queries. */
-    graph_rebalance(0);
+    graph_rebalance(GRAPH_RECOUNT);
     pthread_mutex_unlock(&graph_mutex);
 }
 
@@ -765,7 +790,7 @@ void graph_ptr_freed(CUdeviceptr ptr) {
         }
     }
     graph_refresh_pool(0);
-    graph_rebalance(0);
+    graph_rebalance(GRAPH_RECOUNT);
     pthread_mutex_unlock(&graph_mutex);
 }
 
@@ -904,85 +929,199 @@ void graph_ptr_freed_async(CUdeviceptr ptr, CUstream hStream) {
 }
 
 
-int graph_exec_created(CUgraph graph, CUgraphExec exec) {
-    int ret = 0;
+/** Snapshot allocation references before native executable creation. */
+int graph_exec_prepare(CUgraph graph, graph_exec_state **out) {
+    *out = NULL;
+    if (graph == NULL) return CUDA_SUCCESS;
     pthread_mutex_lock(&graph_mutex);
-    for (graph_charge_entry *g = graph_charges; g != NULL; g = g->next) {
-        if (g->graph != graph) continue;
-        graph_exec_link *l = malloc(sizeof(*l));
+    graph_exec_state *s = calloc(1, sizeof(*s));
+    if (s == NULL) {
+        pthread_mutex_unlock(&graph_mutex);
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+    if (pthread_mutex_init(&s->submit_mutex, NULL) != 0) {
+        free(s);
+        pthread_mutex_unlock(&graph_mutex);
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+    int ret = CUDA_SUCCESS;
+    for (graph_charge_entry *e = graph_charges; e != NULL; e = e->next) {
+        if (e->graph != graph) continue;
+        graph_exec_link *l = calloc(1, sizeof(*l));
         if (l == NULL) {
             ret = CUDA_ERROR_OUT_OF_MEMORY;
             break;
         }
-        l->exec = exec;
-        l->entry = g;
-        l->next = graph_execs;
-        graph_execs = l;
-        g->nexec++;
+        l->entry = e;
+        l->next = s->entries;
+        s->entries = l;
+        e->nexec++;
     }
-    if (ret != 0) {
-        /* Undo the links already made for this exec. */
-        graph_exec_link **lp = &graph_execs;
-        while (*lp != NULL) {
-            graph_exec_link *l = *lp;
-            if (l->exec == exec) {
-                l->entry->nexec--;
-                *lp = l->next;
-                free(l);
-            } else {
-                lp = &l->next;
-            }
+    if (ret != CUDA_SUCCESS || s->entries == NULL) {
+        while (s->entries != NULL) {
+            graph_exec_link *l = s->entries;
+            s->entries = l->next;
+            l->entry->nexec--;
+            free(l);
         }
+        pthread_mutex_destroy(&s->submit_mutex);
+        free(s);
+    } else {
+        s->next = graph_states;
+        graph_states = s;
+        *out = s;
     }
     pthread_mutex_unlock(&graph_mutex);
     return ret;
 }
 
+/** Bind prepared tracking to a native executable. */
+void graph_exec_commit(graph_exec_state *s, CUgraphExec exec) {
+    if (s == NULL) return;
+    pthread_mutex_lock(&graph_mutex);
+    s->exec = exec;
+    pthread_mutex_unlock(&graph_mutex);
+}
 
-/** Retire executable references while retaining driver-backed memory. */
+/** Free retired tracking after its last host submission returns. */
+static void graph_exec_maybe_free(graph_exec_state *s) {
+    if (!s->retired || s->users != 0) return;
+    graph_exec_state **pp = &graph_states;
+    while (*pp != s) pp = &(*pp)->next;
+    *pp = s->next;
+    while (s->entries != NULL) {
+        graph_exec_link *l = s->entries;
+        graph_charge_entry *e = l->entry;
+        s->entries = l->next;
+        free(l);
+        if (--e->nexec == 0 && e->graph == NULL && !e->launching &&
+            (e->has_free || !e->launched)) graph_drop_entry(e);
+    }
+    pthread_mutex_destroy(&s->submit_mutex);
+    free(s);
+}
+
+/** Retire an uncommitted executable snapshot after native failure. */
+void graph_exec_discard(graph_exec_state *s) {
+    if (s == NULL) return;
+    pthread_mutex_lock(&graph_mutex);
+    s->retired = 1;
+    graph_exec_maybe_free(s);
+    graph_refresh_pool(0);
+    graph_rebalance(GRAPH_RECOUNT);
+    pthread_mutex_unlock(&graph_mutex);
+}
+
+/** Retire native executable tracking without dropping pending host references. */
 void graph_exec_destroyed(CUgraphExec exec) {
     pthread_mutex_lock(&graph_mutex);
-    graph_exec_link **lp = &graph_execs;
-    while (*lp != NULL) {
-        graph_exec_link *l = *lp;
-        if (l->exec != exec) {
-            lp = &l->next;
-            continue;
+    for (graph_exec_state *s = graph_states; s != NULL; s = s->next) {
+        if (!s->retired && s->exec == exec) {
+            s->retired = 1;
+            graph_exec_maybe_free(s);
+            break;
         }
-        graph_charge_entry *e = l->entry;
-        *lp = l->next;
-        free(l);
-        if (--e->nexec == 0 && e->graph == NULL && (e->has_free || !e->launched)) {
-            graph_drop_entry(e);
-        }
-        lp = &graph_execs;  /* graph_drop_entry may have freed other links */
     }
     graph_refresh_pool(0);
-    graph_rebalance(0);
+    graph_rebalance(GRAPH_RECOUNT);
     pthread_mutex_unlock(&graph_mutex);
 }
 
+/** Undo prospective residency after rejected admission or native submission. */
+static void graph_cancel_submission(graph_exec_state *s) {
+    for (graph_exec_link *l = s->entries; l != NULL; l = l->next) {
+        l->entry->launching--;
+        graph_entry_update(l->entry);
+    }
+}
 
-/** Update persistent demand only when an executable changes allocation state. */
-void graph_exec_launched(CUgraphExec exec) {
-    int changed = 0;
+/** Drop a host reference after releasing the submission mutex. */
+static void graph_exec_put_user(graph_exec_state *s) {
     pthread_mutex_lock(&graph_mutex);
-    for (graph_exec_link *l = graph_execs; l != NULL; l = l->next) {
-        if (l->exec == exec && !l->entry->launched) {
-            l->entry->launched = 1;
-            graph_submitted[l->entry->dev] = 1;
-            graph_entry_update(l->entry);
-            changed = 1;
+    s->users--;
+    graph_exec_maybe_free(s);
+    pthread_mutex_unlock(&graph_mutex);
+}
+
+/** Admit prospective persistent outputs before the native call. */
+int graph_exec_reserve(graph_exec_state *s, CUstream stream, int upload) {
+    (void)stream; (void)upload;
+    if (s == NULL) return CUDA_SUCCESS;
+    pthread_mutex_lock(&graph_mutex);
+    s->users++;
+    pthread_mutex_unlock(&graph_mutex);
+    pthread_mutex_lock(&s->submit_mutex);
+    pthread_mutex_lock(&graph_mutex);
+    int ret = s->retired ? CUDA_ERROR_INVALID_HANDLE : CUDA_SUCCESS;
+    s->changed = 0;
+    if (ret == CUDA_SUCCESS) {
+        for (graph_exec_link *l = s->entries; l != NULL; l = l->next) {
+            graph_charge_entry *e = l->entry;
+            l->freed = e->freed;
+            e->launching++;
+            if (!e->launched) s->changed = 1;
+            graph_entry_update(e);
+        }
+        if (s->changed) {
+            graph_refresh_pool(0);
+            ret = graph_rebalance(GRAPH_SUBMIT);
+        }
+        if (ret != CUDA_SUCCESS) {
+            graph_cancel_submission(s);
+            graph_rebalance(GRAPH_RECOUNT);
         }
     }
-    /* Replays are the hot path: only the first launch changes the charge. */
-    if (changed) {
-        graph_refresh_pool(0);
-        graph_rebalance(0);
-    }
     pthread_mutex_unlock(&graph_mutex);
+    if (ret != CUDA_SUCCESS) {
+        pthread_mutex_unlock(&s->submit_mutex);
+        graph_exec_put_user(s);
+    }
+    return ret;
 }
 
+/** Find executable tracking while retaining it across concurrent destruction. */
+int graph_exec_begin(CUgraphExec exec, CUstream stream, int upload, graph_exec_state **out) {
+    *out = NULL;
+    pthread_mutex_lock(&graph_mutex);
+    graph_exec_state *s;
+    for (s = graph_states; s != NULL; s = s->next) {
+        if (!s->retired && s->exec == exec) {
+            s->users++;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&graph_mutex);
+    if (s == NULL) return CUDA_SUCCESS;
+    int ret = graph_exec_reserve(s, stream, upload);
+    graph_exec_put_user(s);
+    if (ret == CUDA_SUCCESS) *out = s;
+    return ret;
+}
+
+/** Commit successful output residency or restore the failed submission's reservation. */
+void graph_exec_end(graph_exec_state *s, CUstream stream, CUresult result) {
+    (void)stream;
+    if (s == NULL) return;
+    pthread_mutex_lock(&graph_mutex);
+    if (result == CUDA_SUCCESS) {
+        for (graph_exec_link *l = s->entries; l != NULL; l = l->next) {
+            graph_charge_entry *e = l->entry;
+            e->launching--;
+            if (e->freed == l->freed) e->launched = 1;
+            graph_submitted[e->dev] = 1;
+            graph_entry_update(e);
+        }
+    } else {
+        graph_cancel_submission(s);
+    }
+    if (s->changed) {
+        graph_refresh_pool(0);
+        graph_rebalance(GRAPH_RECOUNT);
+    }
+    pthread_mutex_unlock(&graph_mutex);
+    pthread_mutex_unlock(&s->submit_mutex);
+    graph_exec_put_user(s);
+}
 
 /** Release invalidated allocations across all participating streams. */
 void graph_capture_end(cuuint64_t capid, CUgraph graph) {
@@ -997,7 +1136,7 @@ void graph_capture_end(cuuint64_t capid, CUgraph graph) {
         }
     }
     graph_refresh_pool(0);
-    graph_rebalance(0);
+    graph_rebalance(GRAPH_RECOUNT);
     pthread_mutex_unlock(&graph_mutex);
 }
 
@@ -1016,7 +1155,7 @@ void graph_release(CUgraph graph) {
         if ((g->has_free || !g->launched) && g->nexec == 0) graph_drop_entry(g);
     }
     graph_refresh_pool(0);
-    graph_rebalance(0);
+    graph_rebalance(GRAPH_RECOUNT);
     pthread_mutex_unlock(&graph_mutex);
 }
 
