@@ -13,6 +13,9 @@ extern CUresult cuMemoryFree(CUdeviceptr dptr);
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
+static void graph_reclaim(unsigned int trim_mask);
+static unsigned int graph_trim_mask(int dev, size_t addon);
+
 /* already_locked: caller already holds lock_shrreg (not reentrant). */
 static int oom_check_impl(const int dev, size_t addon, int already_locked) {
     CUdevice d;
@@ -53,11 +56,20 @@ static int oom_check_impl(const int dev, size_t addon, int already_locked) {
     return 0;
 }
 
+/** Retry a refused quota check after releasing unused graph backing. */
 int oom_check(const int dev, size_t addon) {
-    return oom_check_impl(dev, addon, 0);
+    graph_reclaim(0);
+    int ret = oom_check_impl(dev, addon, 0);
+    if (ret) {
+        unsigned int trim_mask = graph_trim_mask(dev, addon);
+        if (trim_mask != 0) graph_reclaim(trim_mask);
+        ret = oom_check_impl(dev, addon, 0);
+    }
+    return ret;
 }
 
-int reserve_device_memory(CUdevice dev, size_t size) {
+/** Reserve device quota atomically under the shared lock. */
+static int reserve_device_memory_impl(CUdevice dev, size_t size) {
     lock_shrreg();
     if (oom_check_impl(dev, size, 1)) {
         unlock_shrreg();
@@ -66,6 +78,18 @@ int reserve_device_memory(CUdevice dev, size_t size) {
     add_gpu_device_memory_usage(getpid(), dev, size, 2);
     unlock_shrreg();
     return 0;
+}
+
+/** Refresh graph backing before atomically reserving ordinary device quota. */
+int reserve_device_memory(CUdevice dev, size_t size) {
+    graph_reclaim(0);
+    int ret = reserve_device_memory_impl(dev, size);
+    if (ret != CUDA_SUCCESS) {
+        unsigned int trim_mask = graph_trim_mask(dev, size);
+        if (trim_mask != 0) graph_reclaim(trim_mask);
+        ret = reserve_device_memory_impl(dev, size);
+    }
+    return ret;
 }
 
 void release_device_memory(CUdevice dev, size_t size) {
@@ -398,9 +422,17 @@ int free_raw_async(CUdeviceptr dptr, CUstream hStream) {
     return tmp;
 }
 
+typedef struct graph_group {
+    CUgraph graph;
+    int refs;
+    size_t total[CUDA_DEVICE_MAX_COUNT];
+    size_t temporary[CUDA_DEVICE_MAX_COUNT];
+    size_t pending[CUDA_DEVICE_MAX_COUNT];
+    struct graph_group *next;
+} graph_group;
+
 struct graph_charge_entry {
     CUgraph graph;       /* NULL once the graph is destroyed */
-    uint64_t gid;        /* which graph it was recorded in; handles are reused, so not the pointer */
     CUdevice dev;
     size_t size;
     CUdeviceptr ptr;
@@ -409,159 +441,39 @@ struct graph_charge_entry {
     int has_free;
     int nexec;           /* live execs instantiated from the graph */
     int launched;        /* an exec of the graph was launched or uploaded */
+    int launching;       /* admitted submissions not yet returned by the driver */
+    int resident;
+    int held;
+    int temporary;
+    uint64_t freed;
+    graph_group *group;
     struct graph_charge_entry *next;
 };
 typedef struct graph_exec_link {
-    CUgraphExec exec;
     graph_charge_entry *entry;
+    uint64_t freed;
     struct graph_exec_link *next;
 } graph_exec_link;
+struct graph_exec_state {
+    CUgraphExec exec;
+    graph_exec_link *entries;
+    pthread_mutex_t submit_mutex;
+    int users, retired, changed;
+    struct graph_exec_state *next;
+};
 static graph_charge_entry *graph_charges;
-static graph_exec_link *graph_execs;
+static graph_exec_state *graph_states;
+static graph_group *graph_groups;
 static pthread_mutex_t graph_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-/* What the driver really holds for graph memory. Allocations with a free
- * node live in the device graph pool, which graphs share: they reuse the same
- * physical memory, so the pool needs the largest graph, not the sum. Memory
- * without a free node, once launched, stays allocated on its own. Call with
- * graph_mutex held.
- * ponytail: two graphs launched at the same time can need their sum, so this
- * can under-count by that overlap; track concurrent launches to close it. */
 static size_t graph_charged[CUDA_DEVICE_MAX_COUNT];
-static uint64_t graph_serial;
-
-static size_t graph_wanted(int dev) {
-    size_t persistent = 0, pool_max = 0;
-    for (graph_charge_entry *e = graph_charges; e != NULL; e = e->next) {
-        if (e->dev != dev) continue;
-        if (e->launched && !e->has_free) {
-            persistent += e->size;
-            continue;
-        }
-        size_t group = 0;
-        for (graph_charge_entry *o = graph_charges; o != NULL; o = o->next) {
-            if (o->dev == dev && o->gid == e->gid && !(o->launched && !o->has_free)) group += o->size;
-        }
-        if (group > pool_max) pool_max = group;
-    }
-    return persistent + pool_max;
-}
-
-/* Bring the charged usage in line with what the entries need. With check,
- * growth is refused when it would pass the limit; returns the CUDA error. */
-static int graph_rebalance(int check) {
-    int ret = 0;
-    for (int dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
-        size_t want = graph_wanted(dev);
-        size_t have = graph_charged[dev];
-        if (want > have) {
-            if (check) {
-                if (reserve_device_memory(dev, want - have) != 0) {
-                    ret = CUDA_ERROR_OUT_OF_MEMORY;
-                    continue;
-                }
-            } else {
-                add_gpu_device_memory_usage(getpid(), dev, want - have, 2);
-            }
-            graph_charged[dev] = want;
-        } else if (want < have) {
-            release_device_memory(dev, have - want);
-            graph_charged[dev] = want;
-        }
-    }
-    return ret;
-}
-
-/* Forget the entry. Call with graph_mutex held, then graph_rebalance(). */
-static void graph_drop_entry(graph_charge_entry *e) {
-    graph_exec_link **lp = &graph_execs;
-    while (*lp != NULL) {
-        if ((*lp)->entry == e) {
-            graph_exec_link *l = *lp;
-            *lp = l->next;
-            free(l);
-        } else {
-            lp = &(*lp)->next;
-        }
-    }
-    graph_charge_entry **pp = &graph_charges;
-    while (*pp != e) pp = &(*pp)->next;
-    *pp = e->next;
-    free(e);
-}
-
-/** Reserve pooled graph quota and bookkeeping before native allocation. */
-int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, cuuint64_t capid, int capturing,
-                      graph_charge_entry **out) {
-    *out = NULL;
-    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) return CUDA_SUCCESS;
-    int count;
-    CUresult valid = CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGetCount, &count);
-    if (valid != CUDA_SUCCESS) return valid;
-    if (dev >= count) return CUDA_SUCCESS;
-    graph_charge_entry *g = calloc(1, sizeof(*g));
-    if (g == NULL) return CUDA_ERROR_OUT_OF_MEMORY;
-    g->graph = graph; g->dev = dev; g->size = size;
-    g->capid = capid; g->capturing = capturing;
-    pthread_mutex_lock(&graph_mutex);
-    for (graph_charge_entry *o = graph_charges; o != NULL; o = o->next) {
-        if (o->graph == graph) g->gid = o->gid;
-    }
-    if (g->gid == 0) g->gid = ++graph_serial;
-    g->next = graph_charges; graph_charges = g;
-    int ret = graph_rebalance(1);
-    if (ret != CUDA_SUCCESS) {
-        graph_drop_entry(g);
-        graph_rebalance(0);
-    } else {
-        *out = g;
-    }
-    pthread_mutex_unlock(&graph_mutex);
-    return ret;
-}
-
-/** Commit the native pointer or refund a failed allocation. */
-void graph_alloc_end(graph_charge_entry *entry, CUdeviceptr ptr, CUresult result) {
-    if (entry == NULL) return;
-    pthread_mutex_lock(&graph_mutex);
-    if (result == CUDA_SUCCESS) {
-        entry->ptr = ptr;
-    } else {
-        graph_drop_entry(entry);
-        graph_rebalance(0);
-    }
-    pthread_mutex_unlock(&graph_mutex);
-}
-
-/** Retain post-allocation accounting for native capture entry points outside the hook. */
-int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr, cuuint64_t capid) {
-    graph_charge_entry *entry;
-    int ret = graph_alloc_begin(graph, dev, size, capid, capid != 0, &entry);
-    if (ret == CUDA_SUCCESS) graph_alloc_end(entry, ptr, CUDA_SUCCESS);
-    return ret;
-}
-
-/* Only the allocating graph's own free node frees the memory when that graph
- * and its execs are gone. A free node in another graph leaves the charge held
- * until the pointer is freed, which can over-count but never under-count. */
-void graph_mark_free(CUgraph graph, CUdeviceptr ptr) {
-    pthread_mutex_lock(&graph_mutex);
-    for (graph_charge_entry *g = graph_charges; g != NULL; g = g->next) {
-        if (g->ptr == ptr && g->graph == graph) g->has_free = 1;
-    }
-    graph_rebalance(0);
-    pthread_mutex_unlock(&graph_mutex);
-}
-
-void graph_ptr_freed(CUdeviceptr ptr) {
-    pthread_mutex_lock(&graph_mutex);
-    for (graph_charge_entry *g = graph_charges, *n; g != NULL; g = n) {
-        n = g->next;
-        if (g->ptr == ptr) graph_drop_entry(g);
-    }
-    graph_rebalance(0);
-    pthread_mutex_unlock(&graph_mutex);
-}
+static size_t graph_reserved[CUDA_DEVICE_MAX_COUNT];
+static int graph_submitted[CUDA_DEVICE_MAX_COUNT];
+static size_t graph_total[CUDA_DEVICE_MAX_COUNT];
+static size_t graph_persistent[CUDA_DEVICE_MAX_COUNT];
+static size_t graph_pending_peak[CUDA_DEVICE_MAX_COUNT];
+static size_t graph_temporary_peak[CUDA_DEVICE_MAX_COUNT];
+enum { GRAPH_RECOUNT, GRAPH_SUBMIT, GRAPH_MUTATE };
+static unsigned int graph_pending_dirty;
 
 /* Preserve capture identity until native termination is established. */
 typedef struct capture_link {
@@ -577,6 +489,342 @@ typedef struct capture_link {
 static capture_link *capture_links;
 static uint64_t capture_serial, graph_thread_serial;
 static _Thread_local uint64_t graph_thread_id;
+
+/** Release a graph group after its final reference is dropped. */
+static void graph_group_put(graph_group *group) {
+    if (--group->refs != 0) return;
+    graph_group **pp = &graph_groups;
+    while (*pp != group) pp = &(*pp)->next;
+    *pp = group->next;
+    free(group);
+}
+
+
+/** Add a pending allocation and update the cached peak for its device. */
+static void graph_pending_add(graph_group *group, int dev, size_t bytes) {
+    group->pending[dev] += bytes;
+    if (group->pending[dev] > graph_pending_peak[dev]) graph_pending_peak[dev] = group->pending[dev];
+}
+
+
+/** Remove a pending allocation and invalidate its cached peak when needed. */
+static void graph_pending_remove(graph_group *group, int dev, size_t bytes) {
+    if (group->pending[dev] == graph_pending_peak[dev]) graph_pending_dirty |= 1u << dev;
+    group->pending[dev] -= bytes;
+}
+
+
+/** Move an allocation's charge between pending and persistent demand. */
+static void graph_entry_update(graph_charge_entry *e) {
+    int resident = !e->has_free && (e->launched || e->launching);
+    int held = resident || e->freed == 0;
+    int temporary = e->has_free && held;
+    if (temporary != e->temporary) {
+        if (temporary) e->group->temporary[e->dev] += e->size;
+        else e->group->temporary[e->dev] -= e->size;
+        graph_pending_dirty |= 1u << e->dev;
+        e->temporary = temporary;
+    }
+    if (resident == e->resident && held == e->held) return;
+    if (e->held) {
+        if (e->resident) graph_persistent[e->dev] -= e->size;
+        else graph_pending_remove(e->group, e->dev, e->size);
+    }
+    if (held) {
+        if (resident) graph_persistent[e->dev] += e->size;
+        else graph_pending_add(e->group, e->dev, e->size);
+    }
+    e->resident = resident;
+    e->held = held;
+}
+
+
+/** Relax only internal queries and retain the caller's interaction mode. */
+static int graph_query_begin(CUstreamCaptureMode *mode) {
+    *mode = CU_STREAM_CAPTURE_MODE_RELAXED;
+    return CUDA_FIND_ENTRY(cuda_library_entry, cuThreadExchangeStreamCaptureMode) != NULL &&
+        CUDA_OVERRIDE_CALL(cuda_library_entry, cuThreadExchangeStreamCaptureMode, mode) == CUDA_SUCCESS;
+}
+
+/** Restore the capture interaction mode after internal driver queries. */
+static void graph_query_end(CUstreamCaptureMode mode) {
+    CUDA_OVERRIDE_CALL(cuda_library_entry, cuThreadExchangeStreamCaptureMode, &mode);
+}
+
+/** Refresh retained graph-pool backing and conservatively preserve charges on query failure. */
+static void graph_refresh_pool(unsigned int trim_mask) {
+    for (capture_link *l = capture_links; l != NULL; l = l->next) {
+        if (l->mode == CU_STREAM_CAPTURE_MODE_GLOBAL || l->thread == graph_thread_id) return;
+    }
+    CUstreamCaptureMode mode;
+    int relaxed = 0;
+    for (int dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
+        int tracked = graph_total[dev] != 0;
+        if (!tracked && graph_charged[dev] == 0) continue;
+        if (!relaxed && !graph_query_begin(&mode)) {
+            for (int d = 0; d < CUDA_DEVICE_MAX_COUNT; d++) {
+                if (graph_submitted[d] && graph_charged[d] > graph_reserved[d])
+                    graph_reserved[d] = graph_charged[d];
+            }
+            return;
+        }
+        relaxed = 1;
+        /* Release unused backing only when admission needs more space. */
+        if ((trim_mask & (1u << dev)) && CUDA_FIND_ENTRY(cuda_library_entry, cuDeviceGraphMemTrim) != NULL)
+            CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGraphMemTrim, dev);
+        cuuint64_t reserved;
+        if (CUDA_FIND_ENTRY(cuda_library_entry, cuDeviceGetGraphMemAttribute) != NULL &&
+            CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGetGraphMemAttribute, dev,
+                CU_GRAPH_MEM_ATTR_RESERVED_MEM_CURRENT, &reserved) == CUDA_SUCCESS) {
+            graph_reserved[dev] = reserved;
+        } else if (graph_submitted[dev] && graph_charged[dev] > graph_reserved[dev]) {
+            /* A failed query cannot establish that cached backing was freed. */
+            graph_reserved[dev] = graph_charged[dev];
+        }
+    }
+    if (relaxed) graph_query_end(mode);
+}
+
+
+/** Refresh cached demand only for groups whose peak changed. */
+static void graph_update_cache(void) {
+    for (int dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
+        if (!(graph_pending_dirty & (1u << dev))) continue;
+        graph_pending_peak[dev] = 0;
+        graph_temporary_peak[dev] = 0;
+        for (graph_group *g = graph_groups; g != NULL; g = g->next) {
+            if (g->pending[dev] > graph_pending_peak[dev]) graph_pending_peak[dev] = g->pending[dev];
+            if (g->temporary[dev] > graph_temporary_peak[dev]) graph_temporary_peak[dev] = g->temporary[dev];
+        }
+    }
+    graph_pending_dirty = 0;
+}
+
+/** Combine cached pending and submitted graph demand. */
+static size_t graph_logical_wanted(int dev) {
+    size_t want = graph_persistent[dev] + graph_temporary_peak[dev];
+    if (graph_pending_peak[dev] > want) want = graph_pending_peak[dev];
+    return want;
+}
+
+/** Include retained driver backing in the quota charge. */
+static size_t graph_wanted(int dev) {
+    size_t want = graph_logical_wanted(dev);
+    return graph_reserved[dev] > want ? graph_reserved[dev] : want;
+}
+
+/** Trim only devices whose maximum refund can cover the quota shortfall. */
+static unsigned int graph_trim_mask(int dev, size_t addon) {
+    CUdevice current = dev;
+    if (current == -1 && cuCtxGetDevice(&current) != CUDA_SUCCESS) return 0;
+    if (current < 0 || current >= CUDA_DEVICE_MAX_COUNT) return 0;
+    pthread_mutex_lock(&graph_mutex);
+    graph_update_cache();
+    size_t logical = graph_logical_wanted(current);
+    size_t refundable = graph_charged[current] > logical ? graph_charged[current] - logical : 0;
+    lock_shrreg();
+    uint64_t limit = get_current_device_memory_limit(current);
+    size_t usage = get_gpu_memory_usage(cuda_to_nvml_map(current));
+    unlock_shrreg();
+    unsigned int mask = 0;
+    if (refundable != 0 && limit != 0 && (usage > limit || addon > limit - usage)) {
+        size_t remaining = usage > refundable ? usage - refundable : 0;
+        if (remaining <= limit && addon <= limit - remaining) mask = 1u << current;
+    }
+    pthread_mutex_unlock(&graph_mutex);
+    return mask;
+}
+
+
+/** Apply cached demand changes under the shared quota lock. */
+static int graph_rebalance(int check) {
+    graph_update_cache();
+    int ret = 0;
+    for (int dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++) {
+        size_t want = graph_wanted(dev);
+        if (check == GRAPH_MUTATE && graph_persistent[dev] + graph_pending_peak[dev] > want)
+            want = graph_persistent[dev] + graph_pending_peak[dev];
+        size_t have = graph_charged[dev];
+        if (want > have) {
+            if (check) {
+                if (reserve_device_memory_impl(dev, want - have) != 0) {
+                    ret = CUDA_ERROR_OUT_OF_MEMORY;
+                    continue;
+                }
+            } else {
+                lock_shrreg();
+                add_gpu_device_memory_usage(getpid(), dev, want - have, 2);
+                unlock_shrreg();
+            }
+            graph_charged[dev] = want;
+        } else if (want < have) {
+            release_device_memory(dev, have - want);
+            graph_charged[dev] = want;
+        }
+    }
+    return ret;
+}
+
+
+/** Refresh backing before ordinary allocation checks. */
+static void graph_reclaim(unsigned int trim_mask) {
+    pthread_mutex_lock(&graph_mutex);
+    graph_refresh_pool(trim_mask);
+    graph_rebalance(GRAPH_RECOUNT);
+    pthread_mutex_unlock(&graph_mutex);
+}
+
+
+void graph_pool_trimmed(void) {
+    graph_reclaim(0);
+}
+
+
+/** Remove an allocation from cached demand and executable references. */
+static void graph_drop_entry(graph_charge_entry *e) {
+    for (graph_exec_state *s = graph_states; s != NULL; s = s->next) {
+        graph_exec_link **lp = &s->entries;
+        while (*lp != NULL) {
+            if ((*lp)->entry == e) {
+                graph_exec_link *l = *lp;
+                *lp = l->next;
+                free(l);
+            } else {
+                lp = &(*lp)->next;
+            }
+        }
+    }
+    graph_charge_entry **pp = &graph_charges;
+    while (*pp != e) pp = &(*pp)->next;
+    *pp = e->next;
+    graph_group *group = e->group;
+    group->total[e->dev] -= e->size;
+    graph_total[e->dev] -= e->size;
+    if (e->temporary) {
+        group->temporary[e->dev] -= e->size;
+        graph_pending_dirty |= 1u << e->dev;
+    }
+    if (e->held) {
+        if (e->resident) graph_persistent[e->dev] -= e->size;
+        else graph_pending_remove(group, e->dev, e->size);
+    }
+    free(e);
+    graph_group_put(group);
+}
+
+
+/** Reserve quota and bookkeeping before adding a graph allocation. */
+int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, cuuint64_t capid, int capturing,
+                      graph_charge_entry **out) {
+    *out = NULL;
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) return CUDA_SUCCESS;
+    int count;
+    CUresult valid = CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGetCount, &count);
+    if (valid != CUDA_SUCCESS) return valid;
+    if (dev >= count) return CUDA_SUCCESS;
+    graph_charge_entry *g = calloc(1, sizeof(*g));
+    if (g == NULL) return CUDA_ERROR_OUT_OF_MEMORY;
+    g->graph = graph;
+    g->dev = dev;
+    g->size = size;
+    g->held = 1;
+    g->capid = capid;
+    g->capturing = capturing;
+    pthread_mutex_lock(&graph_mutex);
+    graph_group *group;
+    for (group = graph_groups; group != NULL; group = group->next) {
+        if (group->graph == graph) break;
+    }
+    if (group == NULL) {
+        group = calloc(1, sizeof(*group));
+        if (group == NULL) {
+            free(g);
+            pthread_mutex_unlock(&graph_mutex);
+            return CUDA_ERROR_OUT_OF_MEMORY;
+        }
+        group->graph = graph;
+        group->next = graph_groups;
+        graph_groups = group;
+    }
+    g->group = group;
+    group->refs++;
+    group->total[dev] += size;
+    graph_total[dev] += size;
+    graph_pending_add(group, dev, size);
+    g->next = graph_charges;
+    graph_charges = g;
+    if (!capturing) graph_refresh_pool(0);
+    int ret = graph_rebalance(GRAPH_MUTATE);
+    if (ret != 0) {
+        graph_drop_entry(g);
+        if (!capturing) graph_refresh_pool(0);
+        graph_rebalance(GRAPH_RECOUNT);
+    } else {
+        *out = g;
+    }
+    pthread_mutex_unlock(&graph_mutex);
+    return ret;
+}
+
+
+/** Commit a graph allocation or roll back its reservation after native failure. */
+void graph_alloc_end(graph_charge_entry *entry, CUdeviceptr ptr, CUresult result) {
+    if (entry == NULL) return;
+    pthread_mutex_lock(&graph_mutex);
+    if (result == CUDA_SUCCESS) {
+        entry->ptr = ptr;
+    } else {
+        int capturing = entry->capturing;
+        graph_drop_entry(entry);
+        if (!capturing) graph_refresh_pool(0);
+        graph_rebalance(GRAPH_RECOUNT);
+    }
+    pthread_mutex_unlock(&graph_mutex);
+}
+
+
+/** Record an allocation using cached state while graph construction may be capturing. */
+int graph_record(CUgraph graph, CUdevice dev, size_t size, CUdeviceptr ptr, cuuint64_t capid) {
+    graph_charge_entry *entry;
+    int ret = graph_alloc_begin(graph, dev, size, capid, 1, &entry);
+    if (ret == CUDA_SUCCESS) graph_alloc_end(entry, ptr, CUDA_SUCCESS);
+    return ret;
+}
+
+/** Record a graph-owned free without querying the driver during capture. */
+void graph_mark_free(CUgraph graph, CUdeviceptr ptr) {
+    pthread_mutex_lock(&graph_mutex);
+    for (graph_charge_entry *g = graph_charges; g != NULL; g = g->next) {
+        if (g->ptr == ptr && g->graph == graph && !g->has_free) {
+            g->has_free = 1;
+            graph_entry_update(g);
+        }
+    }
+    /* Recording a free node may run during capture, so defer driver queries. */
+    graph_rebalance(GRAPH_RECOUNT);
+    pthread_mutex_unlock(&graph_mutex);
+}
+
+
+/** Update graph allocation lifetimes after an external pointer free. */
+void graph_ptr_freed(CUdeviceptr ptr) {
+    pthread_mutex_lock(&graph_mutex);
+    for (graph_charge_entry *g = graph_charges, *n; g != NULL; g = n) {
+        n = g->next;
+        if (g->ptr != ptr) continue;
+        if (g->graph == NULL && g->nexec == 0 && g->launching == 0) {
+            graph_drop_entry(g);
+        } else {
+            g->launched = 0;
+            g->freed++;
+            graph_entry_update(g);
+        }
+    }
+    graph_refresh_pool(0);
+    graph_rebalance(GRAPH_RECOUNT);
+    pthread_mutex_unlock(&graph_mutex);
+}
+
 
 /** Return native capture state and preserve query failures. */
 CUresult graph_capture_info(CUstream hStream, CUstreamCaptureStatus *cap, cuuint64_t *id, CUgraph *graph) {
@@ -711,79 +959,202 @@ void graph_ptr_freed_async(CUdeviceptr ptr, CUstream hStream) {
     }
 }
 
-/* An exec keeps its graph's allocations alive after the graph is destroyed. */
-int graph_exec_created(CUgraph graph, CUgraphExec exec) {
-    int ret = 0;
+
+/** Snapshot allocation references before native executable creation. */
+int graph_exec_prepare(CUgraph graph, graph_exec_state **out) {
+    *out = NULL;
+    if (graph == NULL) return CUDA_SUCCESS;
     pthread_mutex_lock(&graph_mutex);
-    for (graph_charge_entry *g = graph_charges; g != NULL; g = g->next) {
-        if (g->graph != graph) continue;
-        graph_exec_link *l = malloc(sizeof(*l));
+    graph_exec_state *s = calloc(1, sizeof(*s));
+    if (s == NULL) {
+        pthread_mutex_unlock(&graph_mutex);
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+    if (pthread_mutex_init(&s->submit_mutex, NULL) != 0) {
+        free(s);
+        pthread_mutex_unlock(&graph_mutex);
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+    int ret = CUDA_SUCCESS;
+    for (graph_charge_entry *e = graph_charges; e != NULL; e = e->next) {
+        if (e->graph != graph) continue;
+        graph_exec_link *l = calloc(1, sizeof(*l));
         if (l == NULL) {
             ret = CUDA_ERROR_OUT_OF_MEMORY;
             break;
         }
-        l->exec = exec;
-        l->entry = g;
-        l->next = graph_execs;
-        graph_execs = l;
-        g->nexec++;
+        l->entry = e;
+        l->next = s->entries;
+        s->entries = l;
+        e->nexec++;
     }
-    if (ret != 0) {
-        /* Undo the links already made for this exec. */
-        graph_exec_link **lp = &graph_execs;
-        while (*lp != NULL) {
-            graph_exec_link *l = *lp;
-            if (l->exec == exec) {
-                l->entry->nexec--;
-                *lp = l->next;
-                free(l);
-            } else {
-                lp = &l->next;
-            }
+    if (ret != CUDA_SUCCESS || s->entries == NULL) {
+        while (s->entries != NULL) {
+            graph_exec_link *l = s->entries;
+            s->entries = l->next;
+            l->entry->nexec--;
+            free(l);
         }
+        pthread_mutex_destroy(&s->submit_mutex);
+        free(s);
+    } else {
+        s->next = graph_states;
+        graph_states = s;
+        *out = s;
     }
     pthread_mutex_unlock(&graph_mutex);
     return ret;
 }
 
+/** Bind prepared tracking to a native executable. */
+void graph_exec_commit(graph_exec_state *s, CUgraphExec exec) {
+    if (s == NULL) return;
+    pthread_mutex_lock(&graph_mutex);
+    s->exec = exec;
+    pthread_mutex_unlock(&graph_mutex);
+}
+
+/** Free retired tracking after its last host submission returns. */
+static void graph_exec_maybe_free(graph_exec_state *s) {
+    if (!s->retired || s->users != 0) return;
+    graph_exec_state **pp = &graph_states;
+    while (*pp != s) pp = &(*pp)->next;
+    *pp = s->next;
+    while (s->entries != NULL) {
+        graph_exec_link *l = s->entries;
+        graph_charge_entry *e = l->entry;
+        s->entries = l->next;
+        free(l);
+        if (--e->nexec == 0 && e->graph == NULL && !e->launching &&
+            (e->has_free || !e->launched)) graph_drop_entry(e);
+    }
+    pthread_mutex_destroy(&s->submit_mutex);
+    free(s);
+}
+
+/** Retire an uncommitted executable snapshot after native failure. */
+void graph_exec_discard(graph_exec_state *s) {
+    if (s == NULL) return;
+    pthread_mutex_lock(&graph_mutex);
+    s->retired = 1;
+    graph_exec_maybe_free(s);
+    graph_refresh_pool(0);
+    graph_rebalance(GRAPH_RECOUNT);
+    pthread_mutex_unlock(&graph_mutex);
+}
+
+/** Retire native executable tracking without dropping pending host references. */
 void graph_exec_destroyed(CUgraphExec exec) {
     pthread_mutex_lock(&graph_mutex);
-    graph_exec_link **lp = &graph_execs;
-    while (*lp != NULL) {
-        graph_exec_link *l = *lp;
-        if (l->exec != exec) {
-            lp = &l->next;
-            continue;
+    for (graph_exec_state *s = graph_states; s != NULL; s = s->next) {
+        if (!s->retired && s->exec == exec) {
+            s->retired = 1;
+            graph_exec_maybe_free(s);
+            break;
         }
-        graph_charge_entry *e = l->entry;
-        *lp = l->next;
-        free(l);
-        if (--e->nexec == 0 && e->graph == NULL && (e->has_free || !e->launched)) {
-            graph_drop_entry(e);
-        }
-        lp = &graph_execs;  /* graph_drop_entry may have freed other links */
     }
-    graph_rebalance(0);
+    graph_refresh_pool(0);
+    graph_rebalance(GRAPH_RECOUNT);
     pthread_mutex_unlock(&graph_mutex);
 }
 
-void graph_exec_launched(CUgraphExec exec) {
-    int changed = 0;
+/** Undo prospective residency after rejected admission or native submission. */
+static void graph_cancel_submission(graph_exec_state *s) {
+    for (graph_exec_link *l = s->entries; l != NULL; l = l->next) {
+        l->entry->launching--;
+        graph_entry_update(l->entry);
+    }
+}
+
+/** Drop a host reference after releasing the submission mutex. */
+static void graph_exec_put_user(graph_exec_state *s) {
     pthread_mutex_lock(&graph_mutex);
-    for (graph_exec_link *l = graph_execs; l != NULL; l = l->next) {
-        if (l->exec == exec && !l->entry->launched) {
-            l->entry->launched = 1;
-            changed = 1;
-        }
-    }
-    /* Replays are the hot path: only the first launch changes the charge. */
-    if (changed) graph_rebalance(0);
+    s->users--;
+    graph_exec_maybe_free(s);
     pthread_mutex_unlock(&graph_mutex);
 }
 
-/* A failed capture is discarded by the driver without a cuGraphDestroy, so
- * the memory it recorded was never allocated. The capture id covers every
- * stream that joined the capture. */
+/** Admit prospective persistent outputs before the native call. */
+int graph_exec_reserve(graph_exec_state *s, CUstream stream, int upload) {
+    (void)stream; (void)upload;
+    if (s == NULL) return CUDA_SUCCESS;
+    pthread_mutex_lock(&graph_mutex);
+    s->users++;
+    pthread_mutex_unlock(&graph_mutex);
+    pthread_mutex_lock(&s->submit_mutex);
+    pthread_mutex_lock(&graph_mutex);
+    int ret = s->retired ? CUDA_ERROR_INVALID_HANDLE : CUDA_SUCCESS;
+    s->changed = 0;
+    if (ret == CUDA_SUCCESS) {
+        for (graph_exec_link *l = s->entries; l != NULL; l = l->next) {
+            graph_charge_entry *e = l->entry;
+            l->freed = e->freed;
+            e->launching++;
+            if (!e->launched) s->changed = 1;
+            graph_entry_update(e);
+        }
+        if (s->changed) {
+            graph_refresh_pool(0);
+            ret = graph_rebalance(GRAPH_SUBMIT);
+        }
+        if (ret != CUDA_SUCCESS) {
+            graph_cancel_submission(s);
+            graph_rebalance(GRAPH_RECOUNT);
+        }
+    }
+    pthread_mutex_unlock(&graph_mutex);
+    if (ret != CUDA_SUCCESS) {
+        pthread_mutex_unlock(&s->submit_mutex);
+        graph_exec_put_user(s);
+    }
+    return ret;
+}
+
+/** Find executable tracking while retaining it across concurrent destruction. */
+int graph_exec_begin(CUgraphExec exec, CUstream stream, int upload, graph_exec_state **out) {
+    *out = NULL;
+    pthread_mutex_lock(&graph_mutex);
+    graph_exec_state *s;
+    for (s = graph_states; s != NULL; s = s->next) {
+        if (!s->retired && s->exec == exec) {
+            s->users++;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&graph_mutex);
+    if (s == NULL) return CUDA_SUCCESS;
+    int ret = graph_exec_reserve(s, stream, upload);
+    graph_exec_put_user(s);
+    if (ret == CUDA_SUCCESS) *out = s;
+    return ret;
+}
+
+/** Commit successful output residency or restore the failed submission's reservation. */
+void graph_exec_end(graph_exec_state *s, CUstream stream, CUresult result) {
+    (void)stream;
+    if (s == NULL) return;
+    pthread_mutex_lock(&graph_mutex);
+    if (result == CUDA_SUCCESS) {
+        for (graph_exec_link *l = s->entries; l != NULL; l = l->next) {
+            graph_charge_entry *e = l->entry;
+            e->launching--;
+            if (e->freed == l->freed) e->launched = 1;
+            graph_submitted[e->dev] = 1;
+            graph_entry_update(e);
+        }
+    } else {
+        graph_cancel_submission(s);
+    }
+    if (s->changed) {
+        graph_refresh_pool(0);
+        graph_rebalance(GRAPH_RECOUNT);
+    }
+    pthread_mutex_unlock(&graph_mutex);
+    pthread_mutex_unlock(&s->submit_mutex);
+    graph_exec_put_user(s);
+}
+
+/** Release invalidated allocations across all participating streams. */
 void graph_capture_end(cuuint64_t capid, CUgraph graph) {
     pthread_mutex_lock(&graph_mutex);
     for (graph_charge_entry *g = graph_charges, *n; g != NULL; g = n) {
@@ -795,14 +1166,18 @@ void graph_capture_end(cuuint64_t capid, CUgraph graph) {
             graph_drop_entry(g);
         }
     }
-    graph_rebalance(0);
+    graph_refresh_pool(0);
+    graph_rebalance(GRAPH_RECOUNT);
     pthread_mutex_unlock(&graph_mutex);
 }
 
-/* Memory with a free node is released once the graph and all its execs are
- * gone. Memory without one stays until its pointer is freed. */
+
+/** Retain persistent allocations after graph destruction until their pointers are freed. */
 void graph_release(CUgraph graph) {
     pthread_mutex_lock(&graph_mutex);
+    for (graph_group *group = graph_groups; group != NULL; group = group->next) {
+        if (group->graph == graph) group->graph = NULL;
+    }
     for (graph_charge_entry *g = graph_charges, *n; g != NULL; g = n) {
         n = g->next;
         if (g->graph != graph) continue;
@@ -810,9 +1185,11 @@ void graph_release(CUgraph graph) {
         /* Memory of a graph that never ran was never allocated. */
         if ((g->has_free || !g->launched) && g->nexec == 0) graph_drop_entry(g);
     }
-    graph_rebalance(0);
+    graph_refresh_pool(0);
+    graph_rebalance(GRAPH_RECOUNT);
     pthread_mutex_unlock(&graph_mutex);
 }
+
 
 /* Track an allocated async chunk and account it against its pool's high-water
  * limit. Call with mutex held. */

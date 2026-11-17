@@ -159,6 +159,7 @@ int main(void) {
                             prefetch_on13, 3);
     failures += check_symbol_status();
     failures += check_graph_node_procs();
+    failures += check_graph_pool_procs();
 
     failures += check_graph_loader_abi();
 

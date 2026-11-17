@@ -108,8 +108,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             set_property(TARGET ${TEST_TARGET_NAME} APPEND_STRING PROPERTY
                 LINK_FLAGS " -Wl,--wrap=hostpid_broker_query_trusted,--wrap=hostpid_fallback_lock_acquire_until,--wrap=hostpid_fallback_lock_acquire_shared_until")
         endif()
-    elseif (TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat"
-            OR TEST_TARGET_NAME STREQUAL "test_graph_allocation_admission")
+    elseif (TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat")
         add_executable(${TEST_TARGET_NAME}
             ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/memory.c
@@ -123,19 +122,22 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         # pull in unrelated driver/accounting dependencies.
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
-        if (TEST_TARGET_NAME STREQUAL "test_graph_allocation_admission")
-            target_sources(${TEST_TARGET_NAME} PRIVATE
-                ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/graph.c)
-        endif()
-    elseif (TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle")
+    elseif (TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_pool_lifetimes"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_allocation_admission")
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/allocator/allocator.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/graph.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/memory.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE _GNU_SOURCE)
         target_compile_options(${TEST_TARGET_NAME} PRIVATE -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+        if (TEST_TARGET_NAME STREQUAL "test_graph_pool_lifetimes")
+            target_sources(${TEST_TARGET_NAME} PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/context.c)
+        endif()
     elseif (TEST_TARGET_NAME STREQUAL "test_device_total_mem")
         add_executable(${TEST_TARGET_NAME}
             ${TEST_SCRIPT}
@@ -276,7 +278,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_lookup"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_init"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_concurrency"
-            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker")
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_allocation_admission")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         target_link_libraries(${TEST_TARGET_NAME}
@@ -285,9 +288,9 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_utilization_nvml_index"
             OR TEST_TARGET_NAME STREQUAL "test_rate_limiter_recent_kernel"
             OR TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat"
-            OR TEST_TARGET_NAME STREQUAL "test_graph_allocation_admission"
             OR TEST_TARGET_NAME STREQUAL "test_device_total_mem"
-            OR TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle")
+            OR TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_pool_lifetimes")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_sm_limiter_step")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
@@ -469,6 +472,22 @@ set_tests_properties(sm_limiter_step PROPERTIES TIMEOUT 10)
 
 add_test(NAME graph_capture_lifecycle COMMAND test_graph_capture_lifecycle)
 set_tests_properties(graph_capture_lifecycle PROPERTIES TIMEOUT 15)
+
+add_test(NAME graph_pool_lifetimes COMMAND test_graph_pool_lifetimes)
+set_tests_properties(graph_pool_lifetimes PROPERTIES TIMEOUT 15)
+
+if (TARGET vgpu)
+    target_link_libraries(test_graph_persistent_gpu -ldl)
+    target_compile_definitions(test_graph_persistent_gpu PRIVATE _GNU_SOURCE)
+    foreach(GRAPH_OUTPUT_MODE launch upload instantiate-upload)
+        add_test(NAME graph_persistent_gpu_${GRAPH_OUTPUT_MODE}
+            COMMAND test_graph_persistent_gpu ${GRAPH_OUTPUT_MODE})
+        set_tests_properties(graph_persistent_gpu_${GRAPH_OUTPUT_MODE} PROPERTIES
+            ENVIRONMENT "LIBVGPU=$<TARGET_FILE:vgpu>"
+            SKIP_RETURN_CODE 77
+            TIMEOUT 30)
+    endforeach()
+endif()
 
 add_test(NAME graph_allocation_admission COMMAND test_graph_allocation_admission)
 set_tests_properties(graph_allocation_admission PROPERTIES TIMEOUT 15)

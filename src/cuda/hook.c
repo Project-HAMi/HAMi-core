@@ -78,6 +78,9 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemcpyHtoD_v2"},
     {.name = "cuMipmappedArrayCreate"},
     {.name = "cuMipmappedArrayDestroy"},
+    {.name = "cuDeviceGetGraphMemAttribute"},
+    {.name = "cuThreadExchangeStreamCaptureMode"},
+    {.name = "cuDeviceGraphMemTrim"},
     {.name = "cuMemGetInfo_v2"},
     {.name = "cuMemcpy"},
     {.name = "cuPointerGetAttribute"},
@@ -360,19 +363,20 @@ void *find_symbols_in_table_by_cudaversion(const char *symbol,int  cudaVersion) 
 
 
 
-/** Preserve native availability while selecting the generic Graph-node ABI. */
+/** Preserve native availability while selecting graph memory hooks and node ABIs. */
 static int resolve_graph_add_proc(const char *symbol, void **pfn, int version, cuuint64_t flags,
                                   CUdriverProcAddressQueryResult *status, int v2, CUresult *result) {
     int current = strcmp(symbol, "cuGraphAddNode_v2") == 0;
     int latest = strcmp(symbol, "cuGraphAddNode_v3") == 0;
-    if (!current && !latest && strcmp(symbol, "cuGraphAddNode") != 0) return 0;
+    int trim = strcmp(symbol, "cuDeviceGraphMemTrim") == 0;
+    if (!current && !trim && !latest && strcmp(symbol, "cuGraphAddNode") != 0) return 0;
     *result = v2
         ? CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress_v2, symbol, pfn, version, flags, status)
         : CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress, symbol, pfn, version, flags);
     if (*result == CUDA_SUCCESS && *pfn != NULL &&
         (!v2 || status == NULL || *status == CU_GET_PROC_ADDRESS_SUCCESS)) {
-        const char *name = latest || (!current && version >= 13040) ? "cuGraphAddNode_v3"
-            : (current || version >= 12030 ? "cuGraphAddNode_v2" : "cuGraphAddNode");
+        const char *name = trim ? symbol : (latest || (!current && version >= 13040) ? "cuGraphAddNode_v3"
+            : (current || version >= 12030 ? "cuGraphAddNode_v2" : "cuGraphAddNode"));
         void *hook = __dlsym_hook_section(NULL, name);
         if (strcmp(symbol, "cuGraphAddNode") == 0 && version > 13050 &&
             (*pfn != CUDA_FIND_ENTRY(cuda_library_entry, cuGraphAddNode_v3) || hook == NULL)) {

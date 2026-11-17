@@ -132,7 +132,7 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
 }
 #endif
 
-/** Resolve exported CUDA and NVML hooks by symbol name. */
+/** Resolve supported CUDA and NVML hooks by their exported spelling. */
 void* __dlsym_hook_section(void* handle, const char* symbol) {
     int it;
     for (it=0;it<CUDA_ENTRY_END;it++){
@@ -380,6 +380,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuGraphLaunch);
     DLSYM_HOOK_FUNC(cuGraphExecDestroy);
     DLSYM_HOOK_FUNC(cuGraphDestroy);
+    DLSYM_HOOK_FUNC(cuDeviceGraphMemTrim);
 #ifdef HOOK_MEMINFO_ENABLE
     DLSYM_HOOK_FUNC(cuMemGetInfo_v2);
 #endif
