@@ -374,7 +374,7 @@ static int resolve_graph_add_proc(const char *symbol, void **pfn, int version, c
         const char *name = latest || (!current && version >= 13040) ? "cuGraphAddNode_v3"
             : (current || version >= 12030 ? "cuGraphAddNode_v2" : "cuGraphAddNode");
         void *hook = __dlsym_hook_section(NULL, name);
-        if (!current && !latest && version > 13050 &&
+        if (strcmp(symbol, "cuGraphAddNode") == 0 && version > 13050 &&
             (*pfn != CUDA_FIND_ENTRY(cuda_library_entry, cuGraphAddNode_v3) || hook == NULL)) {
             *pfn = NULL;
             *result = CUDA_ERROR_NOT_SUPPORTED;
