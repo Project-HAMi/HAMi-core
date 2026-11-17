@@ -37,6 +37,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
+            OR TEST_TARGET_NAME STREQUAL "test_fork_reinit_leak"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
             OR TEST_TARGET_NAME STREQUAL "test_shrreg_debug"
             OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
@@ -93,6 +94,11 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             # Read a scratch file, never the production /overrideEnv.
             target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
                 ENV_OVERRIDE_FILE=\"${CMAKE_CURRENT_BINARY_DIR}/override_env.test\")
+        elseif (TEST_TARGET_NAME STREQUAL "test_fork_reinit_leak")
+            # A file nothing creates, so no override can move the cache path
+            # this test inspects.
+            target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+                ENV_OVERRIDE_FILE=\"${CMAKE_CURRENT_BINARY_DIR}/override_env.absent\")
         endif()
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
             -ffunction-sections -fdata-sections)
@@ -260,6 +266,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     if (TEST_SCRIPT MATCHES "test_shared_region_concurrency.c"
             OR TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
+            OR TEST_TARGET_NAME STREQUAL "test_fork_reinit_leak"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_fallback_lock"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
             OR TEST_TARGET_NAME STREQUAL "test_shrreg_debug"
@@ -343,6 +350,10 @@ set_tests_properties(meminfo_null_out PROPERTIES TIMEOUT 20)
 add_test(NAME fork_child_exit_cleanup
     COMMAND test_fork_child_exit_cleanup)
 set_tests_properties(fork_child_exit_cleanup PROPERTIES TIMEOUT 20)
+
+add_test(NAME fork_reinit_leak
+    COMMAND test_fork_reinit_leak)
+set_tests_properties(fork_reinit_leak PROPERTIES TIMEOUT 20)
 
 add_test(NAME dlsym_rtld_next
     COMMAND test_dlsym_rtld_next)
