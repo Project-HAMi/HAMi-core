@@ -147,6 +147,7 @@ int main(void) {
     DRIVER(cuStreamBeginCapture_v2, driver_begin_capture);
     DRIVER(cuStreamEndCapture, driver_end_capture);
     DRIVER(cuCtxGetDevice, driver_device);
+    DRIVER(cuDeviceGetCount, driver_device_count);
     test_persistent_and_pending(); test_trim_pressure();
     test_serial_pool(); test_output_replay(); test_peak_removal();
     test_query_failure(); test_graph_handle_reuse(); test_capture_queries();

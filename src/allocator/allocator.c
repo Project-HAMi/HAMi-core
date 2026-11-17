@@ -661,6 +661,10 @@ int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, cuuint64_t capid
                       graph_charge_entry **out) {
     *out = NULL;
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) return CUDA_SUCCESS;
+    int count;
+    CUresult valid = CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGetCount, &count);
+    if (valid != CUDA_SUCCESS) return valid;
+    if (dev >= count) return CUDA_SUCCESS;
     graph_charge_entry *g = calloc(1, sizeof(*g));
     if (g == NULL) return CUDA_ERROR_OUT_OF_MEMORY;
     g->graph = graph;
@@ -831,7 +835,13 @@ void graph_capture_started(uint64_t token, CUresult result) {
     for (capture_link *l = capture_links; l != NULL; l = l->next) {
         if (l->token != token) continue;
         CUstreamCaptureStatus cap;
-        graph_capture_info(l->stream, &cap, &l->id, &l->graph);
+        cuuint64_t id = 0;
+        CUgraph graph = NULL;
+        if (graph_capture_info(l->stream, &cap, &id, &graph) == CUDA_SUCCESS &&
+            cap != CU_STREAM_CAPTURE_STATUS_NONE) {
+            l->id = id;
+            l->graph = graph;
+        }
         break;
     }
     pthread_mutex_unlock(&graph_mutex);
@@ -1059,6 +1069,23 @@ static int account_async_chunk(allocated_list_entry *e, size_t size, CUmemoryPoo
     return 0;
 }
 
+/** Bind a previously unknown capture ID before recording its first allocation. */
+static CUresult graph_capture_observe(CUstream stream, cuuint64_t id, CUgraph graph) {
+    cuuint64_t cached;
+    uint64_t token;
+    CUresult res = graph_capture_resolve(stream, &cached, &token);
+    if (res != CUDA_SUCCESS || token == 0 || cached != 0) return res;
+    pthread_mutex_lock(&graph_mutex);
+    for (capture_link *l = capture_links; l != NULL; l = l->next) {
+        if (l->token != token) continue;
+        l->id = id;
+        l->graph = graph;
+        break;
+    }
+    pthread_mutex_unlock(&graph_mutex);
+    return CUDA_SUCCESS;
+}
+
 /** Admit captured allocations before the driver records their nodes. */
 static CUresult allocate_captured(CUdeviceptr *address, size_t size, CUdevice dev,
                                   CUmemoryPool pool, CUstream stream, int from_pool, int *capturing) {
@@ -1069,6 +1096,8 @@ static CUresult allocate_captured(CUdeviceptr *address, size_t size, CUdevice de
     *capturing = res != CUDA_SUCCESS || cap != CU_STREAM_CAPTURE_STATUS_NONE;
     if (res != CUDA_SUCCESS || !*capturing) return res;
     if (graph == NULL) return CUDA_ERROR_STREAM_CAPTURE_INVALIDATED;
+    res = graph_capture_observe(stream, id, graph);
+    if (res != CUDA_SUCCESS) return res;
     graph_charge_entry *entry;
     res = graph_alloc_begin(graph, dev, size, id, 1, &entry);
     if (res != CUDA_SUCCESS) return res;
