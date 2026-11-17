@@ -30,6 +30,7 @@ static int check_graph_node_procs(void) {
     g_present[0] = names[0]; g_present[1] = names[1]; g_present[2] = names[2]; g_present[3] = NULL;
     cuda_library_entry[OVERRIDE_cuGetProcAddress].fn_ptr = graph_proc_native;
     cuda_library_entry[OVERRIDE_cuGetProcAddress_v2].fn_ptr = graph_proc_native_v2;
+    cuda_library_entry[OVERRIDE_cuGraphAddNode_v3].fn_ptr = graph_native_marker;
     for (int n = 0; n < 3; n++) for (int v = 0; v < 10; v++) for (int pt = 0; pt < 2; pt++)
         for (int entry = 0; entry < 4; entry++) for (int state = 0; state < 4; state++) {
             graph_proc_result = state == 1 ? CUDA_ERROR_NOT_FOUND : CUDA_SUCCESS;
@@ -44,8 +45,7 @@ static int check_graph_node_procs(void) {
             else if (entry == 2) res = cuGetProcAddress_v2(names[n], &pfn, versions[v], flags, &status);
             else res = _cuGetProcAddress_v2(names[n], &pfn, versions[v], flags, &status);
             void *expected = graph_proc_pointer ? graph_native_marker : NULL;
-            if (graph_proc_result == CUDA_SUCCESS && graph_proc_pointer && (entry < 2 || state != 3) &&
-                (n || versions[v] <= 13050))
+            if (graph_proc_result == CUDA_SUCCESS && graph_proc_pointer && (entry < 2 || state != 3))
                 expected = names[n ? n : (versions[v] >= 13040 ? 2 : versions[v] >= 12030)];
             if (res != graph_proc_result || pfn != expected || (entry >= 2 && status != graph_proc_status)) {
                 printf("FAIL graph node lookup: %s version=%d entry=%d state=%d\n",
@@ -54,6 +54,18 @@ static int check_graph_node_procs(void) {
             }
         }
     puts("ok   generic graph node ABIs and native lookup outcomes: 960 cases");
+    cuda_library_entry[OVERRIDE_cuGraphAddNode_v3].fn_ptr = NULL;
+    graph_proc_result = CUDA_SUCCESS; graph_proc_pointer = 1; graph_proc_status = CU_GET_PROC_ADDRESS_SUCCESS;
+    for (int entry = 0; entry < 4; entry++) {
+        void *pfn = NULL; CUdriverProcAddressQueryResult status = STATUS_POISON;
+        CUresult res;
+        if (entry == 0) res = cuGetProcAddress(names[0], &pfn, 13060, 0);
+        else if (entry == 1) res = _cuGetProcAddress(names[0], &pfn, 13060, 0);
+        else if (entry == 2) res = cuGetProcAddress_v2(names[0], &pfn, 13060, 0, &status);
+        else res = _cuGetProcAddress_v2(names[0], &pfn, 13060, 0, &status);
+        if (res != CUDA_ERROR_NOT_SUPPORTED || pfn != NULL ||
+            (entry >= 2 && status != CU_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT)) return 1;
+    }
     return 0;
 }
 
