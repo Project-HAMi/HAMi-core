@@ -22,13 +22,9 @@ WRAPPER_GLOB = "src/cuda/*.c"
 OPTIONAL_DLSYM_SYMBOLS = {"cuCtxFromGreenCtx", "cuEventCreate", "cuEventRecord", "cuEventQuery", "cuStreamGetId", "cuStreamGetCtx", "cuGetExportTable", "cuStreamGetCaptureInfo_v2", "cuStreamGetCaptureInfo_v3", "cuDeviceGetGraphMemAttribute", "cuThreadExchangeStreamCaptureMode", "cuCtxGetId"}
 OPTIONAL_WRAPPER_SYMBOLS = {"cuCtxFromGreenCtx", "cuEventCreate", "cuEventRecord", "cuEventQuery", "cuStreamGetId", "cuStreamGetCtx", "cuGetExportTable", "cuStreamGetCaptureInfo_v2", "cuStreamGetCaptureInfo_v3", "cuDeviceGetGraphMemAttribute", "cuThreadExchangeStreamCaptureMode", "cuCtxGetId"}
 
-OPTIONAL_DLSYM_SYMBOLS.add("cuThreadExchangeStreamCaptureMode")
-OPTIONAL_WRAPPER_SYMBOLS.add("cuThreadExchangeStreamCaptureMode")
 OPTIONAL_DLSYM_SYMBOLS.add("cuGraphMemFreeNodeGetParams")
 OPTIONAL_WRAPPER_SYMBOLS.add("cuGraphMemFreeNodeGetParams")
 
-OPTIONAL_DLSYM_SYMBOLS.add("cuThreadExchangeStreamCaptureMode")
-OPTIONAL_WRAPPER_SYMBOLS.add("cuThreadExchangeStreamCaptureMode")
 
 
 def strip_c_comments(content: str) -> str:

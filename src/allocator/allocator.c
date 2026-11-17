@@ -13,7 +13,8 @@ extern CUresult cuMemoryFree(CUdeviceptr dptr);
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static void graph_reclaim(int trim);
+static void graph_reclaim(unsigned int trim_mask);
+static unsigned int graph_trim_mask(int dev, size_t addon);
 
 /* already_locked: caller already holds lock_shrreg (not reentrant). */
 static int oom_check_impl(const int dev, size_t addon, int already_locked) {
@@ -60,7 +61,8 @@ int oom_check(const int dev, size_t addon) {
     graph_reclaim(0);
     int ret = oom_check_impl(dev, addon, 0);
     if (ret) {
-        graph_reclaim(1);
+        unsigned int trim_mask = graph_trim_mask(dev, addon);
+        if (trim_mask != 0) graph_reclaim(trim_mask);
         ret = oom_check_impl(dev, addon, 0);
     }
     return ret;
@@ -83,7 +85,8 @@ int reserve_device_memory(CUdevice dev, size_t size) {
     graph_reclaim(0);
     int ret = reserve_device_memory_impl(dev, size);
     if (ret != CUDA_SUCCESS) {
-        graph_reclaim(1);
+        unsigned int trim_mask = graph_trim_mask(dev, size);
+        if (trim_mask != 0) graph_reclaim(trim_mask);
         ret = reserve_device_memory_impl(dev, size);
     }
     return ret;
@@ -706,7 +709,7 @@ static void graph_poll_active(void) {
 }
 
 /** Refresh retained graph-pool backing and conservatively preserve charges on query failure. */
-static void graph_refresh_pool(int trim) {
+static void graph_refresh_pool(unsigned int trim_mask) {
     for (capture_link *l = capture_links; l != NULL; l = l->next) {
         if (l->mode == CU_STREAM_CAPTURE_MODE_GLOBAL || l->thread == graph_thread_id) return;
     }
@@ -724,7 +727,7 @@ static void graph_refresh_pool(int trim) {
         }
         relaxed = 1;
         /* Release unused backing only when admission needs more space. */
-        if (trim && CUDA_FIND_ENTRY(cuda_library_entry, cuDeviceGraphMemTrim) != NULL)
+        if ((trim_mask & (1u << dev)) && CUDA_FIND_ENTRY(cuda_library_entry, cuDeviceGraphMemTrim) != NULL)
             CUDA_OVERRIDE_CALL(cuda_library_entry, cuDeviceGraphMemTrim, dev);
         cuuint64_t reserved;
         if (CUDA_FIND_ENTRY(cuda_library_entry, cuDeviceGetGraphMemAttribute) != NULL &&
@@ -776,12 +779,39 @@ static void graph_update_cache(void) {
     graph_active_dirty = 0;
 }
 
-/** Combine pending demand, live allocations, and retained driver backing. */
-static size_t graph_wanted(int dev) {
+/** Combine cached pending and active graph demand. */
+static size_t graph_logical_wanted(int dev) {
     size_t want = graph_persistent[dev] + graph_active_bytes[dev];
     if (graph_pending_peak[dev] > want) want = graph_pending_peak[dev];
-    if (graph_reserved[dev] > want) want = graph_reserved[dev];
     return want;
+}
+
+/** Include retained driver backing in the quota charge. */
+static size_t graph_wanted(int dev) {
+    size_t want = graph_logical_wanted(dev);
+    return graph_reserved[dev] > want ? graph_reserved[dev] : want;
+}
+
+/** Trim only devices whose maximum refund can cover the quota shortfall. */
+static unsigned int graph_trim_mask(int dev, size_t addon) {
+    CUdevice current = dev;
+    if (current == -1 && cuCtxGetDevice(&current) != CUDA_SUCCESS) return 0;
+    if (current < 0 || current >= CUDA_DEVICE_MAX_COUNT) return 0;
+    pthread_mutex_lock(&graph_mutex);
+    graph_update_cache();
+    size_t logical = graph_logical_wanted(current);
+    size_t refundable = graph_charged[current] > logical ? graph_charged[current] - logical : 0;
+    lock_shrreg();
+    uint64_t limit = get_current_device_memory_limit(current);
+    size_t usage = get_gpu_memory_usage(cuda_to_nvml_map(current));
+    unlock_shrreg();
+    unsigned int mask = 0;
+    if (refundable != 0 && limit != 0 && (usage > limit || addon > limit - usage)) {
+        size_t remaining = usage > refundable ? usage - refundable : 0;
+        if (remaining <= limit && addon <= limit - remaining) mask = 1u << current;
+    }
+    pthread_mutex_unlock(&graph_mutex);
+    return mask;
 }
 
 /** Apply cached graph demand changes under the shared quota lock. */
@@ -811,10 +841,10 @@ static int graph_rebalance(int check) {
     return ret;
 }
 
-static void graph_reclaim(int trim) {
+static void graph_reclaim(unsigned int trim_mask) {
     pthread_mutex_lock(&graph_mutex);
     graph_poll_active();
-    graph_refresh_pool(trim);
+    graph_refresh_pool(trim_mask);
     graph_rebalance(0);
     pthread_mutex_unlock(&graph_mutex);
 }

@@ -428,13 +428,18 @@ static int resolve_graph_add_proc(const char *symbol, void **pfn, int version, c
     *result = v2
         ? CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress_v2, symbol, pfn, version, flags, status)
         : CUDA_OVERRIDE_CALL(cuda_library_entry, cuGetProcAddress, symbol, pfn, version, flags);
-    /* Preserve newer node semantics until their versions are supported. */
-    if (strcmp(symbol, "cuGraphAddNode") == 0 && version > 13050) return 1;
     if (*result == CUDA_SUCCESS && *pfn != NULL &&
         (!v2 || status == NULL || *status == CU_GET_PROC_ADDRESS_SUCCESS)) {
         const char *name = trim ? symbol : (latest || (!current && version >= 13040) ? "cuGraphAddNode_v3"
             : (current || version >= 12030 ? "cuGraphAddNode_v2" : "cuGraphAddNode"));
         void *hook = __dlsym_hook_section(NULL, name);
+        if (strcmp(symbol, "cuGraphAddNode") == 0 && version > 13050 &&
+            (*pfn != CUDA_FIND_ENTRY(cuda_library_entry, cuGraphAddNode_v3) || hook == NULL)) {
+            *pfn = NULL;
+            *result = CUDA_ERROR_NOT_SUPPORTED;
+            if (v2 && status != NULL) *status = CU_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT;
+            return 1;
+        }
         if (hook != NULL) *pfn = hook;
     }
     return 1;

@@ -500,3 +500,15 @@ target_link_options(test_graph_allocation_admission PRIVATE "-Wl,--wrap=calloc")
 
 add_test(NAME cuda_ptsz_wrappers COMMAND test_cuda_ptsz_wrappers)
 set_tests_properties(cuda_ptsz_wrappers PROPERTIES TIMEOUT 10)
+
+if (TARGET vgpu)
+    target_link_libraries(test_graph_persistent_gpu -ldl)
+    foreach(GRAPH_OUTPUT_MODE launch upload instantiate-upload)
+        add_test(NAME graph_persistent_gpu_${GRAPH_OUTPUT_MODE}
+            COMMAND test_graph_persistent_gpu ${GRAPH_OUTPUT_MODE})
+        set_tests_properties(graph_persistent_gpu_${GRAPH_OUTPUT_MODE} PROPERTIES
+            ENVIRONMENT "LIBVGPU=$<TARGET_FILE:vgpu>"
+            SKIP_RETURN_CODE 77
+            TIMEOUT 30)
+    endforeach()
+endif()
