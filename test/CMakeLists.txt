@@ -503,6 +503,7 @@ set_tests_properties(cuda_ptsz_wrappers PROPERTIES TIMEOUT 10)
 
 if (TARGET vgpu)
     target_link_libraries(test_graph_persistent_gpu -ldl)
+    target_compile_definitions(test_graph_persistent_gpu PRIVATE _GNU_SOURCE)
     foreach(GRAPH_OUTPUT_MODE launch upload instantiate-upload)
         add_test(NAME graph_persistent_gpu_${GRAPH_OUTPUT_MODE}
             COMMAND test_graph_persistent_gpu ${GRAPH_OUTPUT_MODE})
