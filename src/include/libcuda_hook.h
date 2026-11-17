@@ -307,6 +307,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuGraphClone),
     CUDA_OVERRIDE_ENUM(cuGraphNodeFindInClone),
     CUDA_OVERRIDE_ENUM(cuGraphNodeGetType),
+    CUDA_OVERRIDE_ENUM(cuGraphMemFreeNodeGetParams),
     CUDA_OVERRIDE_ENUM(cuGraphGetNodes),
     CUDA_OVERRIDE_ENUM(cuGraphGetRootNodes),
     CUDA_OVERRIDE_ENUM(cuGraphGetEdges),

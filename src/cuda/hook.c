@@ -274,6 +274,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuGraphClone"},
     {.name = "cuGraphNodeFindInClone"},
     {.name = "cuGraphNodeGetType"},
+    {.name = "cuGraphMemFreeNodeGetParams"},
     {.name = "cuGraphGetNodes"},
     {.name = "cuGraphGetRootNodes"},
     {.name = "cuGraphGetEdges"},

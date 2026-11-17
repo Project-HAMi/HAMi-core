@@ -21,7 +21,8 @@
 cuda_entry_t cuda_library_entry[CUDA_ENTRY_END];
 static size_t used = 256 * MIB, reserved;
 static uintptr_t serial = 10;
-static int nodes, submissions, instantiations, gpu_done;
+static int nodes, instantiations, gpu_done;
+static _Atomic int submissions;
 static CUresult add_result, submit_result, event_result, pool_result, record_result;
 static _Thread_local CUgraph capturing;
 static _Thread_local cuuint64_t capture_id = 123;
@@ -29,6 +30,13 @@ static _Thread_local CUstreamCaptureMode capturing_mode;
 static _Atomic int global_captures;
 static CUcontext current_ctx = (CUcontext)1, pushed_ctx;
 static struct { CUcontext ctx; cuuint64_t ctx_id; int alive; } events[8192];
+static struct {
+    CUgraph graph, child;
+    CUgraphNodeType type;
+    CUdeviceptr ptr;
+} graph_nodes[8192];
+static CUresult graph_query_result;
+static int graph_node_queries;
 static cuuint64_t context_ids[] = {0, 1, 2};
 static int event_queries, pool_queries, events_created, trim_calls;
 static _Thread_local CUstreamCaptureMode interaction_mode;
@@ -43,7 +51,8 @@ static CUresult driver_exchange_mode(CUstreamCaptureMode *mode) {
 
 static pthread_mutex_t submit_gate = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t submit_cond = PTHREAD_COND_INITIALIZER;
-static int block_submit, submit_entered;
+static _Atomic int block_submit;
+static int submit_entered;
 static int block_sync, sync_entered;
 static CUresult capture_end_result;
 static CUresult capture_begin_result;
@@ -77,13 +86,62 @@ static CUresult driver_add(CUgraphNode *node, CUgraph graph, const CUgraphNode *
     nodes++;
     *node = (CUgraphNode)++serial;
     params->dptr = ++serial * MIB;
+    graph_nodes[(uintptr_t)*node].graph = graph;
+    graph_nodes[(uintptr_t)*node].type = CU_GRAPH_NODE_TYPE_MEM_ALLOC;
     return CUDA_SUCCESS;
 }
 static CUresult driver_free_node(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
                                   size_t ndeps, CUdeviceptr ptr) {
     (void)graph; (void)deps; (void)ndeps; (void)ptr;
     *node = (CUgraphNode)++serial;
+    graph_nodes[serial].graph = graph;
+    graph_nodes[serial].type = CU_GRAPH_NODE_TYPE_MEM_FREE;
+    graph_nodes[serial].ptr = ptr;
     return CUDA_SUCCESS;
+}
+
+/** Return the nodes currently owned by a simulated graph. */
+static CUresult driver_graph_nodes(CUgraph graph, CUgraphNode *nodes_out, size_t *count) {
+    graph_node_queries++;
+    if (graph_query_result != CUDA_SUCCESS) return graph_query_result;
+    size_t found = 0;
+    for (size_t i = 0; i < 8192; i++) {
+        if (graph_nodes[i].graph != graph) continue;
+        if (nodes_out != NULL && found < *count) nodes_out[found] = (CUgraphNode)i;
+        found++;
+    }
+    *count = found;
+    return CUDA_SUCCESS;
+}
+static CUresult driver_node_type(CUgraphNode node, CUgraphNodeType *type) {
+    REQUIRE((uintptr_t)node < 8192); *type = graph_nodes[(uintptr_t)node].type; return CUDA_SUCCESS;
+}
+static CUresult driver_free_params(CUgraphNode node, CUdeviceptr *ptr) {
+    REQUIRE((uintptr_t)node < 8192); *ptr = graph_nodes[(uintptr_t)node].ptr; return CUDA_SUCCESS;
+}
+static CUresult driver_child_graph(CUgraphNode node, CUgraph *graph) {
+    REQUIRE((uintptr_t)node < 8192); *graph = graph_nodes[(uintptr_t)node].child; return CUDA_SUCCESS;
+}
+/** Record generic child and free nodes in the simulated native graph. */
+static CUresult driver_generic_node(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
+                                    const CUgraphEdgeData *edges, size_t count, CUgraphNodeParams *params) {
+    (void)edges;
+    if (add_result != CUDA_SUCCESS) return add_result;
+    if (params->type == CU_GRAPH_NODE_TYPE_MEM_FREE)
+        return driver_free_node(node, graph, deps, count, params->free.dptr);
+    REQUIRE(params->type == CU_GRAPH_NODE_TYPE_GRAPH);
+    *node = (CUgraphNode)++serial;
+    graph_nodes[serial].graph = graph;
+    graph_nodes[serial].type = CU_GRAPH_NODE_TYPE_GRAPH;
+    graph_nodes[serial].child = params->graph.graph;
+    return CUDA_SUCCESS;
+}
+static void setup_graph_queries(void) {
+    cuda_library_entry[OVERRIDE_cuGraphGetNodes].fn_ptr = driver_graph_nodes;
+    cuda_library_entry[OVERRIDE_cuGraphNodeGetType].fn_ptr = driver_node_type;
+    cuda_library_entry[OVERRIDE_cuGraphMemFreeNodeGetParams].fn_ptr = driver_free_params;
+    cuda_library_entry[OVERRIDE_cuGraphChildGraphNodeGetGraph].fn_ptr = driver_child_graph;
+    cuda_library_entry[OVERRIDE_cuGraphAddNode_v2].fn_ptr = driver_generic_node;
 }
 static CUresult driver_instantiate(CUgraphExec *exec, CUgraph graph, cuuint64_t flags) {
     (void)graph; (void)flags; instantiations++;
@@ -119,7 +177,16 @@ static CUresult driver_stream_sync(CUstream stream) {
     (void)stream;
     return driver_context_sync();
 }
-static CUresult driver_destroy(void *handle) { (void)handle; return CUDA_SUCCESS; }
+/** Retire a simulated graph and every child whose ownership it holds. */
+static CUresult driver_destroy(void *handle) {
+    if (handle == NULL) return CUDA_SUCCESS;
+    for (size_t i = 0; i < 8192; i++) {
+        if (graph_nodes[i].graph != handle) continue;
+        if (graph_nodes[i].type == CU_GRAPH_NODE_TYPE_GRAPH) driver_destroy(graph_nodes[i].child);
+        graph_nodes[i].graph = NULL;
+    }
+    return CUDA_SUCCESS;
+}
 /** Create a simulated completion event bound to the current context generation. */
 static CUresult driver_event_create(CUevent *event, unsigned int flags) {
     REQUIRE(flags == CU_EVENT_DISABLE_TIMING);

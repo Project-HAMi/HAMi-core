@@ -136,6 +136,7 @@ static void test_trim_pressure(void) {
 
 /** Exercise pooled quota and pointer lifetimes through production CUDA wrappers. */
 int main(void) {
+    setup_graph_queries();
 #define DRIVER(name, fn) cuda_library_entry[CUDA_OVERRIDE_ENUM(name)].fn_ptr = (void *)(fn)
     DRIVER(cuGraphAddMemAllocNode, driver_add);
     DRIVER(cuGraphAddMemFreeNode, driver_free_node);

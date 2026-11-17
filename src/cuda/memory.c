@@ -643,6 +643,10 @@ static CUresult graph_add_node(cuda_sym_t add, int edges, CUgraphNode *node, CUg
                                 const CUgraphNode *deps, const CUgraphEdgeData *data,
                                 size_t count, CUgraphNodeParams *params) {
     if (add == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+#if CUDA_VERSION >= 13000
+    CUgraph child = params != NULL && params->type == CU_GRAPH_NODE_TYPE_GRAPH &&
+        params->graph.ownership == CU_GRAPH_CHILD_GRAPH_OWNERSHIP_MOVE ? params->graph.graph : NULL;
+#endif
     int charge = params != NULL && params->type == CU_GRAPH_NODE_TYPE_MEM_ALLOC &&
         params->alloc.poolProps.location.type == CU_MEM_LOCATION_TYPE_DEVICE;
     graph_charge_entry *entry = NULL;
@@ -657,6 +661,9 @@ static CUresult graph_add_node(cuda_sym_t add, int edges, CUgraphNode *node, CUg
     graph_alloc_end(entry, res == CUDA_SUCCESS && charge ? params->alloc.dptr : 0, res);
     if (res == CUDA_SUCCESS && params != NULL && params->type == CU_GRAPH_NODE_TYPE_MEM_FREE)
         graph_mark_free(graph, params->free.dptr);
+#if CUDA_VERSION >= 13000
+    if (res == CUDA_SUCCESS && child != NULL) graph_child_moved(graph, child);
+#endif
     return res;
 }
 
