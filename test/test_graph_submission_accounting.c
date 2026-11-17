@@ -1,5 +1,6 @@
 // Copyright 2026 The HAMi Authors.
 #include <stdio.h>
+#include <time.h>
 
 #include "test/graph_accounting_fixture.h"
 
@@ -141,7 +142,7 @@ static void test_stream_fallback(void) {
     REQUIRE(cuGraphLaunch(execs[0], (CUstream)10) == CUDA_SUCCESS);
     REQUIRE(cuGraphLaunch(execs[1], (CUstream)10) == CUDA_SUCCESS);
     REQUIRE(used == 656 * MIB);
-    graph_stream_destroyed((CUstream)10);
+    REQUIRE(cuStreamDestroy_v2((CUstream)10) == CUDA_SUCCESS);
     /* A new stream reusing the same raw handle must not alias queued work. */
     REQUIRE(cuGraphLaunch(execs[2], (CUstream)10) == CUDA_ERROR_OUT_OF_MEMORY);
     gpu_done = 1;
@@ -401,6 +402,63 @@ static void test_external_capture_queries(void) {
     destroy(graph, exec); clean();
 }
 
+static int block_destroy, destroy_entered, reused_ready, reused_done;
+/** Pause native destruction after the handle becomes reusable. */
+static CUresult driver_stream_destroy(CUstream stream) {
+    (void)stream;
+    pthread_mutex_lock(&submit_gate);
+    destroy_entered = 1;
+    pthread_cond_broadcast(&submit_cond);
+    while (block_destroy) pthread_cond_wait(&submit_cond, &submit_gate);
+    pthread_mutex_unlock(&submit_gate);
+    return CUDA_SUCCESS;
+}
+static void *destroy_stream_once(void *unused) {
+    (void)unused;
+    REQUIRE(cuStreamDestroy_v2((CUstream)10) == CUDA_SUCCESS);
+    return NULL;
+}
+static void *submit_reused_stream(void *exec) {
+    pthread_mutex_lock(&submit_gate);
+    reused_ready = 1; pthread_cond_broadcast(&submit_cond);
+    pthread_mutex_unlock(&submit_gate);
+    REQUIRE(cuGraphLaunch(exec, (CUstream)10) == CUDA_SUCCESS);
+    pthread_mutex_lock(&submit_gate);
+    reused_done = 1; pthread_cond_broadcast(&submit_cond);
+    pthread_mutex_unlock(&submit_gate);
+    return NULL;
+}
+
+/** Preserve ordering for a stream handle reused while old destruction is returning. */
+static void test_stream_destroy_race(void) {
+    void *native_id = cuda_library_entry[OVERRIDE_cuStreamGetId].fn_ptr;
+    cuda_library_entry[OVERRIDE_cuStreamGetId].fn_ptr = NULL;
+    CUgraph a = make_graph(), b = make_graph();
+    REQUIRE(add(a, 400, 1, NULL) == CUDA_SUCCESS);
+    REQUIRE(add(b, 400, 1, NULL) == CUDA_SUCCESS);
+    CUgraphExec x = instantiate(a), y = instantiate(b);
+    pthread_t destroying, submitting;
+    block_destroy = 1; destroy_entered = reused_ready = reused_done = 0;
+    REQUIRE(pthread_create(&destroying, NULL, destroy_stream_once, NULL) == 0);
+    pthread_mutex_lock(&submit_gate);
+    while (!destroy_entered) pthread_cond_wait(&submit_cond, &submit_gate);
+    pthread_mutex_unlock(&submit_gate);
+    REQUIRE(pthread_create(&submitting, NULL, submit_reused_stream, x) == 0);
+    pthread_mutex_lock(&submit_gate);
+    while (!reused_ready) pthread_cond_wait(&submit_cond, &submit_gate);
+    struct timespec deadline; clock_gettime(CLOCK_REALTIME, &deadline); deadline.tv_sec++;
+    int waited = 0;
+    while (!reused_done && waited != ETIMEDOUT)
+        waited = pthread_cond_timedwait(&submit_cond, &submit_gate, &deadline);
+    block_destroy = 0; pthread_cond_broadcast(&submit_cond);
+    pthread_mutex_unlock(&submit_gate);
+    REQUIRE(pthread_join(destroying, NULL) == 0 && pthread_join(submitting, NULL) == 0);
+    REQUIRE(cuGraphLaunch(y, (CUstream)10) == CUDA_SUCCESS);
+    REQUIRE(used == 656 * MIB);
+    gpu_done = 1; destroy(a, x); destroy(b, y); clean();
+    cuda_library_entry[OVERRIDE_cuStreamGetId].fn_ptr = native_id;
+}
+
 /** Verify graph submission admission, completion, and synchronization interleavings. */
 int main(void) {
 #define DRIVER(name, fn) cuda_library_entry[CUDA_OVERRIDE_ENUM(name)].fn_ptr = (void *)(fn)
@@ -426,6 +484,7 @@ int main(void) {
     DRIVER(cuDeviceGetCount, driver_device_count);
     DRIVER(cuCtxSynchronize, driver_context_sync);
     DRIVER(cuStreamSynchronize, driver_stream_sync);
+    DRIVER(cuStreamDestroy_v2, driver_stream_destroy);
     DRIVER(cuCtxGetId, driver_context_id);
     DRIVER(cuCtxPushCurrent_v2, driver_push);
     DRIVER(cuCtxPopCurrent_v2, driver_pop);
@@ -443,7 +502,7 @@ int main(void) {
     test_green_context_lifetime();
 #endif
     test_reused_context_handle(); test_record_failure_sync();
-    test_stream_fallback(); test_cached_replay(); test_host_submission_lifetime();
+    test_stream_fallback(); test_stream_destroy_race(); test_cached_replay(); test_host_submission_lifetime();
     for (int context = 0; context < 2; context++)
         for (int pending = 0; pending < 2; pending++) test_sync_submission_race(context, pending);
     puts("PASS: graph overlap, persistent admission, event lifetime, and concurrent synchronization");

@@ -10,9 +10,7 @@ CUresult cuStreamCreate(CUstream *phstream, unsigned int flags){
 /** Destroy a stream and retire its fallback graph-accounting identity on success. */
 CUresult cuStreamDestroy_v2 ( CUstream hStream ){
     LOG_DEBUG("cuStreamDestroy_v2 %p",hStream);
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamDestroy_v2, hStream);
-    if (res == CUDA_SUCCESS) graph_stream_destroyed(hStream);
-    return res;
+    return graph_stream_destroy(hStream);
 }
 
 /** Synchronize a stream and release graph charges covered by the submission snapshot. */

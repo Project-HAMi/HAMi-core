@@ -1419,22 +1419,25 @@ void graph_primary_context_released(CUdevice dev, int reset) {
     if (reset && ctx != NULL) graph_primary_context(dev, ctx);
 }
 
-/** Retire fallback stream identities while keeping queued GPU work charged. */
-void graph_stream_destroyed(CUstream stream) {
-    if (stream == NULL || stream == CU_STREAM_LEGACY || stream == CU_STREAM_PER_THREAD) return;
+/** Serialize stream destruction and identity retirement against graph submission lookup. */
+CUresult graph_stream_destroy(CUstream stream) {
     pthread_mutex_lock(&graph_mutex);
-    uint64_t epoch = ++graph_stream_epoch;
-    for (graph_exec_state *s = graph_active; s != NULL; s = s->active_next) {
-        if (!s->key.native_id && s->key.stream == stream && s->key.epoch == 0) {
-            s->key.epoch = epoch;
-            graph_active_dirty = 1;
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamDestroy_v2, stream);
+    if (res == CUDA_SUCCESS && stream != NULL && stream != CU_STREAM_LEGACY &&
+        stream != CU_STREAM_PER_THREAD) {
+        uint64_t epoch = ++graph_stream_epoch;
+        for (graph_exec_state *s = graph_active; s != NULL; s = s->active_next) {
+            if (!s->key.native_id && s->key.stream == stream && s->key.epoch == 0) {
+                s->key.epoch = epoch;
+                graph_active_dirty = 1;
+            }
+            if (s->pending && !s->saved_key.native_id && s->saved_key.stream == stream &&
+                s->saved_key.epoch == 0) s->saved_key.epoch = epoch;
         }
-        if (s->pending && !s->saved_key.native_id && s->saved_key.stream == stream &&
-            s->saved_key.epoch == 0) s->saved_key.epoch = epoch;
+        graph_rebalance(0);
     }
-    /* Keep queued work charged; its event survives stream destruction. */
-    graph_rebalance(0);
     pthread_mutex_unlock(&graph_mutex);
+    return res;
 }
 
 uint64_t graph_sync_begin(void) {

@@ -116,7 +116,7 @@ cuuint64_t graph_context_id(CUcontext ctx);
 void graph_context_destroyed(CUcontext ctx, cuuint64_t id);
 void graph_primary_context(CUdevice dev, CUcontext ctx);
 void graph_primary_context_released(CUdevice dev, int reset);
-void graph_stream_destroyed(CUstream stream);
+CUresult graph_stream_destroy(CUstream stream);
 uint64_t graph_sync_begin(void);
 void graph_synchronized(CUcontext ctx, CUstream stream, int whole_context,
                         uint64_t submitted);
