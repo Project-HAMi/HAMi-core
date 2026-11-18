@@ -617,8 +617,12 @@ static int acquire_driver_admission(
 
     status = read_u16(response + 6);
     if (memcmp(response, hostpid_magic, sizeof(hostpid_magic)) != 0 ||
-        read_u16(response + 4) != HOSTPID_PROTOCOL_VERSION ||
-        status != HOSTPID_STATUS_OK) {
+        read_u16(response + 4) != HOSTPID_PROTOCOL_VERSION) {
+        hostpid_broker_release_driver_admission(&fd);
+        errno = EPROTO;
+        return -1;
+    }
+    if (status != HOSTPID_STATUS_OK) {
         hostpid_broker_release_driver_admission(&fd);
         errno = status == HOSTPID_STATUS_UNAVAILABLE ? EAGAIN : EPROTO;
         return -1;
@@ -655,7 +659,8 @@ void hostpid_broker_release_driver_admission(int *lease_fd) {
     if (lease_fd == NULL || *lease_fd < 0) {
         return;
     }
-    // close() is a cancellation point; the lease is already off the list.
+    // close() is a cancellation point; take the lease off the list and
+    // close it with cancellation off, so a cancel cannot split the two.
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cancel_state);
     pthread_mutex_lock(&admission_leases_lock);
     for (cursor = &admission_leases; *cursor != NULL;

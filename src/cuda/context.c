@@ -72,7 +72,8 @@ static int primary_context_active(CUdevice dev) {
 /* Another reference stays after this release, so the driver only counts.
  * The count is read before the locks, so two releases at the same time can
  * both look non-final, and a release through a symbol this hook does not
- * see leaves the count too high. Either way one release skips a permit. */
+ * see, or a cuDevicePrimaryCtxReset_v2, leaves the count too high. Either
+ * way one release skips a permit. */
 static int primary_context_release_is_final(CUdevice dev) {
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) return 1;
     return __atomic_load_n(&primary_context_retains[dev], __ATOMIC_RELAXED) <= 1;
@@ -155,6 +156,7 @@ CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
     if (res == CUDA_SUCCESS) {
         unsigned int flags;
         int active;
+        // The device lock is held, so this check and decrement do not race.
         if (dev >= 0 && dev < CUDA_DEVICE_MAX_COUNT &&
             __atomic_load_n(&primary_context_retains[dev], __ATOMIC_RELAXED) > 0)
             __atomic_sub_fetch(&primary_context_retains[dev], 1, __ATOMIC_RELAXED);

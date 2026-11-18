@@ -123,7 +123,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_broker.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
-            _GNU_SOURCE)
+            _GNU_SOURCE HOSTPID_ADMISSION_WAIT_MS=200)
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES

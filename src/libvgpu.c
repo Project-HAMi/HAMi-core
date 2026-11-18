@@ -949,21 +949,29 @@ int driver_admission_enabled(void) {
            hostpid_broker_enabled(getenv("LIBVGPU_DRIVER_ADMISSION"));
 }
 
-// Set while this thread detects its host PID, which can retain and release
-// a primary context under the node-wide fallback lock.
+// Set while this thread detects its host PID. The fallback path holds the
+// node-wide lock and retains and releases a primary context to probe.
 static __thread int in_hostpid_init;
 static int admission_miss_logged;
+// Set after a permit wait times out: a silent broker would stall every
+// later call for the full wait, so this process stops asking.
+static int admission_timed_out;
 
 int driver_admission_acquire(hostpid_driver_admission_operation_t operation) {
     int lease_fd = -1;
 
-    // Never wait for a permit while holding the node-wide fallback lock.
-    if (!driver_admission_enabled() || in_hostpid_init) {
+    // Host PID detection takes no permit, so no thread waits for one while
+    // it holds the node-wide fallback lock.
+    if (!driver_admission_enabled() || in_hostpid_init ||
+        __atomic_load_n(&admission_timed_out, __ATOMIC_RELAXED)) {
         return -1;
     }
     // Admission only smooths bursts, so a missing permit never fails the call.
     if (hostpid_broker_acquire_driver_admission_trusted(operation,
                                                         &lease_fd) != 0) {
+        if (errno == ETIMEDOUT) {
+            __atomic_store_n(&admission_timed_out, 1, __ATOMIC_RELAXED);
+        }
         if (!__atomic_exchange_n(&admission_miss_logged, 1, __ATOMIC_RELAXED)) {
             LOG_WARN("No driver admission permit, calling the driver anyway: %s",
                      strerror(errno));
@@ -1071,6 +1079,7 @@ void childReinitPostInit() {
     reset_lazy_context_sizing();
     reset_primary_context_retains();
     __atomic_store_n(&admission_miss_logged, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&admission_timed_out, 0, __ATOMIC_RELAXED);
     LOG_DEBUG("Reset postInit state after fork");
     post_cuinit_flag = PTHREAD_ONCE_INIT;
     hostpid_flag = PTHREAD_ONCE_INIT;

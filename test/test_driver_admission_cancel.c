@@ -9,8 +9,9 @@
  *
  * It also checks that cuInit skips the permit after one success (until a
  * fork), that retain skips it while the primary context is active, that a
- * non-final release skips it, and that host PID detection under the
- * fallback lock never asks for one.
+ * non-final release skips it, that host PID detection under the fallback
+ * lock never asks for one, that a missing permit warns once per process,
+ * and that after one timed-out wait the process stops asking until a fork.
  */
 #undef NDEBUG
 #include <assert.h>
@@ -337,6 +338,78 @@ static void run_skip_cases(void) {
     assert(waitpid(child, &status, 0) == child);
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
     puts("host PID fallback: no permit under the fallback lock");
+
+    // The broker socket is gone, so every request fails. A process warns
+    // once; a forked child warns once again.
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        FILE *log = tmpfile();
+        char line[256];
+        pid_t grandchild;
+        int warnings = 0;
+
+        assert(log != NULL && dup2(fileno(log), STDERR_FILENO) >= 0);
+        g_log_level = 2;
+        assert(driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_INIT) == -1);
+        assert(driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_INIT) == -1);
+        grandchild = fork();
+        assert(grandchild >= 0);
+        if (grandchild == 0) {
+            driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_INIT);
+            _exit(0);
+        }
+        assert(waitpid(grandchild, &status, 0) == grandchild);
+        rewind(log);
+        while (fgets(line, sizeof(line), log) != NULL) {
+            warnings += strstr(line, "Warn(") != NULL &&
+                        strstr(line, "No driver admission permit") != NULL;
+        }
+        _exit(warnings == 2 ? 0 : 1);
+    }
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    puts("driver admission: missing permit logged once per process");
+
+    // A listener that never accepts is a silent broker: connect and the
+    // request write succeed, the reply never comes.
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        struct sockaddr_un address;
+        int listener = socket(AF_UNIX, SOCK_STREAM, 0);
+        int before;
+        pid_t grandchild;
+
+        assert(listener >= 0);
+        memset(&address, 0, sizeof(address));
+        address.sun_family = AF_UNIX;
+        snprintf(socket_path, sizeof(socket_path),
+                 "/tmp/hami-admission-silent-%d.sock", (int)getpid());
+        strcpy(address.sun_path, socket_path);
+        assert(bind(listener, (struct sockaddr *)&address,
+                    sizeof(address)) == 0);
+        assert(listen(listener, 8) == 0);
+        before = admission_requests;
+        errno = 0;
+        assert(driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_INIT) == -1);
+        assert(errno == ETIMEDOUT && admission_requests == before + 1);
+        // After a timeout the process does not ask again.
+        assert(driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_INIT) == -1);
+        assert(admission_requests == before + 1);
+        grandchild = fork();
+        assert(grandchild >= 0);
+        if (grandchild == 0) {
+            driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_INIT);
+            _exit(admission_requests == before + 2 ? 0 : 1);
+        }
+        assert(waitpid(grandchild, &status, 0) == grandchild);
+        unlink(socket_path);
+        _exit(WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : 1);
+    }
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    puts("driver admission: no request after a timed-out wait until a fork");
 }
 
 int main(void) {
