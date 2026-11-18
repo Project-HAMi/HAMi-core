@@ -110,7 +110,7 @@ rm /tmp/cudevshr.cache
 
 ```bash
 # 构建 Docker 镜像
-docker build . -f=dockerfiles/Dockerfile -t hami-core:dev
+make docker-build
 
 # 配置容器的 GPU 设备和库挂载
 export DEVICE_MOUNTS="--device /dev/nvidia0:/dev/nvidia0 --device /dev/nvidia-uvm:/dev/nvidia-uvm --device /dev/nvidiactl:/dev/nvidiactl"
