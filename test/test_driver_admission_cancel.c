@@ -42,6 +42,11 @@ void load_cuda_libraries(void) {}
 void ensure_initialized(void) {}
 void size_primary_context_lazily(int cudadev) { (void)cudadev; }
 void reset_lazy_context_sizing(void) {}
+void graph_primary_context(CUdevice dev, CUcontext ctx) { (void)dev; (void)ctx; }
+void graph_primary_context_prepare_release(CUdevice dev) { (void)dev; }
+void graph_primary_context_released(CUdevice dev, int reset) {
+    (void)dev; (void)reset;
+}
 int add_gpu_device_memory_usage(int32_t pid, int dev, size_t usage,
                                 int type) {
     (void)pid; (void)dev; (void)usage; (void)type;

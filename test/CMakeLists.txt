@@ -37,6 +37,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
+            OR TEST_TARGET_NAME STREQUAL "test_fork_reinit_leak"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
             OR TEST_TARGET_NAME STREQUAL "test_shrreg_debug"
             OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
@@ -93,6 +94,11 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             # Read a scratch file, never the production /overrideEnv.
             target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
                 ENV_OVERRIDE_FILE=\"${CMAKE_CURRENT_BINARY_DIR}/override_env.test\")
+        elseif (TEST_TARGET_NAME STREQUAL "test_fork_reinit_leak")
+            # A file nothing creates, so no override can move the cache path
+            # this test inspects.
+            target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+                ENV_OVERRIDE_FILE=\"${CMAKE_CURRENT_BINARY_DIR}/override_env.absent\")
         endif()
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
             -ffunction-sections -fdata-sections)
@@ -122,12 +128,20 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections,--wrap=hostpid_broker_acquire_driver_admission_trusted")
-    elseif (TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat")
+    elseif (TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat"
+            OR TEST_TARGET_NAME STREQUAL "test_cuda_ptsz_wrappers")
         add_executable(${TEST_TARGET_NAME}
             ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/memory.c
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/allocator/allocator.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        if (TEST_TARGET_NAME STREQUAL "test_cuda_ptsz_wrappers")
+            target_sources(${TEST_TARGET_NAME} PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/graph.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/stream.c)
+        else()
+            target_sources(${TEST_TARGET_NAME} PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/allocator/allocator.c)
+        endif()
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
             _GNU_SOURCE HOOK_MEMINFO_ENABLE)
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
@@ -136,15 +150,28 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         # pull in unrelated driver/accounting dependencies.
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
-    elseif (TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle")
+    elseif (TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_pool_lifetimes"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_submission_accounting"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_allocation_admission")
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/allocator/allocator.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/graph.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/memory.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE _GNU_SOURCE)
         target_compile_options(${TEST_TARGET_NAME} PRIVATE -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+        if (TEST_TARGET_NAME STREQUAL "test_graph_pool_lifetimes"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_submission_accounting")
+            target_sources(${TEST_TARGET_NAME} PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/context.c)
+        endif()
+        if (TEST_TARGET_NAME STREQUAL "test_graph_submission_accounting")
+            target_sources(${TEST_TARGET_NAME} PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/stream.c)
+        endif()
     elseif (TEST_TARGET_NAME STREQUAL "test_device_total_mem")
         add_executable(${TEST_TARGET_NAME}
             ${TEST_SCRIPT}
@@ -250,7 +277,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
-            LINK_FLAGS "-Wl,--gc-sections")
+            LINK_FLAGS "-Wl,--gc-sections,--wrap=dlopen,--wrap=dlclose")
     elseif (TEST_TARGET_NAME STREQUAL "test_rate_limiter_recent_kernel")
         # Includes the watcher source to reach its static limit state and
         # stubs the driver and shared region, so it needs no GPU.
@@ -275,6 +302,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     if (TEST_SCRIPT MATCHES "test_shared_region_concurrency.c"
             OR TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
+            OR TEST_TARGET_NAME STREQUAL "test_fork_reinit_leak"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_fallback_lock"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
             OR TEST_TARGET_NAME STREQUAL "test_shrreg_debug"
@@ -284,7 +312,9 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_lookup"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_init"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_concurrency"
-            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker")
+            OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_allocation_admission"
+            OR TEST_TARGET_NAME STREQUAL "test_cuda_ptsz_wrappers")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_dlsym_rtld_next")
         target_link_libraries(${TEST_TARGET_NAME}
@@ -294,7 +324,9 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_rate_limiter_recent_kernel"
             OR TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat"
             OR TEST_TARGET_NAME STREQUAL "test_device_total_mem"
-            OR TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle")
+            OR TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_pool_lifetimes"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_submission_accounting")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_sm_limiter_step")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
@@ -358,6 +390,10 @@ set_tests_properties(meminfo_null_out PROPERTIES TIMEOUT 20)
 add_test(NAME fork_child_exit_cleanup
     COMMAND test_fork_child_exit_cleanup)
 set_tests_properties(fork_child_exit_cleanup PROPERTIES TIMEOUT 20)
+
+add_test(NAME fork_reinit_leak
+    COMMAND test_fork_reinit_leak)
+set_tests_properties(fork_reinit_leak PROPERTIES TIMEOUT 20)
 
 add_test(NAME dlsym_rtld_next
     COMMAND test_dlsym_rtld_next)
@@ -478,3 +514,28 @@ set_tests_properties(sm_limiter_step PROPERTIES TIMEOUT 10)
 
 add_test(NAME graph_capture_lifecycle COMMAND test_graph_capture_lifecycle)
 set_tests_properties(graph_capture_lifecycle PROPERTIES TIMEOUT 15)
+
+add_test(NAME graph_pool_lifetimes COMMAND test_graph_pool_lifetimes)
+set_tests_properties(graph_pool_lifetimes PROPERTIES TIMEOUT 15)
+
+add_test(NAME graph_submission_accounting COMMAND test_graph_submission_accounting)
+set_tests_properties(graph_submission_accounting PROPERTIES TIMEOUT 20)
+add_test(NAME graph_allocation_admission COMMAND test_graph_allocation_admission)
+set_tests_properties(graph_allocation_admission PROPERTIES TIMEOUT 15)
+target_link_options(test_graph_allocation_admission PRIVATE "-Wl,--wrap=calloc")
+
+add_test(NAME cuda_ptsz_wrappers COMMAND test_cuda_ptsz_wrappers)
+set_tests_properties(cuda_ptsz_wrappers PROPERTIES TIMEOUT 10)
+
+if (TARGET vgpu)
+    target_link_libraries(test_graph_persistent_gpu -ldl)
+    target_compile_definitions(test_graph_persistent_gpu PRIVATE _GNU_SOURCE)
+    foreach(GRAPH_OUTPUT_MODE launch upload instantiate-upload retired-root context-free)
+        add_test(NAME graph_persistent_gpu_${GRAPH_OUTPUT_MODE}
+            COMMAND test_graph_persistent_gpu ${GRAPH_OUTPUT_MODE})
+        set_tests_properties(graph_persistent_gpu_${GRAPH_OUTPUT_MODE} PROPERTIES
+            ENVIRONMENT "LIBVGPU=$<TARGET_FILE:vgpu>"
+            SKIP_RETURN_CODE 77
+            TIMEOUT 30)
+    endforeach()
+endif()

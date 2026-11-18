@@ -83,6 +83,8 @@ static CUresult native_end(CUstream stream, CUgraph *graph) {
     return end_result;
 }
 
+static CUresult native_device_count(int *count) { *count = 1; return CUDA_SUCCESS; }
+
 /** Return the active context or an injected native query failure. */
 static CUresult native_current(CUcontext *ctx) {
     if (context_result != CUDA_SUCCESS) return context_result;
@@ -250,6 +252,7 @@ static void check_transition_serialization(void) {
 /** Exercise production capture wrappers and allocator transition ordering. */
 int main(void) {
     device_allocasync = &async_list;
+    cuda_library_entry[OVERRIDE_cuDeviceGetCount].fn_ptr = native_device_count;
     cuda_library_entry[OVERRIDE_cuStreamGetCaptureInfo_v3].fn_ptr = native_info;
     cuda_library_entry[OVERRIDE_cuCtxGetCurrent].fn_ptr = native_current;
     cuda_library_entry[OVERRIDE_cuStreamBeginCapture_v2].fn_ptr = native_begin;

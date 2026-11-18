@@ -5,6 +5,14 @@ project(libvgpu)
 enable_language(ASM)
 enable_testing()
 
+# The CUDA and NVML hook tables call through function pointers declared with
+# an empty parameter list. C23, the default of GCC 15 and later, reads () as
+# (void), so pin the dialect the sources are written in. Keep the GNU dialect
+# (gnu11 rather than c11), which is what GCC built them with before.
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS ON)
+
 # Set CUDA_HOME if not defined
 if (NOT DEFINED ENV{CUDA_HOME})
     set(CUDA_HOME /usr/local/cuda)

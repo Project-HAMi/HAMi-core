@@ -132,8 +132,18 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
 }
 #endif
 
-/** Resolve exported CUDA and NVML hooks by symbol name. */
+/** Resolve supported CUDA and NVML hooks by their exported spelling. */
 void* __dlsym_hook_section(void* handle, const char* symbol) {
+    DLSYM_HOOK_FUNC(cuStreamSynchronize_ptsz);
+    DLSYM_HOOK_FUNC(cuMemcpyAsync_ptsz);
+    DLSYM_HOOK_FUNC(cuMemAllocAsync_ptsz);
+    DLSYM_HOOK_FUNC(cuMemFreeAsync_ptsz);
+    DLSYM_HOOK_FUNC(cuMemAllocFromPoolAsync_ptsz);
+    DLSYM_HOOK_FUNC(cuGraphInstantiateWithParams_ptsz);
+    DLSYM_HOOK_FUNC(cuGraphUpload_ptsz);
+    DLSYM_HOOK_FUNC(cuGraphLaunch_ptsz);
+    DLSYM_HOOK_FUNC(cuStreamBeginCapture_v2_ptsz);
+    DLSYM_HOOK_FUNC(cuStreamEndCapture_ptsz);
     int it;
     for (it=0;it<CUDA_ENTRY_END;it++){
         if (strcmp(cuda_library_entry[it].name,symbol) == 0){
@@ -154,11 +164,13 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuCtxCreate_v4);
 #if CUDA_VERSION >= 12040
     DLSYM_HOOK_FUNC(cuGreenCtxCreate);
+    DLSYM_HOOK_FUNC(cuGreenCtxDestroy);
 #endif
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxGetState);
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxRetain);
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxSetFlags_v2);
     DLSYM_HOOK_FUNC(cuDevicePrimaryCtxRelease_v2);
+    DLSYM_HOOK_FUNC(cuDevicePrimaryCtxReset_v2);
     DLSYM_HOOK_FUNC(cuDriverGetVersion);
     DLSYM_HOOK_FUNC(cuDeviceGetTexture1DLinearMaxWidth);
     DLSYM_HOOK_FUNC(cuDeviceSetMemPool);
@@ -228,6 +240,39 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuMemcpyPeer);
     DLSYM_HOOK_FUNC(cuMemcpyPeerAsync);
     DLSYM_HOOK_FUNC(cuMemcpyAsync);
+    DLSYM_HOOK_FUNC(cuMemcpyHtoDAsync_v2_ptsz);
+    DLSYM_HOOK_FUNC(cuMemcpyDtoHAsync_v2_ptsz);
+    DLSYM_HOOK_FUNC(cuMemcpyDtoDAsync_v2_ptsz);
+    DLSYM_HOOK_FUNC(cuMemsetD8Async_ptsz);
+    DLSYM_HOOK_FUNC(cuMemsetD2D8Async_ptsz);
+    DLSYM_HOOK_FUNC(cuMemsetD16Async_ptsz);
+    DLSYM_HOOK_FUNC(cuMemsetD2D16Async_ptsz);
+    DLSYM_HOOK_FUNC(cuMemsetD32Async_ptsz);
+    DLSYM_HOOK_FUNC(cuMemsetD2D32Async_ptsz);
+    DLSYM_HOOK_FUNC(cuLaunchKernel_ptsz);
+    DLSYM_HOOK_FUNC(cuMemcpy2DAsync_v2_ptsz);
+    DLSYM_HOOK_FUNC(cuMemcpy3DAsync_v2_ptsz);
+    DLSYM_HOOK_FUNC(cuMemcpy3DPeerAsync_ptsz);
+    DLSYM_HOOK_FUNC(cuMemcpyPeerAsync_ptsz);
+    DLSYM_HOOK_FUNC(cuMemPrefetchAsync_ptsz);
+    DLSYM_HOOK_FUNC(cuMemPrefetchAsync_v2_ptsz);
+    DLSYM_HOOK_FUNC(cuLaunchCooperativeKernel_ptsz);
+    DLSYM_HOOK_FUNC(cuMemcpy_ptds);
+    DLSYM_HOOK_FUNC(cuMemcpyHtoD_v2_ptds);
+    DLSYM_HOOK_FUNC(cuMemcpyDtoH_v2_ptds);
+    DLSYM_HOOK_FUNC(cuMemcpyDtoD_v2_ptds);
+    DLSYM_HOOK_FUNC(cuMemcpyPeer_ptds);
+    DLSYM_HOOK_FUNC(cuMemcpy2D_v2_ptds);
+    DLSYM_HOOK_FUNC(cuMemcpy2DUnaligned_v2_ptds);
+    DLSYM_HOOK_FUNC(cuMemcpy3D_v2_ptds);
+    DLSYM_HOOK_FUNC(cuMemcpy3DPeer_ptds);
+    DLSYM_HOOK_FUNC(cuMemsetD8_v2_ptds);
+    DLSYM_HOOK_FUNC(cuMemsetD2D8_v2_ptds);
+    DLSYM_HOOK_FUNC(cuMemsetD16_v2_ptds);
+    DLSYM_HOOK_FUNC(cuMemsetD2D16_v2_ptds);
+    DLSYM_HOOK_FUNC(cuMemsetD32_v2_ptds);
+    DLSYM_HOOK_FUNC(cuMemsetD2D32_v2_ptds);
+    DLSYM_HOOK_FUNC(cuLaunchKernelEx_ptsz);
     DLSYM_HOOK_FUNC(cuMemcpyAtoD_v2);
     DLSYM_HOOK_FUNC(cuMemcpyDtoA_v2);
     DLSYM_HOOK_FUNC(cuMemcpyDtoD_v2);
@@ -277,13 +322,15 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuStreamBeginCapture_ptsz);
     DLSYM_HOOK_FUNC(cuStreamBeginCapture_v2);
     DLSYM_HOOK_FUNC(cuStreamEndCapture);
-    DLSYM_HOOK_FUNC(cuStreamEndCapture_ptsz);
     DLSYM_HOOK_FUNC(cuMemUnmap);
     DLSYM_HOOK_FUNC(cuMemRetainAllocationHandle);
     DLSYM_HOOK_FUNC(cuMemImportFromShareableHandle);
     DLSYM_HOOK_FUNC(cuMemAllocAsync);
     DLSYM_HOOK_FUNC(cuMemFreeAsync);
     DLSYM_HOOK_FUNC(cuGraphAddMemAllocNode);
+    DLSYM_HOOK_FUNC(cuGraphAddNode);
+    DLSYM_HOOK_FUNC(cuGraphAddNode_v2);
+    DLSYM_HOOK_FUNC(cuGraphAddNode_v3);
     DLSYM_HOOK_FUNC(cuGraphAddMemFreeNode);
     // memory ops
     DLSYM_HOOK_FUNC(cuMemHostGetDevicePointer_v2);
@@ -377,6 +424,7 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuGraphLaunch);
     DLSYM_HOOK_FUNC(cuGraphExecDestroy);
     DLSYM_HOOK_FUNC(cuGraphDestroy);
+    DLSYM_HOOK_FUNC(cuDeviceGraphMemTrim);
 #ifdef HOOK_MEMINFO_ENABLE
     DLSYM_HOOK_FUNC(cuMemGetInfo_v2);
 #endif
