@@ -953,9 +953,10 @@ int driver_admission_enabled(void) {
 // node-wide lock and retains and releases a primary context to probe.
 static __thread int in_hostpid_init;
 static int admission_miss_logged;
-// Set after the broker takes a request and never answers. A silent broker
-// would stall every later call for the full wait, so this process stops
-// asking for the rest of its life; a forked child asks again.
+// Set after the broker takes a request and sends no reply within the wait
+// (a silent broker, or a queue longer than the wait). Each later call would
+// wait the full time again, so this process stops asking for the rest of
+// its life; a forked child asks again.
 static int admission_timed_out;
 
 int driver_admission_acquire(hostpid_driver_admission_operation_t operation) {
@@ -981,7 +982,6 @@ int driver_admission_acquire(hostpid_driver_admission_operation_t operation) {
         } else {
             LOG_DEBUG("No driver admission permit: %s", strerror(saved_errno));
         }
-        errno = saved_errno;
         return -1;
     }
     return lease_fd;

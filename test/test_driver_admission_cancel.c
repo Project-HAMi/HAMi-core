@@ -382,6 +382,8 @@ static void run_skip_cases(void) {
         int before;
         pid_t grandchild;
 
+        // alarm() does not survive fork; do not hang on the default wait.
+        alarm(10);
         assert(listener >= 0);
         assert(mkdtemp(directory) != NULL);
         memset(&address, 0, sizeof(address));

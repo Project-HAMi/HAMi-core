@@ -31,7 +31,8 @@ typedef enum {
  * closes it. Returns -1 with errno and *lease_fd set to -1 on failure; EAGAIN
  * means the broker is busy: admission off, no free handler, or connect and
  * the request write missed the 500 ms deadline. ETIMEDOUT means the broker
- * took the request but sent no reply within HOSTPID_ADMISSION_WAIT_MS.
+ * took the request but sent no reply within HOSTPID_ADMISSION_WAIT_MS (a
+ * silent broker, or a queue longer than the wait).
  */
 int hostpid_broker_acquire_driver_admission(
     const char *socket_path, hostpid_driver_admission_operation_t operation,
