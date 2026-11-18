@@ -264,7 +264,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/hostpid_broker.c)
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
-            _GNU_SOURCE HOSTPID_TIMEOUT_MS=100 HOSTPID_BROKER_TESTING)
+            _GNU_SOURCE HOSTPID_TIMEOUT_MS=100 HOSTPID_ADMISSION_WAIT_MS=1000
+            HOSTPID_BROKER_TESTING)
     elseif (TEST_TARGET_NAME STREQUAL "test_cuda_version_map")
         # Links the production resolver and stubs __dlsym_hook_section, so it
         # needs no driver and no GPU.

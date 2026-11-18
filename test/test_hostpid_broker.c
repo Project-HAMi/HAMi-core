@@ -320,7 +320,16 @@ static void serve_admission_partial_response(int connection) {
     write_all(connection, response, 5);
 }
 
-// A permit can come long after the 100 ms test deadline.
+// A broker that takes the request and never answers. The client must give
+// up after the 1 s permit wait and close the socket.
+static void serve_admission_silent(int connection) {
+    unsigned char byte;
+
+    read_request_command(connection, 2);
+    assert(read(connection, &byte, 1) == 0);
+}
+
+// A permit can come long after the 100 ms test deadline, within the wait.
 static void serve_admission_late(int connection) {
     const struct timespec delay = {.tv_sec = 0, .tv_nsec = 300000000L};
 
@@ -396,6 +405,8 @@ static void test_driver_admission_protocol(void) {
     admission_command = 2;
     run_admission_case(serve_admission_late, HOSTPID_DRIVER_ADMISSION_INIT,
                        0, 0);
+    run_admission_case(serve_admission_silent, HOSTPID_DRIVER_ADMISSION_INIT,
+                       -1, ETIMEDOUT);
     admission_status = 2;
     run_admission_case(serve_admission, HOSTPID_DRIVER_ADMISSION_INIT,
                        -1, EAGAIN);

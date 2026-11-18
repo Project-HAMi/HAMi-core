@@ -8,7 +8,9 @@
  * cancellation point, so the cancel lands inside the driver call.
  *
  * It also checks that cuInit skips the permit after one success (until a
- * fork) and that retain skips it while the primary context is active.
+ * fork), that retain skips it while the primary context is active, that a
+ * non-final release skips it, and that host PID detection under the
+ * fallback lock never asks for one.
  */
 #undef NDEBUG
 #include <assert.h>
@@ -73,11 +75,29 @@ int rm_gpu_device_memory_usage(int32_t pid, int dev, size_t usage, int type) {
 }
 
 /* postInit and host PID dependencies (cuInit and ensure_hostpid reach them). */
+/* fallback_mode makes host PID detection take the fallback path, where
+ * set_task_pid retains and releases a primary context under the lock. */
+static volatile int fallback_mode;
+static volatile int fallback_lock_held;
+static volatile int fallback_probes;
+
 void allocator_init(void) {}
 void print_all(void) {}
 int map_cuda_visible_devices(void) { return 0; }
-nvmlReturn_t set_task_pid(void) { return NVML_SUCCESS; }
-nvmlReturn_t set_task_pid_from_broker(void) { return NVML_SUCCESS; }
+nvmlReturn_t set_task_pid(void) {
+    CUcontext context;
+
+    if (fallback_mode) {
+        assert(fallback_lock_held);
+        assert(cuDevicePrimaryCtxRetain(&context, 0) == CUDA_SUCCESS);
+        assert(cuDevicePrimaryCtxRelease_v2(0) == CUDA_SUCCESS);
+        fallback_probes++;
+    }
+    return NVML_SUCCESS;
+}
+nvmlReturn_t set_task_pid_from_broker(void) {
+    return fallback_mode ? NVML_ERROR_UNKNOWN : NVML_SUCCESS;
+}
 int lock_postinit(void) { return 1; }
 void unlock_postinit(void) {}
 int set_env_utilization_switch(void) { return 0; }
@@ -85,13 +105,20 @@ void init_utilization_watcher(void) {}
 int hostpid_fallback_lock_deadline_after_ms(struct timespec *deadline,
                                            unsigned int timeout_ms) {
     (void)deadline; (void)timeout_ms;
-    return -1;
+    return fallback_mode ? 0 : -1;
 }
 int hostpid_fallback_lock_acquire_until(const struct timespec *deadline) {
     (void)deadline;
-    return -1;
+    if (!fallback_mode) {
+        return -1;
+    }
+    fallback_lock_held = 1;
+    return 0;
 }
-int hostpid_fallback_lock_release(void) { return 0; }
+int hostpid_fallback_lock_release(void) {
+    fallback_lock_held = 0;
+    return 0;
+}
 void hostpid_fallback_lock_after_fork(void) {}
 
 static char socket_path[PATH_MAX];
@@ -237,8 +264,10 @@ static void expect_no_permit(int operation) {
 
     if (operation == HOSTPID_DRIVER_ADMISSION_INIT) {
         assert(cuInit(0) == CUDA_SUCCESS);
-    } else {
+    } else if (operation == HOSTPID_DRIVER_ADMISSION_RETAIN) {
         assert(cuDevicePrimaryCtxRetain(&context, 0) == CUDA_SUCCESS);
+    } else {
+        assert(cuDevicePrimaryCtxRelease_v2(0) == CUDA_SUCCESS);
     }
     assert(admission_requests == before);
 }
@@ -269,8 +298,45 @@ static void run_skip_cases(void) {
     // The retain cases in main ran with an inactive context and took one.
     primary_active = 1;
     expect_no_permit(HOSTPID_DRIVER_ADMISSION_RETAIN);
-    primary_active = 0;
     puts("cuDevicePrimaryCtxRetain: no permit while the context is active");
+
+    // Two references: the first release only counts down, the last one
+    // can destroy the context and takes a permit.
+    expect_no_permit(HOSTPID_DRIVER_ADMISSION_RETAIN);
+
+    // A forked child holds none of the parent's references, so its first
+    // release counts as final and asks for a permit.
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        int before = admission_requests;
+
+        cuDevicePrimaryCtxRelease_v2(0);
+        _exit(admission_requests == before + 1 ? 0 : 1);
+    }
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+
+    expect_no_permit(HOSTPID_DRIVER_ADMISSION_RELEASE);
+    primary_active = 0;
+    run_case(HOSTPID_DRIVER_ADMISSION_RELEASE, 0, 0);
+    puts("cuDevicePrimaryCtxRelease_v2: no permit while a reference stays");
+
+    // Host PID detection runs again in a forked child. On the fallback path
+    // it retains and releases under the fallback lock without a permit.
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        int before = admission_requests;
+
+        fallback_mode = 1;
+        ensure_hostpid();
+        _exit(fallback_probes == 1 && !fallback_lock_held &&
+              admission_requests == before ? 0 : 1);
+    }
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    puts("host PID fallback: no permit under the fallback lock");
 }
 
 int main(void) {

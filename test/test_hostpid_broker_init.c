@@ -133,6 +133,9 @@ void hostpid_fallback_lock_after_fork(void) {
 void reset_lazy_context_sizing(void) {
 }
 
+void reset_primary_context_retains(void) {
+}
+
 static int trusted_admission_calls;
 
 /* Stands in for a host with no broker, whatever runs on this machine. */

@@ -949,17 +949,27 @@ int driver_admission_enabled(void) {
            hostpid_broker_enabled(getenv("LIBVGPU_DRIVER_ADMISSION"));
 }
 
+// Set while this thread detects its host PID, which can retain and release
+// a primary context under the node-wide fallback lock.
+static __thread int in_hostpid_init;
+static int admission_miss_logged;
+
 int driver_admission_acquire(hostpid_driver_admission_operation_t operation) {
     int lease_fd = -1;
 
-    if (!driver_admission_enabled()) {
+    // Never wait for a permit while holding the node-wide fallback lock.
+    if (!driver_admission_enabled() || in_hostpid_init) {
         return -1;
     }
     // Admission only smooths bursts, so a missing permit never fails the call.
     if (hostpid_broker_acquire_driver_admission_trusted(operation,
                                                         &lease_fd) != 0) {
-        LOG_WARN("No driver admission permit, calling the driver anyway: %s",
-                 strerror(errno));
+        if (!__atomic_exchange_n(&admission_miss_logged, 1, __ATOMIC_RELAXED)) {
+            LOG_WARN("No driver admission permit, calling the driver anyway: %s",
+                     strerror(errno));
+        } else {
+            LOG_DEBUG("No driver admission permit: %s", strerror(errno));
+        }
         return -1;
     }
     return lease_fd;
@@ -1059,6 +1069,8 @@ void childReinitPostInit() {
     hostpid_broker_admission_fork_child();
     hostpid_fallback_lock_after_fork();
     reset_lazy_context_sizing();
+    reset_primary_context_retains();
+    __atomic_store_n(&admission_miss_logged, 0, __ATOMIC_RELAXED);
     LOG_DEBUG("Reset postInit state after fork");
     post_cuinit_flag = PTHREAD_ONCE_INIT;
     hostpid_flag = PTHREAD_ONCE_INIT;
@@ -1072,8 +1084,6 @@ void ensure_post_init() {
 
 /* hostpidInit() retains a primary context through our own hook, which asks for
  * host PID detection again: skip that re-entry on this thread. */
-static __thread int in_hostpid_init;
-
 void ensure_hostpid() {
     if (in_hostpid_init) return;
     in_hostpid_init = 1;

@@ -51,6 +51,7 @@ nvmlReturn_t set_task_pid();
 nvmlReturn_t set_task_pid_from_broker(void);
 void size_primary_context_lazily(int cudadev);
 void reset_lazy_context_sizing(void);
+void reset_primary_context_retains(void);
 int map_cuda_visible_devices();
 void ensure_post_init();
 void ensure_hostpid();

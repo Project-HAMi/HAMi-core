@@ -38,6 +38,13 @@ enum {
 #define HOSTPID_TIMEOUT_MS 500
 #endif
 
+// How long a client waits in the broker queue for a permit before the driver
+// call goes ahead anyway. A queued request can wait behind several 60 s
+// leases under a burst, so this bounds a silent broker, not a long queue.
+#ifndef HOSTPID_ADMISSION_WAIT_MS
+#define HOSTPID_ADMISSION_WAIT_MS 600000
+#endif
+
 static const unsigned char hostpid_magic[4] = {'H', 'P', 'I', 'D'};
 
 // Open admission sockets, so a forked child can close its copies and the
@@ -252,47 +259,6 @@ static int read_before_deadline(int fd, unsigned char *buffer, size_t length,
         return -1;
     }
     return remaining_ms(deadline) < 0 ? -1 : 0;
-}
-
-// An admission request waits in the broker queue for as long as it takes.
-static int read_without_deadline(int fd, unsigned char *buffer,
-                                 size_t length) {
-    while (length > 0) {
-        struct pollfd descriptor = {
-            .fd = fd,
-            .events = POLLIN,
-        };
-        ssize_t received = recv(fd, buffer, length, MSG_DONTWAIT);
-
-        if (received > 0) {
-            buffer += received;
-            length -= (size_t)received;
-            continue;
-        }
-        if (received < 0 && errno == EINTR) {
-            continue;
-        }
-        if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            int result;
-
-            do {
-                result = poll(&descriptor, 1, -1);
-            } while (result < 0 && errno == EINTR);
-            if (result < 0) {
-                return -1;
-            }
-            if ((descriptor.revents & POLLNVAL) != 0) {
-                errno = EBADF;
-                return -1;
-            }
-            continue;
-        }
-        if (received == 0) {
-            errno = ECONNRESET;
-        }
-        return -1;
-    }
-    return 0;
 }
 
 static uint16_t read_u16(const unsigned char *buffer) {
@@ -573,6 +539,7 @@ static int acquire_driver_admission(
     struct sockaddr_un address;
     socklen_t address_length;
     struct timespec deadline;
+    struct timespec wait_deadline;
     admission_lease_t *lease;
     uint16_t status;
     int fd;
@@ -636,7 +603,9 @@ static int acquire_driver_admission(
     if (connect_before_deadline(fd, &address, address_length, &deadline) != 0 ||
         (verify_peer && verify_peer_uid(fd, 0) != 0) ||
         write_before_deadline(fd, request, sizeof(request), &deadline) != 0 ||
-        read_without_deadline(fd, response, sizeof(response)) != 0) {
+        deadline_after_ms(&wait_deadline, HOSTPID_ADMISSION_WAIT_MS) != 0 ||
+        read_before_deadline(fd, response, sizeof(response),
+                             &wait_deadline) != 0) {
         result = -1;
     }
     saved_errno = errno;
