@@ -356,8 +356,8 @@ static void run_skip_cases(void) {
         grandchild = fork();
         assert(grandchild >= 0);
         if (grandchild == 0) {
-            driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_INIT);
-            _exit(0);
+            _exit(driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_INIT) == -1
+                      ? 0 : 1);
         }
         assert(waitpid(grandchild, &status, 0) == grandchild);
         rewind(log);
@@ -377,15 +377,17 @@ static void run_skip_cases(void) {
     assert(child >= 0);
     if (child == 0) {
         struct sockaddr_un address;
+        char directory[] = "/tmp/hami-admission-silent-XXXXXX";
         int listener = socket(AF_UNIX, SOCK_STREAM, 0);
         int before;
         pid_t grandchild;
 
         assert(listener >= 0);
+        assert(mkdtemp(directory) != NULL);
         memset(&address, 0, sizeof(address));
         address.sun_family = AF_UNIX;
-        snprintf(socket_path, sizeof(socket_path),
-                 "/tmp/hami-admission-silent-%d.sock", (int)getpid());
+        snprintf(socket_path, sizeof(socket_path), "%s/broker.sock",
+                 directory);
         strcpy(address.sun_path, socket_path);
         assert(bind(listener, (struct sockaddr *)&address,
                     sizeof(address)) == 0);
@@ -404,7 +406,7 @@ static void run_skip_cases(void) {
             _exit(admission_requests == before + 2 ? 0 : 1);
         }
         assert(waitpid(grandchild, &status, 0) == grandchild);
-        unlink(socket_path);
+        assert(unlink(socket_path) == 0 && rmdir(directory) == 0);
         _exit(WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : 1);
     }
     assert(waitpid(child, &status, 0) == child);

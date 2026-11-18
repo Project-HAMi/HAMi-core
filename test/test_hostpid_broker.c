@@ -307,7 +307,8 @@ static void serve_admission_bad_magic(int connection) {
     unsigned char response[RESPONSE_SIZE];
 
     read_request_command(connection, 2);
-    make_response(response, 1, 0, 0);
+    // A corrupt reply is EPROTO even when its status bytes say unavailable.
+    make_response(response, 1, 2, 0);
     response[0] = 'B';
     write_all(connection, response, sizeof(response));
 }
@@ -649,6 +650,28 @@ static void test_full_accept_queue_timeout(void) {
     puts("full accept queue times out under the original deadline");
 }
 
+/* A full accept queue is a busy broker, not a silent one. */
+static void test_full_accept_queue_admission_busy(void) {
+    char directory[PATH_MAX];
+    char socket_path[PATH_MAX];
+    int lease_fd = 99;
+    int listener = make_listener(socket_path, sizeof(socket_path),
+                                 directory, sizeof(directory));
+    int queued = fill_accept_queue(listener, socket_path);
+
+    errno = 0;
+    assert(hostpid_broker_acquire_driver_admission(
+               socket_path, HOSTPID_DRIVER_ADMISSION_INIT, &lease_fd) == -1);
+    assert(errno == EAGAIN);
+    assert(lease_fd == -1);
+    assert_retry_socket_closed();
+    close(queued);
+    close(listener);
+    assert(unlink(socket_path) == 0);
+    assert(rmdir(directory) == 0);
+    puts("full accept queue makes admission report a busy broker");
+}
+
 static void test_full_accept_queue_recovers(void) {
     char directory[PATH_MAX];
     char socket_path[PATH_MAX];
@@ -934,6 +957,7 @@ int main(void) {
                           hostpid_broker_admission_fork_child) == 0);
 #if defined(__linux__) && defined(HOSTPID_BROKER_TESTING)
     test_full_accept_queue_timeout();
+    test_full_accept_queue_admission_busy();
     test_full_accept_queue_recovers();
     test_cancelled_connect_retry();
 #else

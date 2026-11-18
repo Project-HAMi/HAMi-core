@@ -602,10 +602,17 @@ static int acquire_driver_admission(
     result = 0;
     if (connect_before_deadline(fd, &address, address_length, &deadline) != 0 ||
         (verify_peer && verify_peer_uid(fd, 0) != 0) ||
-        write_before_deadline(fd, request, sizeof(request), &deadline) != 0 ||
-        deadline_after_ms(&wait_deadline, HOSTPID_ADMISSION_WAIT_MS) != 0 ||
-        read_before_deadline(fd, response, sizeof(response),
-                             &wait_deadline) != 0) {
+        write_before_deadline(fd, request, sizeof(request), &deadline) != 0) {
+        // A full accept queue or a slow write means a busy broker. Only a
+        // broker that never answers the request reports ETIMEDOUT.
+        if (errno == ETIMEDOUT) {
+            errno = EAGAIN;
+        }
+        result = -1;
+    } else if (deadline_after_ms(&wait_deadline,
+                                 HOSTPID_ADMISSION_WAIT_MS) != 0 ||
+               read_before_deadline(fd, response, sizeof(response),
+                                    &wait_deadline) != 0) {
         result = -1;
     }
     saved_errno = errno;

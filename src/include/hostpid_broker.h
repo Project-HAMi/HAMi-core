@@ -29,9 +29,9 @@ typedef enum {
 /* Waits in the broker queue for one driver admission permit. On success
  * *lease_fd holds the permit until hostpid_broker_release_driver_admission
  * closes it. Returns -1 with errno and *lease_fd set to -1 on failure; EAGAIN
- * means the broker has admission off or no free handler. Connect and the
- * request write are bounded by the 500 ms deadline; the wait for the permit
- * is bounded by HOSTPID_ADMISSION_WAIT_MS (ETIMEDOUT).
+ * means the broker is busy: admission off, no free handler, or connect and
+ * the request write missed the 500 ms deadline. ETIMEDOUT means the broker
+ * took the request but sent no reply within HOSTPID_ADMISSION_WAIT_MS.
  */
 int hostpid_broker_acquire_driver_admission(
     const char *socket_path, hostpid_driver_admission_operation_t operation,
