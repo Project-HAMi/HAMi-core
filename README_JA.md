@@ -110,7 +110,7 @@ rm /tmp/cudevshr.cache
 
 ```bash
 # Dockerイメージのビルド
-docker build . -f=dockerfiles/Dockerfile -t hami-core:dev
+make docker-build
 
 # コンテナ用のGPUデバイスとライブラリのマウントを設定
 export DEVICE_MOUNTS="--device /dev/nvidia0:/dev/nvidia0 --device /dev/nvidia-uvm:/dev/nvidia-uvm --device /dev/nvidiactl:/dev/nvidiactl"

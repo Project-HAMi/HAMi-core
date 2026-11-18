@@ -2,8 +2,9 @@
 
 current_dir := $(dir $(abspath $(firstword $(MAKEFILE_LIST))))
 
-# Keep in sync with dockerfiles/Dockerfile and Project-HAMi/HAMi's NVIDIA_IMAGE.
-CUDA_IMAGE ?= nvidia/cuda:13.3.0-cudnn-devel-ubi8@sha256:e5b2b971730b6d0defd6d1bd7697630e0e599c359190cc4351e3032134e7b401
+# Derived from dockerfiles/Dockerfile (kept in sync with Project-HAMi/HAMi's NVIDIA_IMAGE).
+CUDA_IMAGE ?= $(shell awk '/^FROM / {print $$2; exit}' $(current_dir)dockerfiles/Dockerfile)
+DOCKER_IMAGE ?= hami-core:dev
 
 build:
 	sh ./build.sh
@@ -22,6 +23,10 @@ build-in-docker:
            ldconfig && \
            ctest --test-dir /libvgpu/build --output-on-failure --no-tests=error"
 .PHONY: build-in-docker
+
+docker-build:
+	docker build -f $(current_dir)dockerfiles/Dockerfile -t $(DOCKER_IMAGE) $(current_dir)
+.PHONY: docker-build
 
 check-cuda-hook-consistency:
 	python3 hack/check_cuda_hook_consistency.py
