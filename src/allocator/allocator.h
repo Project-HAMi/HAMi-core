@@ -94,6 +94,15 @@ int oom_check(const int dev,size_t addon);
 int reserve_device_memory(CUdevice dev, size_t size);
 void release_device_memory(CUdevice dev, size_t size);
 
+/* Mark a hook that changes device memory or its accounting. Module loads wait
+ * for these to finish before sampling memory. */
+int memory_op_begin(void);
+void memory_op_end(int *unused);
+#define MEMORY_OP_SCOPE \
+    int memory_op_ __attribute__((cleanup(memory_op_end), unused)) = memory_op_begin()
+/* Run fn with no memory hook in flight in this process; -1 if called from one. */
+int with_memory_settled(int (*fn)(void *), void *arg);
+
 /* Reserve graph demand before native mutation and retain charges for graph/exec
  * lifetimes and persistent outputs until their pointers are freed. */
 typedef struct graph_charge_entry graph_charge_entry;

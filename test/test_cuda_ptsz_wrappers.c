@@ -37,6 +37,9 @@ static CUresult record_stream(CUstream stream) {
     seen_stream = stream; calls++; return native_result;
 }
 
+int memory_op_begin(void) { return 0; }
+void memory_op_end(int *unused) { (void)unused; }
+
 int allocate_async_raw(CUdeviceptr *ptr, size_t size, CUstream stream) {
     REQUIRE(size == 32); *ptr = 101; return record_stream(stream);
 }

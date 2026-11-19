@@ -41,6 +41,7 @@ CUresult cuMemoryAllocate(CUdeviceptr* dptr, size_t bytesize, void* data) {
 }
 
 CUresult cuMemAlloc_v2(CUdeviceptr* dptr, size_t bytesize) {
+    MEMORY_OP_SCOPE;
     LOG_INFO("into cuMemAllocing_v2 dptr=%p bytesize=%ld",dptr,bytesize);
     ENSURE_RUNNING();
     CUresult res = allocate_raw(dptr,bytesize);
@@ -65,6 +66,7 @@ CUresult cuMemAllocHost_v2(void** hptr, size_t bytesize) {
 }
 
 CUresult cuMemAllocManaged(CUdeviceptr* dptr, size_t bytesize, unsigned int flags) {
+    MEMORY_OP_SCOPE;
     LOG_DEBUG("cuMemAllocManaged dptr=%p bytesize=%ld",dptr,bytesize);
     ENSURE_RUNNING();
     CUdevice dev;
@@ -87,6 +89,7 @@ CUresult cuMemAllocManaged(CUdeviceptr* dptr, size_t bytesize, unsigned int flag
 
 CUresult cuMemAllocPitch_v2(CUdeviceptr* dptr, size_t* pPitch, size_t WidthInBytes, 
                                       size_t Height, unsigned int ElementSizeBytes) {
+    MEMORY_OP_SCOPE;
     LOG_DEBUG("cuMemAllocPitch_v2 dptr=%p (%ld,%ld)",dptr,WidthInBytes,Height);
     size_t guess_pitch = (ElementSizeBytes == 0 || WidthInBytes == 0) ? 0 :
         (((WidthInBytes - 1) / ElementSizeBytes) + 1) * ElementSizeBytes;
@@ -128,6 +131,7 @@ CUresult cuMemAllocPitch_v2(CUdeviceptr* dptr, size_t* pPitch, size_t WidthInByt
 }
 
 CUresult cuMemFree_v2(CUdeviceptr dptr) {
+    MEMORY_OP_SCOPE;
     LOG_DEBUG("cuMemFree_v2 dptr=%llx",dptr);
     if (dptr == 0) {  // NULL
         return CUDA_SUCCESS;
@@ -523,6 +527,7 @@ CUresult cuMemAddressReserve(CUdeviceptr* ptr, size_t size,
 }
 
 CUresult cuMemCreate ( CUmemGenericAllocationHandle* handle, size_t size, const CUmemAllocationProp* prop, unsigned long long flags ) {
+    MEMORY_OP_SCOPE;
     LOG_INFO("cuMemCreate:%lld:%d", size, prop->location.id);
     ENSURE_RUNNING();
     CUdevice dev;
@@ -555,6 +560,7 @@ CUresult cuMemCreate ( CUmemGenericAllocationHandle* handle, size_t size, const 
 }
 
 CUresult cuMemRelease(CUmemGenericAllocationHandle handle) {
+    MEMORY_OP_SCOPE;
     LOG_INFO("cuMemRelease:%llx", handle);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemRelease, handle);
     if (res == CUDA_SUCCESS) {
@@ -564,6 +570,7 @@ CUresult cuMemRelease(CUmemGenericAllocationHandle handle) {
 }
 
 CUresult cuMemMap( CUdeviceptr ptr, size_t size, size_t offset, CUmemGenericAllocationHandle handle, unsigned long long flags ) {
+    MEMORY_OP_SCOPE;
     LOG_INFO("cuMemMap:%lld(%llx,%llx)", size, ptr, offset);
     vmm_map_entry *m = NULL;
     if (vmm_map_begin(handle, &m) != 0) {
@@ -575,6 +582,7 @@ CUresult cuMemMap( CUdeviceptr ptr, size_t size, size_t offset, CUmemGenericAllo
 }
 
 CUresult cuMemUnmap(CUdeviceptr ptr, size_t size) {
+    MEMORY_OP_SCOPE;
     LOG_INFO("cuMemUnmap:%lld(%llx)", size, ptr);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemUnmap, ptr, size);
     if (res == CUDA_SUCCESS) {
@@ -601,11 +609,13 @@ CUresult cuMemImportFromShareableHandle(CUmemGenericAllocationHandle* handle,
 }
 
 CUresult cuMemAllocAsync(CUdeviceptr *dptr, size_t bytesize, CUstream hStream) {
+    MEMORY_OP_SCOPE;
     LOG_DEBUG("cuMemAllocAsync:%ld",bytesize);
     return allocate_async_raw(dptr,bytesize,hStream);
 }
 
 CUresult cuMemFreeAsync(CUdeviceptr dptr, CUstream hStream) {
+    MEMORY_OP_SCOPE;
     LOG_DEBUG("cuMemFreeAsync dptr=%llx",dptr);
     if (dptr == 0) {  // NULL
         return CUDA_SUCCESS;
@@ -713,6 +723,7 @@ CUresult cuMemHostGetFlags(unsigned int *pFlags, void *p){
 }
 
 CUresult cuMemPoolTrimTo(CUmemoryPool pool, size_t minBytesToKeep){
+    MEMORY_OP_SCOPE;
     LOG_DEBUG("cuMemPoolTrimTo");
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemPoolTrimTo,pool,minBytesToKeep);
 }
@@ -749,6 +760,7 @@ CUresult cuMemPoolDestroy(CUmemoryPool pool) {
 }
 
 CUresult cuMemAllocFromPoolAsync(CUdeviceptr *dptr, size_t bytesize, CUmemoryPool pool, CUstream hStream) {
+    MEMORY_OP_SCOPE;
     LOG_DEBUG("cuMemAllocFromPoolAsync:%ld", bytesize);
     return allocate_from_pool_async_raw(dptr, bytesize, pool, hStream);
 }

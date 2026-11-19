@@ -1,3 +1,4 @@
+#include "allocator/allocator.h"
 #include "include/libcuda_hook.h"
 #include "include/libvgpu.h"
 #include "include/memory_limit.h"
@@ -31,7 +32,7 @@ static pthread_mutex_t module_lock = PTHREAD_MUTEX_INITIALIZER;
 static module_charge_t *module_charges;
 
 /** Device memory of this process that HAMi has not charged: what NVML reports
- *  for the process minus its allocations. */
+ *  for the process minus its allocations. Only run while none is in flight. */
 static int sample_untracked(void *arg) {
     module_sample_t *s = arg;
     uint64_t used = 0, data = 0;
@@ -49,7 +50,7 @@ static int sample_untracked(void *arg) {
 static int module_load_begin(module_sample_t *before) {
     pthread_mutex_lock(&module_lock);
     if (cuCtxGetDevice(&before->dev) != CUDA_SUCCESS ||
-        sample_untracked(before) != 0) {
+        with_memory_settled(sample_untracked, before) != 0) {
         LOG_WARN("module load not measured, its memory stays uncharged");
         return -1;
     }
@@ -66,7 +67,7 @@ static CUresult module_load_end(CUresult res, CUmodule *module, int measured,
     if (res != CUDA_SUCCESS || measured != 0 || module == NULL) {
         goto out;
     }
-    if (sample_untracked(&after) != 0) {
+    if (with_memory_settled(sample_untracked, &after) != 0) {
         LOG_WARN("module load not measured, its memory stays uncharged");
         goto out;
     }

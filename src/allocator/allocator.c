@@ -98,8 +98,72 @@ void release_device_memory(CUdevice dev, size_t size) {
     unlock_shrreg();
 }
 
+/* Allocations and frees in flight in this process. A module load samples
+ * memory only when none is between its accounting and its driver call. */
+static pthread_mutex_t settle_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t settle_cond = PTHREAD_COND_INITIALIZER;
+static int settle_inflight;
+static int settle_waiters;
+static __thread int settle_depth;
+
+int memory_op_begin(void) {
+    if (settle_depth++ > 0) {
+        return 0;
+    }
+    pthread_mutex_lock(&settle_mutex);
+    while (settle_waiters > 0) {
+        pthread_cond_wait(&settle_cond, &settle_mutex);
+    }
+    settle_inflight++;
+    pthread_mutex_unlock(&settle_mutex);
+    return 0;
+}
+
+void memory_op_end(int *unused) {
+    (void)unused;
+    if (--settle_depth > 0) {
+        return;
+    }
+    pthread_mutex_lock(&settle_mutex);
+    if (--settle_inflight == 0) {
+        pthread_cond_broadcast(&settle_cond);
+    }
+    pthread_mutex_unlock(&settle_mutex);
+}
+
+int with_memory_settled(int (*fn)(void *), void *arg) {
+    int ret;
+
+    if (settle_depth > 0) {
+        return -1;  /* this thread is inside an allocation */
+    }
+    pthread_mutex_lock(&settle_mutex);
+    settle_waiters++;
+    while (settle_inflight > 0) {
+        pthread_cond_wait(&settle_cond, &settle_mutex);
+    }
+    ret = fn(arg);
+    settle_waiters--;
+    pthread_cond_broadcast(&settle_cond);
+    pthread_mutex_unlock(&settle_mutex);
+    return ret;
+}
+
+static void memory_settle_child(void) {
+    settle_mutex = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+    settle_cond = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
+    settle_inflight = 0;
+    settle_waiters = 0;
+    settle_depth = 0;
+}
+
 void allocator_init() {
     LOG_DEBUG("Allocator_init\n");
+    static int settle_atfork_registered;
+    if (!settle_atfork_registered) {
+        pthread_atfork(NULL, NULL, memory_settle_child);
+        settle_atfork_registered = 1;
+    }
 
     device_overallocated = malloc(sizeof(allocated_list));
     if (!device_overallocated) {
