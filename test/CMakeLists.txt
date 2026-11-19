@@ -338,7 +338,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread -ldl)
     elseif (TEST_TARGET_NAME STREQUAL "test_cuda_version_map")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread -ldl)
-    elseif (TEST_TARGET_NAME STREQUAL "test_lazy_hostpid")
+    elseif (TEST_TARGET_NAME STREQUAL "test_lazy_hostpid"
+            OR TEST_TARGET_NAME STREQUAL "test_module_load")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread -ldl
             -lnvidia-ml -lcuda -lcudart -L${CUDA_HOME}/lib64)
     else()
@@ -476,6 +477,14 @@ if (TARGET vgpu)
             ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:vgpu>;CUDA_DEVICE_MEMORY_LIMIT=4g"
             SKIP_RETURN_CODE 77
             TIMEOUT 30)
+    endforeach()
+    # Needs a GPU: skips (77) when cuInit fails.
+    foreach(MODULE_MODE basic limit thread process)
+        add_test(NAME module_load_${MODULE_MODE} COMMAND test_module_load ${MODULE_MODE})
+        set_tests_properties(module_load_${MODULE_MODE} PROPERTIES
+            ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:vgpu>;CUDA_DEVICE_MEMORY_LIMIT=2g"
+            SKIP_RETURN_CODE 77
+            TIMEOUT 60)
     endforeach()
 endif()
 
