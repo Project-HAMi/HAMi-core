@@ -101,6 +101,27 @@ static shrreg_proc_slot_t* get_current_proc_slot(void) {
     return NULL;
 }
 
+int get_own_device_usage(int cudadev, int32_t *hostpid, uint64_t *data_size) {
+    int dev = cuda_to_nvml_map(cudadev);
+    shrreg_proc_slot_t *slot;
+
+    ensure_initialized();
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        return -1;
+    }
+    lock_shrreg();  /* compaction moves slots under this lock */
+    slot = get_current_proc_slot();
+    if (slot == NULL) {
+        unlock_shrreg();
+        return -1;
+    }
+    *hostpid = atomic_load_explicit(&slot->hostpid, memory_order_acquire);
+    *data_size = atomic_load_explicit(&slot->used[dev].data_size,
+                                      memory_order_acquire);
+    unlock_shrreg();
+    return 0;
+}
+
 void set_current_gpu_status(int status){
     shrreg_proc_slot_t* slot = get_current_proc_slot();
     if (slot != NULL) {

@@ -71,8 +71,8 @@ int getextrapid(unsigned int prev, unsigned int current, nvmlProcessInfo_t1 *pre
     return 0;
 }
 
-static nvmlReturn_t get_used_gpu_memory_by_pid(pid_t hostpid, int cudadev,
-                                              unsigned long long *used) {
+nvmlReturn_t get_used_gpu_memory_by_pid(pid_t hostpid, int cudadev,
+                                        uint64_t *used) {
     nvmlProcessInfo_v1_t *processes;
     nvmlDevice_t device;
     nvmlReturn_t res;
@@ -150,14 +150,14 @@ nvmlReturn_t set_task_pid_from_broker(void) {
 // unknown. The broker PID lets NVML report this process's own usage, so no
 // lock and no extra context are needed.
 void size_primary_context_lazily(int cudadev) {
-    unsigned long long used = 0;
+    uint64_t used = 0;
     nvmlReturn_t res;
 
     pthread_mutex_lock(&lazy_sizing_lock);
     if (lazy_sizing_hostpid > 0 && context_size == 0) {
         res = get_used_gpu_memory_by_pid(lazy_sizing_hostpid, cudadev, &used);
         if (res == NVML_SUCCESS) {
-            LOG_INFO("Primary Context Size==%llu", used);
+            LOG_INFO("Primary Context Size==%" PRIu64, used);
             context_size = used;
         } else {
             LOG_WARN("Primary context size unavailable: %d", res);

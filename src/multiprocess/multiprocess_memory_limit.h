@@ -133,6 +133,8 @@ int set_host_pid(int hostpid);
 
 uint64_t get_current_device_memory_monitor(const int dev);
 uint64_t get_current_device_memory_usage(const int dev);
+/* This process's host PID and data usage on a CUDA device, from its own slot. */
+int get_own_device_usage(int cudadev, int32_t *hostpid, uint64_t *data_size);
 size_t get_gpu_memory_usage(const int dev);
 size_t get_limit_from_env(const char* env_name);
 
