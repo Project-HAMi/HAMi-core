@@ -72,8 +72,7 @@ static int primary_context_active(CUdevice dev) {
 /* Another reference stays after this release, so the driver only counts.
  * The count is read before the locks, so two releases at the same time can
  * both look non-final, and a release through a symbol this hook does not
- * see, or a cuDevicePrimaryCtxReset_v2, leaves the count too high. Either
- * way one release skips a permit. */
+ * see leaves the count too high. Either way one release skips a permit. */
 static int primary_context_release_is_final(CUdevice dev) {
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) return 1;
     return __atomic_load_n(&primary_context_retains[dev], __ATOMIC_RELAXED) <= 1;
@@ -172,13 +171,22 @@ CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
 
 /** Reset a primary context and retire its previous graph-accounting generation. */
 CUresult cuDevicePrimaryCtxReset_v2(CUdevice dev) {
-    pthread_mutex_t *legacy = legacy_context_lock();
-    pthread_mutex_t *guard = primary_context_lock(dev);
+    // A reset tears the context down like a final release, so it takes the
+    // release permit. cudaDeviceReset comes here, not through release.
+    int lease_fd = driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_RELEASE);
+    primary_context_locks_t locks;
+    CUresult res;
+    pthread_cleanup_push(driver_admission_cleanup, &lease_fd);
+    lock_primary_context(dev, &locks);
+    pthread_cleanup_push(unlock_primary_context, &locks);
     graph_primary_context_prepare_release(dev);
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuDevicePrimaryCtxReset_v2, dev);
+    res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuDevicePrimaryCtxReset_v2, dev);
+    driver_admission_release(&lease_fd);
+    // The driver keeps its retain count across a reset, so the count here
+    // stays as it is and releases after the reset count down as before.
     if (res == CUDA_SUCCESS) graph_primary_context_released(dev, 1);
-    if (guard != NULL) pthread_mutex_unlock(guard);
-    if (legacy != NULL) pthread_mutex_unlock(legacy);
+    pthread_cleanup_pop(1);
+    pthread_cleanup_pop(1);
     return res;
 }
 

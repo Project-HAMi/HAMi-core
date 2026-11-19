@@ -9,7 +9,8 @@
  *
  * It also checks that cuInit skips the permit after one success (until a
  * fork), that retain skips it while the primary context is active, that a
- * non-final release skips it, that host PID detection under the fallback
+ * non-final release skips it, that a reset takes the release permit and
+ * keeps the retain count, that host PID detection under the fallback
  * lock never asks for one, that a missing permit warns once per process,
  * and that after one timed-out wait the process stops asking until a fork.
  */
@@ -152,6 +153,10 @@ static CUresult fake_release(CUdevice device) {
     (void)device;
     return fake_driver();
 }
+static CUresult fake_reset(CUdevice device) {
+    (void)device;
+    return fake_driver();
+}
 static CUresult fake_get_state(CUdevice device, unsigned int *flags,
                                int *active) {
     (void)device;
@@ -162,6 +167,9 @@ static CUresult fake_get_state(CUdevice device, unsigned int *flags,
 
 static void noop(void) {}
 
+/* call_hook value for cuDevicePrimaryCtxReset_v2, which sends command 4. */
+#define RESET_CASE 100
+
 static void *call_hook(void *argument) {
     CUcontext context;
 
@@ -171,6 +179,9 @@ static void *call_hook(void *argument) {
         break;
     case HOSTPID_DRIVER_ADMISSION_RETAIN:
         cuDevicePrimaryCtxRetain(&context, 0);
+        break;
+    case RESET_CASE:
+        cuDevicePrimaryCtxReset_v2(0);
         break;
     default:
         cuDevicePrimaryCtxRelease_v2(0);
@@ -238,7 +249,9 @@ static void finish_broker(pid_t broker) {
 }
 
 static void run_case(int operation, int cancel, int in_accounting) {
-    pid_t broker = start_broker((unsigned char)(operation + 2));
+    int command = operation == RESET_CASE ? HOSTPID_DRIVER_ADMISSION_RELEASE
+                                          : operation;
+    pid_t broker = start_broker((unsigned char)(command + 2));
     pthread_t thread;
     void *result;
 
@@ -322,6 +335,17 @@ static void run_skip_cases(void) {
     primary_active = 0;
     run_case(HOSTPID_DRIVER_ADMISSION_RELEASE, 0, 0);
     puts("cuDevicePrimaryCtxRelease_v2: no permit while a reference stays");
+
+    // The driver keeps its retain count across a reset, so with two
+    // references the first release after it only counts down.
+    primary_active = 1;
+    expect_no_permit(HOSTPID_DRIVER_ADMISSION_RETAIN);
+    expect_no_permit(HOSTPID_DRIVER_ADMISSION_RETAIN);
+    primary_active = 0;
+    run_case(RESET_CASE, 0, 0);
+    expect_no_permit(HOSTPID_DRIVER_ADMISSION_RELEASE);
+    run_case(HOSTPID_DRIVER_ADMISSION_RELEASE, 0, 0);
+    puts("cuDevicePrimaryCtxReset_v2: takes a permit, keeps the count");
 
     // Host PID detection runs again in a forked child. On the fallback path
     // it retains and releases under the fallback lock without a permit.
@@ -440,6 +464,8 @@ int main(void) {
         .fn_ptr = (void *)fake_release;
     cuda_library_entry[CUDA_OVERRIDE_ENUM(cuDevicePrimaryCtxGetState)].fn_ptr =
         (void *)fake_get_state;
+    cuda_library_entry[CUDA_OVERRIDE_ENUM(cuDevicePrimaryCtxReset_v2)].fn_ptr =
+        (void *)fake_reset;
 
     for (int operation = HOSTPID_DRIVER_ADMISSION_INIT;
          operation <= HOSTPID_DRIVER_ADMISSION_RELEASE; operation++) {
@@ -455,6 +481,9 @@ int main(void) {
         }
         printf("%s: cancelled call returns its lease\n", names[operation]);
     }
+    run_case(RESET_CASE, 0, 0);
+    run_case(RESET_CASE, 1, 0);
+    puts("cuDevicePrimaryCtxReset_v2: cancelled call returns its lease");
     run_skip_cases();
     puts("driver admission cancel tests passed");
     return 0;
