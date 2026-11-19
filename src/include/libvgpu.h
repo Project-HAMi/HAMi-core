@@ -11,6 +11,7 @@
 #include <signal.h>
 
 #include "include/log_utils.h"
+#include "include/hostpid_broker.h"
 #include "static_config.h"
 
 #define ENSURE_INITIALIZED() ensure_initialized();        \
@@ -50,8 +51,15 @@ nvmlReturn_t set_task_pid();
 nvmlReturn_t set_task_pid_from_broker(void);
 void size_primary_context_lazily(int cudadev);
 void reset_lazy_context_sizing(void);
+void reset_primary_context_retains(void);
 int map_cuda_visible_devices();
 void ensure_post_init();
 void ensure_hostpid();
+int driver_admission_enabled(void);
+// Returns a lease fd, or -1 when admission is off or no permit was granted.
+int driver_admission_acquire(hostpid_driver_admission_operation_t operation);
+void driver_admission_release(int *lease_fd);
+// pthread_cleanup handler, so a cancelled driver call still returns its permit.
+void driver_admission_cleanup(void *lease_fd);
 
 #endif  // SRC_INCLUDE_LIBVGPU_H_

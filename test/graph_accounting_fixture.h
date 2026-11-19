@@ -7,6 +7,7 @@
 #include <stdlib.h>
 
 #include "allocator/allocator.h"
+#include "include/hostpid_broker.h"
 #include "include/libcuda_hook.h"
 #include "multiprocess/multiprocess_memory_limit.h"
 
@@ -63,6 +64,14 @@ static int capture_ready, capture_finish;
 
 void ensure_initialized(void) {}
 void ensure_hostpid(void) {}
+/* context.c asks for driver admission; the broker is off in these tests. */
+int driver_admission_enabled(void) { return 0; }
+int driver_admission_acquire(hostpid_driver_admission_operation_t operation) {
+    (void)operation;
+    return -1;
+}
+void driver_admission_release(int *lease_fd) { *lease_fd = -1; }
+void driver_admission_cleanup(void *lease_fd) { driver_admission_release(lease_fd); }
 void lock_shrreg(void) {}
 void unlock_shrreg(void) {}
 unsigned int cuda_to_nvml_map(unsigned int dev) { return dev; }

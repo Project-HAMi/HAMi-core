@@ -34,6 +34,50 @@ static pthread_mutex_t *primary_context_lock(CUdevice dev) {
     return &primary_context_mutex[dev];
 }
 
+typedef struct {
+    pthread_mutex_t *legacy;
+    pthread_mutex_t *guard;
+} primary_context_locks_t;
+
+/** Take both lifetime locks in the fixed legacy-then-device order. */
+static void lock_primary_context(CUdevice dev, primary_context_locks_t *locks) {
+    locks->legacy = legacy_context_lock();
+    locks->guard = primary_context_lock(dev);
+}
+
+/** pthread_cleanup handler, so a cancelled call does not keep the locks. */
+static void unlock_primary_context(void *arg) {
+    primary_context_locks_t *locks = arg;
+
+    if (locks->guard != NULL) pthread_mutex_unlock(locks->guard);
+    if (locks->legacy != NULL) pthread_mutex_unlock(locks->legacy);
+}
+
+/* Successful retains minus releases through this hook, per device. */
+static int primary_context_retains[CUDA_DEVICE_MAX_COUNT];
+
+void reset_primary_context_retains(void) {
+    for (int dev = 0; dev < CUDA_DEVICE_MAX_COUNT; dev++)
+        __atomic_store_n(&primary_context_retains[dev], 0, __ATOMIC_RELAXED);
+}
+
+static int primary_context_active(CUdevice dev) {
+    unsigned int flags = 0;
+    int active = 0;
+
+    return CUDA_OVERRIDE_CALL(cuda_library_entry, cuDevicePrimaryCtxGetState,
+                              dev, &flags, &active) == CUDA_SUCCESS && active;
+}
+
+/* Another reference stays after this release, so the driver only counts.
+ * The count is read before the locks, so two releases at the same time can
+ * both look non-final, and a release through a symbol this hook does not
+ * see leaves the count too high. Either way one release skips a permit. */
+static int primary_context_release_is_final(CUdevice dev) {
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) return 1;
+    return __atomic_load_n(&primary_context_retains[dev], __ATOMIC_RELAXED) <= 1;
+}
+
 CUresult cuDevicePrimaryCtxGetState( CUdevice dev, unsigned int* flags, int* active ){
     LOG_DEBUG("into cuDevicePrimaryCtxGetState dev=%d",dev);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxGetState,dev,flags,active);
@@ -43,12 +87,29 @@ CUresult cuDevicePrimaryCtxGetState( CUdevice dev, unsigned int* flags, int* act
 /** Retain a primary context and register its lifetime for graph accounting. */
 CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev) {
     ensure_hostpid();
-    pthread_mutex_t *legacy = legacy_context_lock();
-    pthread_mutex_t *guard = primary_context_lock(dev);
+    int lease_fd = -1;
+    primary_context_locks_t locks;
+    CUresult res;
+    // Retaining an active context only takes a reference; skip the permit.
+    // If another thread drops the last reference meanwhile, this retain
+    // creates the context without a permit. Admission is best effort.
+    // The permit comes before the locks, so no thread waits for the broker
+    // while it holds a lock that other threads of this process need.
+    if (driver_admission_enabled() && !primary_context_active(dev)) {
+        lease_fd = driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_RETAIN);
+    }
+    pthread_cleanup_push(driver_admission_cleanup, &lease_fd);
+    lock_primary_context(dev, &locks);
+    pthread_cleanup_push(unlock_primary_context, &locks);
     LOG_INFO("dev=%d context_size=%ld", dev, context_size);
     //for Initialization only
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRetain,pctx,dev);
-    if (res == CUDA_SUCCESS) graph_primary_context(dev, *pctx);
+    res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRetain,pctx,dev);
+    driver_admission_release(&lease_fd);
+    if (res == CUDA_SUCCESS) {
+        graph_primary_context(dev, *pctx);
+        if (dev >= 0 && dev < CUDA_DEVICE_MAX_COUNT)
+            __atomic_add_fetch(&primary_context_retains[dev], 1, __ATOMIC_RELAXED);
+    }
     if (res == CUDA_SUCCESS && context_size == 0) {
         size_primary_context_lazily(dev);
     }
@@ -58,8 +119,8 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev) {
     if (context_size>0) {
         ctx_activate[dev] = 1;
     }
-    if (guard != NULL) pthread_mutex_unlock(guard);
-    if (legacy != NULL) pthread_mutex_unlock(legacy);
+    pthread_cleanup_pop(1);
+    pthread_cleanup_pop(1);
     return res;
 }
 
@@ -72,36 +133,65 @@ CUresult cuDevicePrimaryCtxSetFlags_v2( CUdevice dev, unsigned int  flags ){
 
 /** Release a primary context and retire graph accounting once it becomes inactive. */
 CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
-    pthread_mutex_t *legacy = legacy_context_lock();
-    pthread_mutex_t *guard = primary_context_lock(dev);
+    int lease_fd = -1;
+    primary_context_locks_t locks;
+    CUresult res;
+    // Only the final release destroys the context. A wrong count only
+    // decides whether this call takes a permit; the call never fails.
+    // Wait for the permit first so the usage is not undercounted meanwhile.
+    if (primary_context_release_is_final(dev)) {
+        lease_fd = driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_RELEASE);
+    }
+    pthread_cleanup_push(driver_admission_cleanup, &lease_fd);
+    lock_primary_context(dev, &locks);
+    pthread_cleanup_push(unlock_primary_context, &locks);
     if (ctx_activate[dev] == 1) {
         rm_gpu_device_memory_usage(getpid(),dev,context_size,0);
     }
     ctx_activate[dev] = 0;
     graph_primary_context_prepare_release(dev);
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRelease_v2,dev);
+    res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRelease_v2,dev);
+    driver_admission_release(&lease_fd);
     if (res == CUDA_SUCCESS) {
         unsigned int flags;
         int active;
+        // The device lock is held, so this check and decrement do not race.
+        if (dev >= 0 && dev < CUDA_DEVICE_MAX_COUNT &&
+            __atomic_load_n(&primary_context_retains[dev], __ATOMIC_RELAXED) > 0)
+            __atomic_sub_fetch(&primary_context_retains[dev], 1, __ATOMIC_RELAXED);
         if (CUDA_OVERRIDE_CALL(cuda_library_entry, cuDevicePrimaryCtxGetState, dev,
                                &flags, &active) == CUDA_SUCCESS && !active)
             graph_primary_context_released(dev, 0);
     }
-    if (guard != NULL) pthread_mutex_unlock(guard);
-    if (legacy != NULL) pthread_mutex_unlock(legacy);
+    pthread_cleanup_pop(1);
+    pthread_cleanup_pop(1);
     return res;
 }
 
 
 /** Reset a primary context and retire its previous graph-accounting generation. */
 CUresult cuDevicePrimaryCtxReset_v2(CUdevice dev) {
-    pthread_mutex_t *legacy = legacy_context_lock();
-    pthread_mutex_t *guard = primary_context_lock(dev);
+    int lease_fd = -1;
+    primary_context_locks_t locks;
+    CUresult res;
+    // Resetting an active context tears it down like a final release, so it
+    // takes the release permit; cudaDeviceReset comes here, not through
+    // release. An inactive context has nothing to tear down. Like retain,
+    // the check is before the locks, so admission is best effort.
+    if (driver_admission_enabled() && primary_context_active(dev)) {
+        lease_fd = driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_RELEASE);
+    }
+    pthread_cleanup_push(driver_admission_cleanup, &lease_fd);
+    lock_primary_context(dev, &locks);
+    pthread_cleanup_push(unlock_primary_context, &locks);
     graph_primary_context_prepare_release(dev);
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuDevicePrimaryCtxReset_v2, dev);
+    res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuDevicePrimaryCtxReset_v2, dev);
+    driver_admission_release(&lease_fd);
+    // The driver keeps its retain count across a reset, so the count here
+    // stays as it is and releases after the reset count down as before.
     if (res == CUDA_SUCCESS) graph_primary_context_released(dev, 1);
-    if (guard != NULL) pthread_mutex_unlock(guard);
-    if (legacy != NULL) pthread_mutex_unlock(legacy);
+    pthread_cleanup_pop(1);
+    pthread_cleanup_pop(1);
     return res;
 }
 

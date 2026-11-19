@@ -939,7 +939,60 @@ void preInit(){
     }
     load_cuda_libraries();
     ENSURE_INITIALIZED();
-    pthread_atfork(NULL, NULL, childReinitPostInit);
+    pthread_atfork(hostpid_broker_admission_fork_prepare,
+                   hostpid_broker_admission_fork_parent,
+                   childReinitPostInit);
+}
+
+int driver_admission_enabled(void) {
+    return hostpid_broker_enabled(getenv("LIBVGPU_HOSTPID_BROKER")) &&
+           hostpid_broker_enabled(getenv("LIBVGPU_DRIVER_ADMISSION"));
+}
+
+// Set while this thread detects its host PID. The fallback path holds the
+// node-wide lock and retains and releases a primary context to probe.
+static __thread int in_hostpid_init;
+static int admission_miss_logged;
+// Set after the broker takes a request and sends no reply within the wait
+// (a silent broker, or a queue longer than the wait). Each later call would
+// wait the full time again, so this process stops asking for the rest of
+// its life; a forked child asks again.
+static int admission_timed_out;
+
+int driver_admission_acquire(hostpid_driver_admission_operation_t operation) {
+    int lease_fd = -1;
+
+    // Host PID detection takes no permit, so no thread waits for one while
+    // it holds the node-wide fallback lock.
+    if (!driver_admission_enabled() || in_hostpid_init ||
+        __atomic_load_n(&admission_timed_out, __ATOMIC_RELAXED)) {
+        return -1;
+    }
+    // Admission only smooths bursts, so a missing permit never fails the call.
+    if (hostpid_broker_acquire_driver_admission_trusted(operation,
+                                                        &lease_fd) != 0) {
+        int saved_errno = errno;
+
+        if (saved_errno == ETIMEDOUT) {
+            __atomic_store_n(&admission_timed_out, 1, __ATOMIC_RELAXED);
+        }
+        if (!__atomic_exchange_n(&admission_miss_logged, 1, __ATOMIC_RELAXED)) {
+            LOG_WARN("No driver admission permit, calling the driver anyway: %s",
+                     strerror(saved_errno));
+        } else {
+            LOG_DEBUG("No driver admission permit: %s", strerror(saved_errno));
+        }
+        return -1;
+    }
+    return lease_fd;
+}
+
+void driver_admission_release(int *lease_fd) {
+    hostpid_broker_release_driver_admission(lease_fd);
+}
+
+void driver_admission_cleanup(void *lease_fd) {
+    driver_admission_release(lease_fd);
 }
 
 void postInit(){
@@ -1021,13 +1074,21 @@ FUNC_ATTR_VISIBLE int vgpu_hostpid_found(void) {
     return pidfound;
 }
 
+// Set after the first successful cuInit; later calls return at once.
+static int cuinit_succeeded;
+
 void childReinitPostInit() {
+    hostpid_broker_admission_fork_child();
     hostpid_fallback_lock_after_fork();
     reset_lazy_context_sizing();
+    reset_primary_context_retains();
+    __atomic_store_n(&admission_miss_logged, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&admission_timed_out, 0, __ATOMIC_RELAXED);
     LOG_DEBUG("Reset postInit state after fork");
     post_cuinit_flag = PTHREAD_ONCE_INIT;
     hostpid_flag = PTHREAD_ONCE_INIT;
     pidfound = 0;
+    __atomic_store_n(&cuinit_succeeded, 0, __ATOMIC_RELAXED);
 }
 
 void ensure_post_init() {
@@ -1036,8 +1097,6 @@ void ensure_post_init() {
 
 /* hostpidInit() retains a primary context through our own hook, which asks for
  * host PID detection again: skip that re-entry on this thread. */
-static __thread int in_hostpid_init;
-
 void ensure_hostpid() {
     if (in_hostpid_init) return;
     in_hostpid_init = 1;
@@ -1049,11 +1108,19 @@ CUresult cuInit(unsigned int Flags){
     LOG_INFO("Into cuInit");
     pthread_once(&pre_cuinit_flag,(void(*)(void))preInit);
     ENSURE_INITIALIZED();
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuInit,Flags);
+    int lease_fd = -1;
+    if (!__atomic_load_n(&cuinit_succeeded, __ATOMIC_ACQUIRE)) {
+        lease_fd = driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_INIT);
+    }
+    CUresult res;
+    pthread_cleanup_push(driver_admission_cleanup, &lease_fd);
+    res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuInit,Flags);
+    pthread_cleanup_pop(1);
     if (res != CUDA_SUCCESS){
         LOG_ERROR("cuInit failed:%d",res);
         return res;
     }
+    __atomic_store_n(&cuinit_succeeded, 1, __ATOMIC_RELEASE);
     ensure_post_init();
     return CUDA_SUCCESS;
 }
