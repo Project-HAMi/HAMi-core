@@ -1,4 +1,5 @@
 #include "include/libcuda_hook.h"
+#include "include/memory_limit.h"
 
 CUresult cuEventCreate ( CUevent* phEvent, unsigned int  Flags ){
     LOG_DEBUG("cuEventCreate Event=%p",phEvent);
@@ -10,24 +11,104 @@ CUresult cuEventDestroy_v2 ( CUevent hEvent ){
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuEventDestroy_v2,hEvent);
 }
 
+/* The driver allocates module globals itself when it loads a module, so
+ * cuMemAlloc never sees them. Charge what each load takes as module memory
+ * (type 1) and give it back when the module is unloaded. */
+typedef struct module_charge {
+    CUmodule module;
+    CUdevice dev;
+    size_t size;
+    struct module_charge *next;
+} module_charge_t;
+
+static pthread_mutex_t module_lock = PTHREAD_MUTEX_INITIALIZER;
+static module_charge_t *module_charges;
+
+/** Device memory in use that HAMi does not track. Allocations HAMi counts
+ *  while a module loads change both sides, so they cancel out. */
+static int untracked_device_memory(CUdevice dev, int64_t *untracked) {
+    size_t drv_free = 0, drv_total = 0;
+
+    if (CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemGetInfo_v2,
+                           &drv_free, &drv_total) != CUDA_SUCCESS) {
+        return -1;
+    }
+    *untracked = (int64_t)(drv_total - drv_free) -
+                 (int64_t)get_current_device_memory_usage(cuda_to_nvml_map(dev));
+    return 0;
+}
+
+/** Lock module bookkeeping and note untracked memory before a load. */
+static int module_load_begin(CUdevice *dev, int64_t *before) {
+    pthread_mutex_lock(&module_lock);
+    if (cuCtxGetDevice(dev) != CUDA_SUCCESS) {
+        return -1;
+    }
+    return untracked_device_memory(*dev, before);
+}
+
+/** Charge the memory a successful load took, then unlock. */
+static void module_load_end(CUresult res, const CUmodule *module, CUdevice dev,
+                            int measured, int64_t before) {
+    int64_t after;
+    module_charge_t *charge;
+
+    if (res == CUDA_SUCCESS && measured == 0 && module != NULL &&
+        untracked_device_memory(dev, &after) == 0 && after > before) {
+        charge = malloc(sizeof(*charge));
+        if (charge != NULL) {
+            charge->module = *module;
+            charge->dev = dev;
+            charge->size = (size_t)(after - before);
+            charge->next = module_charges;
+            module_charges = charge;
+            add_gpu_device_memory_usage(getpid(), dev, charge->size, 1);
+            LOG_INFO("module %p on dev %d charged %zu bytes",
+                     (void *)charge->module, dev, charge->size);
+        }
+    }
+    pthread_mutex_unlock(&module_lock);
+}
+
 CUresult cuModuleLoad ( CUmodule* module, const char* fname ){
+    CUdevice dev = 0;
+    int64_t before = 0;
     LOG_DEBUG(" cuModuleLoad fname=%s",fname);
-    return CUDA_OVERRIDE_CALL(cuda_library_entry,cuModuleLoad,module,fname);
+    int measured = module_load_begin(&dev, &before);
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuModuleLoad,module,fname);
+    module_load_end(res, module, dev, measured, before);
+    return res;
 }
 
 CUresult cuModuleLoadData( CUmodule* module, const void* image){
+    CUdevice dev = 0;
+    int64_t before = 0;
     LOG_DEBUG("cuModuleLoadData module=%p",module);
-    return CUDA_OVERRIDE_CALL(cuda_library_entry,cuModuleLoadData,module,image);
+    int measured = module_load_begin(&dev, &before);
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuModuleLoadData,module,image);
+    module_load_end(res, module, dev, measured, before);
+    return res;
 }
 
 CUresult cuModuleLoadDataEx ( CUmodule* module, const void* image, unsigned int  numOptions, CUjit_option* options, void** optionValues ){
+    CUdevice dev = 0;
+    int64_t before = 0;
     LOG_DEBUG("cuModuleLoadDataEx module=%p",module);
-    return CUDA_OVERRIDE_CALL(cuda_library_entry,cuModuleLoadDataEx,module,image,numOptions,options,optionValues);
+    int measured = module_load_begin(&dev, &before);
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuModuleLoadDataEx,module,image,
+                                      numOptions,options,optionValues);
+    module_load_end(res, module, dev, measured, before);
+    return res;
 }
 
 CUresult cuModuleLoadFatBinary ( CUmodule* module, const void* fatCubin ){
+    CUdevice dev = 0;
+    int64_t before = 0;
     LOG_DEBUG("cuModuleLoadFatBinary module=%p",module);
-    return CUDA_OVERRIDE_CALL(cuda_library_entry,cuModuleLoadFatBinary,module,fatCubin);
+    int measured = module_load_begin(&dev, &before);
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuModuleLoadFatBinary,module,fatCubin);
+    module_load_end(res, module, dev, measured, before);
+    return res;
 }
 
 CUresult cuModuleGetFunction ( CUfunction* hfunc, CUmodule hmod, const char* name ){
@@ -36,8 +117,23 @@ CUresult cuModuleGetFunction ( CUfunction* hfunc, CUmodule hmod, const char* nam
 }
 
 CUresult cuModuleUnload(CUmodule hmod) {
+    module_charge_t **link, *charge;
     LOG_DEBUG("cuModuleUnload");
-    return CUDA_OVERRIDE_CALL(cuda_library_entry,cuModuleUnload,hmod);
+    pthread_mutex_lock(&module_lock);
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuModuleUnload,hmod);
+    if (res == CUDA_SUCCESS) {
+        for (link = &module_charges; *link != NULL; link = &(*link)->next) {
+            if ((*link)->module == hmod) {
+                charge = *link;
+                *link = charge->next;
+                rm_gpu_device_memory_usage(getpid(), charge->dev, charge->size, 1);
+                free(charge);
+                break;
+            }
+        }
+    }
+    pthread_mutex_unlock(&module_lock);
+    return res;
 }
 
 CUresult cuModuleGetGlobal_v2(CUdeviceptr *dptr, size_t *bytes, CUmodule hmod, const char *name) {
