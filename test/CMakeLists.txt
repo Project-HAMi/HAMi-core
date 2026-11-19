@@ -338,6 +338,9 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread -ldl)
     elseif (TEST_TARGET_NAME STREQUAL "test_cuda_version_map")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread -ldl)
+    elseif (TEST_TARGET_NAME STREQUAL "test_lazy_hostpid")
+        target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread -ldl
+            -lnvidia-ml -lcuda -lcudart -L${CUDA_HOME}/lib64)
     else()
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread
             -lnvidia-ml -lcuda -lcudart -L${CUDA_HOME}/lib64)
