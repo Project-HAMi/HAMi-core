@@ -171,11 +171,16 @@ CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
 
 /** Reset a primary context and retire its previous graph-accounting generation. */
 CUresult cuDevicePrimaryCtxReset_v2(CUdevice dev) {
-    // A reset tears the context down like a final release, so it takes the
-    // release permit. cudaDeviceReset comes here, not through release.
-    int lease_fd = driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_RELEASE);
+    int lease_fd = -1;
     primary_context_locks_t locks;
     CUresult res;
+    // Resetting an active context tears it down like a final release, so it
+    // takes the release permit; cudaDeviceReset comes here, not through
+    // release. An inactive context has nothing to tear down. Like retain,
+    // the check is before the locks, so admission is best effort.
+    if (driver_admission_enabled() && primary_context_active(dev)) {
+        lease_fd = driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_RELEASE);
+    }
     pthread_cleanup_push(driver_admission_cleanup, &lease_fd);
     lock_primary_context(dev, &locks);
     pthread_cleanup_push(unlock_primary_context, &locks);

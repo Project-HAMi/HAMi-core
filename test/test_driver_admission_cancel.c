@@ -9,8 +9,8 @@
  *
  * It also checks that cuInit skips the permit after one success (until a
  * fork), that retain skips it while the primary context is active, that a
- * non-final release skips it, that a reset takes the release permit and
- * keeps the retain count, that host PID detection under the fallback
+ * non-final release skips it, that a reset of an active context takes the
+ * release permit and keeps the retain count, that host PID detection under the fallback
  * lock never asks for one, that a missing permit warns once per process,
  * and that after one timed-out wait the process stops asking until a fork.
  */
@@ -280,6 +280,8 @@ static void expect_no_permit(int operation) {
         assert(cuInit(0) == CUDA_SUCCESS);
     } else if (operation == HOSTPID_DRIVER_ADMISSION_RETAIN) {
         assert(cuDevicePrimaryCtxRetain(&context, 0) == CUDA_SUCCESS);
+    } else if (operation == RESET_CASE) {
+        assert(cuDevicePrimaryCtxReset_v2(0) == CUDA_SUCCESS);
     } else {
         assert(cuDevicePrimaryCtxRelease_v2(0) == CUDA_SUCCESS);
     }
@@ -337,15 +339,17 @@ static void run_skip_cases(void) {
     puts("cuDevicePrimaryCtxRelease_v2: no permit while a reference stays");
 
     // The driver keeps its retain count across a reset, so with two
-    // references the first release after it only counts down.
+    // references the first release after it only counts down. A second
+    // reset finds the context inactive and skips the permit.
     primary_active = 1;
     expect_no_permit(HOSTPID_DRIVER_ADMISSION_RETAIN);
     expect_no_permit(HOSTPID_DRIVER_ADMISSION_RETAIN);
-    primary_active = 0;
     run_case(RESET_CASE, 0, 0);
+    primary_active = 0;
+    expect_no_permit(RESET_CASE);
     expect_no_permit(HOSTPID_DRIVER_ADMISSION_RELEASE);
     run_case(HOSTPID_DRIVER_ADMISSION_RELEASE, 0, 0);
-    puts("cuDevicePrimaryCtxReset_v2: takes a permit, keeps the count");
+    puts("cuDevicePrimaryCtxReset_v2: permit only while active, keeps the count");
 
     // Host PID detection runs again in a forked child. On the fallback path
     // it retains and releases under the fallback lock without a permit.
@@ -481,8 +485,10 @@ int main(void) {
         }
         printf("%s: cancelled call returns its lease\n", names[operation]);
     }
+    primary_active = 1;
     run_case(RESET_CASE, 0, 0);
     run_case(RESET_CASE, 1, 0);
+    primary_active = 0;
     puts("cuDevicePrimaryCtxReset_v2: cancelled call returns its lease");
     run_skip_cases();
     puts("driver admission cancel tests passed");
