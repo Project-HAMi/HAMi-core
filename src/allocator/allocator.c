@@ -98,6 +98,29 @@ void release_device_memory(CUdevice dev, size_t size) {
     unlock_shrreg();
 }
 
+static int reserve_module_memory_impl(CUdevice dev, size_t size) {
+    lock_shrreg();
+    if (oom_check_impl(dev, size, 1)) {
+        unlock_shrreg();
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+    add_gpu_device_memory_usage(getpid(), dev, size, 1);
+    unlock_shrreg();
+    return 0;
+}
+
+/** Reserve module memory, trimming unused graph memory before giving up. */
+int reserve_module_memory(CUdevice dev, size_t size) {
+    graph_reclaim(0);
+    int ret = reserve_module_memory_impl(dev, size);
+    if (ret != 0) {
+        unsigned int trim_mask = graph_trim_mask(dev, size);
+        if (trim_mask != 0) graph_reclaim(trim_mask);
+        ret = reserve_module_memory_impl(dev, size);
+    }
+    return ret;
+}
+
 /* Allocations and frees in flight in this process. A module load samples
  * memory only when none is between its accounting and its driver call. */
 static pthread_mutex_t settle_mutex = PTHREAD_MUTEX_INITIALIZER;

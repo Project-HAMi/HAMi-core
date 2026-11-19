@@ -93,6 +93,7 @@ int oom_check(const int dev,size_t addon);
  * release_device_memory() if the subsequent CUDA alloc fails. */
 int reserve_device_memory(CUdevice dev, size_t size);
 void release_device_memory(CUdevice dev, size_t size);
+int reserve_module_memory(CUdevice dev, size_t size);
 
 /* Mark a hook that changes device memory or its accounting. Module loads wait
  * for these to finish before sampling memory. */

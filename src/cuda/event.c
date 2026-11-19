@@ -57,7 +57,9 @@ static int module_load_begin(module_sample_t *before) {
     return 0;
 }
 
-/** Charge the memory a successful load took, then unlock. */
+/** Charge the memory a successful load took, then unlock. A load that cannot
+ *  be measured afterwards or would exceed the limit is unloaded and reported
+ *  as out of memory. */
 static CUresult module_load_end(CUresult res, CUmodule *module, int measured,
                                 const module_sample_t *before) {
     module_sample_t after = {.dev = before->dev, .untracked = 0};
@@ -68,18 +70,20 @@ static CUresult module_load_end(CUresult res, CUmodule *module, int measured,
         goto out;
     }
     if (with_memory_settled(sample_untracked, &after) != 0) {
-        LOG_WARN("module load not measured, its memory stays uncharged");
-        goto out;
+        LOG_WARN("module %p could not be measured after loading, unloading",
+                 (void *)*module);
+        goto reject;
     }
     if (after.untracked <= before->untracked) {
         goto out;
     }
     size = (size_t)(after.untracked - before->untracked);
     charge = malloc(sizeof(*charge));
-    if (charge == NULL) {
-        goto out;
+    if (charge == NULL || reserve_module_memory(before->dev, size) != 0) {
+        LOG_WARN("module %p needs %zu bytes over the limit, unloading",
+                 (void *)*module, size);
+        goto reject;
     }
-    add_gpu_device_memory_usage(getpid(), before->dev, size, 1);
     charge->module = *module;
     charge->dev = before->dev;
     charge->size = size;
@@ -87,6 +91,12 @@ static CUresult module_load_end(CUresult res, CUmodule *module, int measured,
     module_charges = charge;
     LOG_INFO("module %p on dev %d charged %zu bytes",
              (void *)charge->module, charge->dev, charge->size);
+    goto out;
+reject:
+    CUDA_OVERRIDE_CALL(cuda_library_entry, cuModuleUnload, *module);
+    *module = NULL;
+    free(charge);
+    res = CUDA_ERROR_OUT_OF_MEMORY;
 out:
     pthread_mutex_unlock(&module_lock);
     return res;
