@@ -213,6 +213,20 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+    elseif (TEST_TARGET_NAME STREQUAL "test_module_accounting")
+        add_executable(${TEST_TARGET_NAME}
+            ${TEST_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/event.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/context.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/allocator/allocator.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_memory_limit.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+        target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
+            _GNU_SOURCE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_sm_limiter_step")
         # Includes the watcher source to reach its static step function and
         # stubs the shared region, so it needs no GPU.
@@ -333,6 +347,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_memory_index_map"
             OR TEST_TARGET_NAME STREQUAL "test_meminfo_null_out"
+            OR TEST_TARGET_NAME STREQUAL "test_module_accounting"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_broker_mapping"
             OR TEST_TARGET_NAME STREQUAL "test_driver_admission_cancel")
         target_link_libraries(${TEST_TARGET_NAME} -lrt -lpthread -ldl)
@@ -530,6 +545,9 @@ target_link_options(test_graph_allocation_admission PRIVATE "-Wl,--wrap=calloc")
 
 add_test(NAME cuda_ptsz_wrappers COMMAND test_cuda_ptsz_wrappers)
 set_tests_properties(cuda_ptsz_wrappers PROPERTIES TIMEOUT 10)
+
+add_test(NAME module_accounting COMMAND test_module_accounting)
+set_tests_properties(module_accounting PROPERTIES TIMEOUT 10)
 
 if (TARGET vgpu)
     target_link_libraries(test_graph_persistent_gpu -ldl)
