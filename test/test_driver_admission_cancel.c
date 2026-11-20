@@ -51,6 +51,15 @@ void graph_primary_context_prepare_release(CUdevice dev) { (void)dev; }
 void graph_primary_context_released(CUdevice dev, int reset) {
     (void)dev; (void)reset;
 }
+void module_primary_context(CUdevice dev, CUcontext ctx) { (void)dev; (void)ctx; }
+void module_primary_context_released(CUdevice dev, int reset) {
+    (void)dev; (void)reset;
+}
+void module_context_destroyed(CUcontext ctx, cuuint64_t id) {
+    (void)ctx; (void)id;
+}
+void memory_op_enter(void) {}
+void memory_op_leave(void) {}
 int add_gpu_device_memory_usage(int32_t pid, int dev, size_t usage,
                                 int type) {
     (void)pid; (void)dev; (void)usage; (void)type;

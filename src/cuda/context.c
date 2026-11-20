@@ -53,6 +53,16 @@ static void unlock_primary_context(void *arg) {
     if (locks->legacy != NULL) pthread_mutex_unlock(locks->legacy);
 }
 
+static void unlock_legacy_context_cleanup(void *arg) {
+    pthread_mutex_t *legacy = arg;
+    if (legacy != NULL) pthread_mutex_unlock(legacy);
+}
+
+static void leave_ctx_memory_op_cleanup(void *unused) {
+    (void)unused;
+    memory_op_leave();
+}
+
 /* Successful retains minus releases through this hook, per device. */
 static int primary_context_retains[CUDA_DEVICE_MAX_COUNT];
 
@@ -101,12 +111,15 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev) {
     pthread_cleanup_push(driver_admission_cleanup, &lease_fd);
     lock_primary_context(dev, &locks);
     pthread_cleanup_push(unlock_primary_context, &locks);
+    memory_op_enter();
+    pthread_cleanup_push(leave_ctx_memory_op_cleanup, NULL);
     LOG_INFO("dev=%d context_size=%ld", dev, context_size);
     //for Initialization only
     res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRetain,pctx,dev);
     driver_admission_release(&lease_fd);
     if (res == CUDA_SUCCESS) {
         graph_primary_context(dev, *pctx);
+        module_primary_context(dev, *pctx);
         if (dev >= 0 && dev < CUDA_DEVICE_MAX_COUNT)
             __atomic_add_fetch(&primary_context_retains[dev], 1, __ATOMIC_RELAXED);
     }
@@ -119,6 +132,7 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev) {
     if (context_size>0) {
         ctx_activate[dev] = 1;
     }
+    pthread_cleanup_pop(1);
     pthread_cleanup_pop(1);
     pthread_cleanup_pop(1);
     return res;
@@ -144,6 +158,8 @@ CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
     pthread_cleanup_push(driver_admission_cleanup, &lease_fd);
     lock_primary_context(dev, &locks);
     pthread_cleanup_push(unlock_primary_context, &locks);
+    memory_op_enter();
+    pthread_cleanup_push(leave_ctx_memory_op_cleanup, NULL);
     graph_primary_context_prepare_release(dev);
     res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRelease_v2,dev);
     driver_admission_release(&lease_fd);
@@ -163,8 +179,10 @@ CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
             }
             ctx_activate[dev] = 0;
             graph_primary_context_released(dev, 0);
+            module_primary_context_released(dev, 0);
         }
     }
+    pthread_cleanup_pop(1);
     pthread_cleanup_pop(1);
     pthread_cleanup_pop(1);
     return res;
@@ -186,12 +204,18 @@ CUresult cuDevicePrimaryCtxReset_v2(CUdevice dev) {
     pthread_cleanup_push(driver_admission_cleanup, &lease_fd);
     lock_primary_context(dev, &locks);
     pthread_cleanup_push(unlock_primary_context, &locks);
+    memory_op_enter();
+    pthread_cleanup_push(leave_ctx_memory_op_cleanup, NULL);
     graph_primary_context_prepare_release(dev);
     res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuDevicePrimaryCtxReset_v2, dev);
     driver_admission_release(&lease_fd);
     // The driver keeps its retain count across a reset, so the count here
     // stays as it is and releases after the reset count down as before.
-    if (res == CUDA_SUCCESS) graph_primary_context_released(dev, 1);
+    if (res == CUDA_SUCCESS) {
+        graph_primary_context_released(dev, 1);
+        module_primary_context_released(dev, 1);
+    }
+    pthread_cleanup_pop(1);
     pthread_cleanup_pop(1);
     pthread_cleanup_pop(1);
     return res;
@@ -236,11 +260,18 @@ CUresult cuGreenCtxCreate(CUgreenCtx *phCtx, CUdevResourceDesc desc, CUdevice de
 /** Retire completion tracking after a green context is destroyed. */
 CUresult cuGreenCtxDestroy(CUgreenCtx green) {
     CUcontext ctx = NULL;
+    CUresult res;
     CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxFromGreenCtx, &ctx, green);
     cuuint64_t id = graph_context_id(ctx);
+    memory_op_enter();
+    pthread_cleanup_push(leave_ctx_memory_op_cleanup, NULL);
     graph_context_prepare_destroy(ctx, id);
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGreenCtxDestroy, green);
-    if (res == CUDA_SUCCESS && ctx != NULL) graph_context_destroyed(ctx, id);
+    res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGreenCtxDestroy, green);
+    if (res == CUDA_SUCCESS && ctx != NULL) {
+        graph_context_destroyed(ctx, id);
+        module_context_destroyed(ctx, id);
+    }
+    pthread_cleanup_pop(1);
     return res;
 }
 #endif
@@ -259,12 +290,20 @@ CUresult cuCtxCreate_v4(CUcontext* pctx, CUctxCreateParams* ctxCreateParams, uns
 /** Destroy a context and retire graph charges for its recorded generation. */
 CUresult cuCtxDestroy_v2 ( CUcontext ctx ){
     pthread_mutex_t *legacy = legacy_context_lock();
+    CUresult res;
+    pthread_cleanup_push(unlock_legacy_context_cleanup, legacy);
     cuuint64_t id = graph_context_id(ctx);
     LOG_DEBUG("into cuCtxDestroy_v2 ctx=%p",ctx);
+    memory_op_enter();
+    pthread_cleanup_push(leave_ctx_memory_op_cleanup, NULL);
     graph_context_prepare_destroy(ctx, id);
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxDestroy_v2, ctx);
-    if (res == CUDA_SUCCESS) graph_context_destroyed(ctx, id);
-    if (legacy != NULL) pthread_mutex_unlock(legacy);
+    res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxDestroy_v2, ctx);
+    if (res == CUDA_SUCCESS) {
+        graph_context_destroyed(ctx, id);
+        module_context_destroyed(ctx, id);
+    }
+    pthread_cleanup_pop(1);
+    pthread_cleanup_pop(1);
     return res;
 }
 
@@ -345,13 +384,16 @@ CUresult cuCtxSetSharedMemConfig ( CUsharedconfig config ){
 }
 
 /** Synchronize the current context and release charges covered by the submission snapshot. */
-CUresult cuCtxSynchronize ( void ){
+CUresult cuCtxSynchronize(void) {
     LOG_DEBUG("INTO CtxSync");
     uint64_t submitted = graph_sync_begin();
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuCtxSynchronize);
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxSynchronize);
     CUcontext ctx;
     if (res == CUDA_SUCCESS &&
-        CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxGetCurrent, &ctx) == CUDA_SUCCESS)
+        CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxGetCurrent, &ctx) == CUDA_SUCCESS) {
+        memory_op_enter();
         graph_synchronized(ctx, NULL, 1, submitted);
+        memory_op_leave();
+    }
     return res;
 }
