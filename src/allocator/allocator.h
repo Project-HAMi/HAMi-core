@@ -93,6 +93,16 @@ int oom_check(const int dev,size_t addon);
  * release_device_memory() if the subsequent CUDA alloc fails. */
 int reserve_device_memory(CUdevice dev, size_t size);
 void release_device_memory(CUdevice dev, size_t size);
+CUresult reserve_module_memory(CUdevice dev, size_t size);
+void release_module_memory(CUdevice dev, size_t size);
+void memory_op_enter(void);
+void memory_op_leave(void);
+void memory_sampling_enter(void);
+void memory_sampling_leave(void);
+void module_graph_enter(void);
+void module_graph_leave(void);
+void module_graph_quiesce_enter(void);
+void module_graph_quiesce_leave(void);
 
 /* Reserve graph demand before native mutation and retain charges for graph/exec
  * lifetimes and persistent outputs until their pointers are freed. */

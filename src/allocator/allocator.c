@@ -98,6 +98,136 @@ void release_device_memory(CUdevice dev, size_t size) {
     unlock_shrreg();
 }
 
+static CUresult reserve_module_memory_impl(CUdevice dev, size_t size) {
+    lock_shrreg();
+    if (oom_check_impl(dev, size, 1)) {
+        unlock_shrreg();
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+    add_gpu_device_memory_usage(getpid(), dev, size, 1);
+    unlock_shrreg();
+    return CUDA_SUCCESS;
+}
+
+CUresult reserve_module_memory(CUdevice dev, size_t size) {
+    graph_reclaim(0);
+    CUresult ret = reserve_module_memory_impl(dev, size);
+    if (ret != CUDA_SUCCESS) {
+        unsigned int trim_mask = graph_trim_mask(dev, size);
+        if (trim_mask != 0) graph_reclaim(trim_mask);
+        ret = reserve_module_memory_impl(dev, size);
+    }
+    return ret;
+}
+
+void release_module_memory(CUdevice dev, size_t size) {
+    lock_shrreg();
+    rm_gpu_device_memory_usage(getpid(), dev, size, 1);
+    unlock_shrreg();
+}
+
+static pthread_mutex_t mem_op_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t mem_op_cond = PTHREAD_COND_INITIALIZER;
+static pthread_once_t mem_op_atfork_once = PTHREAD_ONCE_INIT;
+static int mem_op_inflight = 0;
+static int mem_op_sampling = 0;
+
+static pthread_mutex_t mod_graph_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t mod_graph_cond = PTHREAD_COND_INITIALIZER;
+static int mod_graph_inflight = 0;
+static int mod_graph_quiesced = 0;
+
+static void reset_memory_ops_after_fork(void) {
+    mem_op_mutex = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+    mem_op_cond = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
+    mem_op_inflight = 0;
+    mem_op_sampling = 0;
+    mod_graph_mutex = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+    mod_graph_cond = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
+    mod_graph_inflight = 0;
+    mod_graph_quiesced = 0;
+}
+
+static void register_memory_ops_atfork(void) {
+    pthread_atfork(NULL, NULL, reset_memory_ops_after_fork);
+}
+
+void memory_op_enter(void) {
+    pthread_once(&mem_op_atfork_once, register_memory_ops_atfork);
+    pthread_mutex_lock(&mem_op_mutex);
+    while (mem_op_sampling > 0) {
+        pthread_cond_wait(&mem_op_cond, &mem_op_mutex);
+    }
+    mem_op_inflight++;
+    pthread_mutex_unlock(&mem_op_mutex);
+}
+
+void memory_op_leave(void) {
+    pthread_mutex_lock(&mem_op_mutex);
+    mem_op_inflight--;
+    if (mem_op_inflight == 0 && mem_op_sampling > 0) {
+        pthread_cond_broadcast(&mem_op_cond);
+    }
+    pthread_mutex_unlock(&mem_op_mutex);
+}
+
+void memory_sampling_enter(void) {
+    pthread_once(&mem_op_atfork_once, register_memory_ops_atfork);
+    pthread_mutex_lock(&mem_op_mutex);
+    mem_op_sampling++;
+    while (mem_op_inflight > 0) {
+        pthread_cond_wait(&mem_op_cond, &mem_op_mutex);
+    }
+    pthread_mutex_unlock(&mem_op_mutex);
+}
+
+void memory_sampling_leave(void) {
+    pthread_mutex_lock(&mem_op_mutex);
+    mem_op_sampling--;
+    if (mem_op_sampling == 0) {
+        pthread_cond_broadcast(&mem_op_cond);
+    }
+    pthread_mutex_unlock(&mem_op_mutex);
+}
+
+void module_graph_enter(void) {
+    pthread_once(&mem_op_atfork_once, register_memory_ops_atfork);
+    pthread_mutex_lock(&mod_graph_mutex);
+    while (mod_graph_quiesced > 0) {
+        pthread_cond_wait(&mod_graph_cond, &mod_graph_mutex);
+    }
+    mod_graph_inflight++;
+    pthread_mutex_unlock(&mod_graph_mutex);
+}
+
+void module_graph_leave(void) {
+    pthread_mutex_lock(&mod_graph_mutex);
+    mod_graph_inflight--;
+    if (mod_graph_inflight == 0 && mod_graph_quiesced > 0) {
+        pthread_cond_broadcast(&mod_graph_cond);
+    }
+    pthread_mutex_unlock(&mod_graph_mutex);
+}
+
+void module_graph_quiesce_enter(void) {
+    pthread_once(&mem_op_atfork_once, register_memory_ops_atfork);
+    pthread_mutex_lock(&mod_graph_mutex);
+    mod_graph_quiesced++;
+    while (mod_graph_inflight > 0) {
+        pthread_cond_wait(&mod_graph_cond, &mod_graph_mutex);
+    }
+    pthread_mutex_unlock(&mod_graph_mutex);
+}
+
+void module_graph_quiesce_leave(void) {
+    pthread_mutex_lock(&mod_graph_mutex);
+    mod_graph_quiesced--;
+    if (mod_graph_quiesced == 0) {
+        pthread_cond_broadcast(&mod_graph_cond);
+    }
+    pthread_mutex_unlock(&mod_graph_mutex);
+}
+
 void allocator_init() {
     LOG_DEBUG("Allocator_init\n");
 
