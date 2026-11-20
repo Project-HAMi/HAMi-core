@@ -215,8 +215,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_sm_limiter_step"
             OR TEST_TARGET_NAME STREQUAL "test_utilization_watcher_interval")
-        # Includes the watcher source to reach its static step function and
-        # stubs the shared region, so it needs no GPU.
+        # Includes the watcher source to reach its static helpers and stubs
+        # the shared region, so it needs no GPU.
         add_executable(${TEST_TARGET_NAME}
             ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
@@ -518,6 +518,8 @@ add_test(NAME sm_limiter_step
     COMMAND test_sm_limiter_step)
 set_tests_properties(sm_limiter_step PROPERTIES TIMEOUT 10)
 
+# The watcher polls every 120 ms only when a device has a core limit from 1
+# to 99, and every second otherwise.
 add_test(NAME utilization_watcher_interval
     COMMAND test_utilization_watcher_interval)
 set_tests_properties(utilization_watcher_interval PROPERTIES TIMEOUT 10)

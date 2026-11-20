@@ -285,10 +285,9 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
 }
 
 /*
- * The limiter only needs 120 ms ticks on a device with a core limit below 100.
- * Otherwise the watcher only refreshes sm_util and monitorused, so it polls
- * once a second instead of querying NVML and taking the shared region lock
- * every 120 ms.
+ * The limiter only needs 120 ms ticks on a device with a core limit from 1 to 99.
+ * Otherwise the watcher only refreshes sm_util and monitorused, so once a
+ * second is enough.
  */
 static void choose_watcher_interval(const int *limits, unsigned int count, struct timespec *out) {
     unsigned int dev;
@@ -370,14 +369,13 @@ void init_utilization_watcher() {
         }
     }
 
-    choose_watcher_interval(cached_sm_limit,
-                            device_count < CUDA_DEVICE_MAX_COUNT ? device_count : CUDA_DEVICE_MAX_COUNT,
-                            &watcher_interval);
-    LOG_INFO("utilization watcher polls every %d ms",
-             (int)(watcher_interval.tv_sec * 1000 + watcher_interval.tv_nsec / 1000000));
-
     pthread_t tid;
     if (has_limit) {
+        choose_watcher_interval(cached_sm_limit,
+                                device_count < CUDA_DEVICE_MAX_COUNT ? device_count : CUDA_DEVICE_MAX_COUNT,
+                                &watcher_interval);
+        LOG_INFO("utilization watcher polls every %d ms",
+                 (int)(watcher_interval.tv_sec * 1000 + watcher_interval.tv_nsec / 1000000));
         pthread_create(&tid, NULL, utilization_watcher, NULL);
     }
 }
