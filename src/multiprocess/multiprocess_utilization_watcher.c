@@ -33,6 +33,8 @@ int cuda_to_nvml_map_array[CUDA_DEVICE_MAX_COUNT];
 /* Cached at init — these values do not change at runtime */
 static int cached_sm_limit[CUDA_DEVICE_MAX_COUNT] = {0};
 static int cached_util_switch = 0;
+/* Chosen at init, before the watcher thread starts. */
+static struct timespec watcher_interval;
 
 void rate_limiter(int64_t grids, int64_t blocks) {
   CUdevice current_device;
@@ -282,6 +284,24 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
     return 0;
 }
 
+/*
+ * The limiter only needs 120 ms ticks on a device with a core limit below 100.
+ * Otherwise the watcher only refreshes sm_util and monitorused, so it polls
+ * once a second instead of querying NVML and taking the shared region lock
+ * every 120 ms.
+ */
+static void choose_watcher_interval(const int *limits, unsigned int count, struct timespec *out) {
+    unsigned int dev;
+
+    for (dev = 0; dev < count; dev++) {
+        if (limits[dev] > 0 && limits[dev] < 100) {
+            *out = g_wait;
+            return;
+        }
+    }
+    *out = g_idle_wait;
+}
+
 void* utilization_watcher() {
     nvmlInit();
     int userutil[CUDA_DEVICE_MAX_COUNT];
@@ -297,7 +317,7 @@ void* utilization_watcher() {
     ensure_initialized();
 
     while (1){
-        nanosleep(&g_wait, NULL);
+        nanosleep(&watcher_interval, NULL);
         if (pidfound==0) {
           update_host_pid();
           if (pidfound==0)
@@ -349,6 +369,12 @@ void init_utilization_watcher() {
             has_limit = 1;
         }
     }
+
+    choose_watcher_interval(cached_sm_limit,
+                            device_count < CUDA_DEVICE_MAX_COUNT ? device_count : CUDA_DEVICE_MAX_COUNT,
+                            &watcher_interval);
+    LOG_INFO("utilization watcher polls every %d ms",
+             (int)(watcher_interval.tv_sec * 1000 + watcher_interval.tv_nsec / 1000000));
 
     pthread_t tid;
     if (has_limit) {

@@ -16,6 +16,11 @@ static const struct timespec g_wait = {
     .tv_nsec = 120 * MILLISEC,
 };
 
+static const struct timespec g_idle_wait = {
+    .tv_sec = 1,
+    .tv_nsec = 0,
+};
+
 
 void rate_limiter(int64_t grids, int64_t blocks);
 void init_utilization_watcher();

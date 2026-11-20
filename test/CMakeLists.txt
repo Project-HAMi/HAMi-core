@@ -213,7 +213,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             -ffunction-sections -fdata-sections)
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
-    elseif (TEST_TARGET_NAME STREQUAL "test_sm_limiter_step")
+    elseif (TEST_TARGET_NAME STREQUAL "test_sm_limiter_step"
+            OR TEST_TARGET_NAME STREQUAL "test_utilization_watcher_interval")
         # Includes the watcher source to reach its static step function and
         # stubs the shared region, so it needs no GPU.
         add_executable(${TEST_TARGET_NAME}
@@ -329,7 +330,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_graph_pool_lifetimes"
             OR TEST_TARGET_NAME STREQUAL "test_graph_submission_accounting")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
-    elseif (TEST_TARGET_NAME STREQUAL "test_sm_limiter_step")
+    elseif (TEST_TARGET_NAME STREQUAL "test_sm_limiter_step"
+            OR TEST_TARGET_NAME STREQUAL "test_utilization_watcher_interval")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_memory_index_map"
             OR TEST_TARGET_NAME STREQUAL "test_meminfo_null_out"
@@ -515,6 +517,10 @@ set_tests_properties(cuda_memory_compat PROPERTIES
 add_test(NAME sm_limiter_step
     COMMAND test_sm_limiter_step)
 set_tests_properties(sm_limiter_step PROPERTIES TIMEOUT 10)
+
+add_test(NAME utilization_watcher_interval
+    COMMAND test_utilization_watcher_interval)
+set_tests_properties(utilization_watcher_interval PROPERTIES TIMEOUT 10)
 
 add_test(NAME graph_capture_lifecycle COMMAND test_graph_capture_lifecycle)
 set_tests_properties(graph_capture_lifecycle PROPERTIES TIMEOUT 15)
