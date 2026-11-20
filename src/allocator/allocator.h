@@ -100,6 +100,14 @@ void memory_op_leave(void);
 void memory_sampling_enter(void);
 void memory_sampling_leave(void);
 
+void module_load_lock(void);
+void module_load_unlock(void);
+CUresult module_admit_loaded(CUmodule handle, CUcontext ctx, cuuint64_t ctx_id,
+                             CUdevice dev, size_t size);
+void module_release_unloaded(CUmodule handle);
+void module_context_destroyed(CUcontext ctx, cuuint64_t id);
+void module_primary_context(CUdevice dev, CUcontext ctx);
+void module_primary_context_released(CUdevice dev, int reset);
 /* Reserve graph demand before native mutation and retain charges for graph/exec
  * lifetimes and persistent outputs until their pointers are freed. */
 typedef struct graph_charge_entry graph_charge_entry;

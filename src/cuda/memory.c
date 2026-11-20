@@ -69,7 +69,9 @@ CUresult cuMemAllocManaged(CUdeviceptr* dptr, size_t bytesize, unsigned int flag
     ENSURE_RUNNING();
     CUdevice dev;
     CHECK_DRV_API(cuCtxGetDevice(&dev));
+    memory_op_enter();
     if (reserve_device_memory(dev, bytesize) != 0) {
+        memory_op_leave();
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemAllocManaged, dptr, bytesize, flags);
@@ -77,11 +79,13 @@ CUresult cuMemAllocManaged(CUdeviceptr* dptr, size_t bytesize, unsigned int flag
         if (add_chunk_only(*dptr, bytesize, dev) != 0) {
             CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFree_v2, *dptr);
             release_device_memory(dev, bytesize);
+            memory_op_leave();
             return CUDA_ERROR_OUT_OF_MEMORY;
         }
     } else {
         release_device_memory(dev, bytesize);
     }
+    memory_op_leave();
     return res;
 }
 
@@ -95,18 +99,22 @@ CUresult cuMemAllocPitch_v2(CUdeviceptr* dptr, size_t* pPitch, size_t WidthInByt
     ENSURE_RUNNING();
     CUdevice dev;
     CHECK_DRV_API(cuCtxGetDevice(&dev));
+    memory_op_enter();
     if (reserve_device_memory(dev, bytesize) != 0) {
+        memory_op_leave();
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemAllocPitch_v2, dptr, pPitch, WidthInBytes, Height, ElementSizeBytes);
     if (res != CUDA_SUCCESS) {
         release_device_memory(dev, bytesize);
+        memory_op_leave();
         return res;
     }
     /* Driver pitch may exceed guess_pitch due to alignment; account for real size. */
     if (Height != 0 && pPitch != NULL && *pPitch > SIZE_MAX / Height) {
         CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFree_v2, *dptr);
         release_device_memory(dev, bytesize);
+        memory_op_leave();
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
     actual = (pPitch != NULL) ? (*pPitch * Height) : bytesize;
@@ -114,6 +122,7 @@ CUresult cuMemAllocPitch_v2(CUdeviceptr* dptr, size_t* pPitch, size_t WidthInByt
         if (reserve_device_memory(dev, actual - bytesize) != 0) {
             CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFree_v2, *dptr);
             release_device_memory(dev, bytesize);
+            memory_op_leave();
             return CUDA_ERROR_OUT_OF_MEMORY;
         }
     } else if (actual < bytesize) {
@@ -122,8 +131,10 @@ CUresult cuMemAllocPitch_v2(CUdeviceptr* dptr, size_t* pPitch, size_t WidthInByt
     if (add_chunk_only(*dptr, actual, dev) != 0) {
         CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFree_v2, *dptr);
         release_device_memory(dev, actual);
+        memory_op_leave();
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
+    memory_op_leave();
     return CUDA_SUCCESS;
 }
 
@@ -530,7 +541,11 @@ CUresult cuMemCreate ( CUmemGenericAllocationHandle* handle, size_t size, const 
     if (do_oom_check && cuCtxGetDevice(&dev) != CUDA_SUCCESS) {
         dev = prop->location.id;
     }
+    if (do_oom_check) {
+        memory_op_enter();
+    }
     if (do_oom_check && reserve_device_memory(dev, size) != 0) {
+        memory_op_leave();
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,
@@ -540,26 +555,31 @@ CUresult cuMemCreate ( CUmemGenericAllocationHandle* handle, size_t size, const 
             if (add_chunk_only(*handle, size, dev) != 0) {
                 CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemRelease, *handle);
                 release_device_memory(dev, size);
+                memory_op_leave();
                 return CUDA_ERROR_OUT_OF_MEMORY;
             }
             if (vmm_handle_created(*handle) != 0) {
                 remove_chunk_only(*handle);
                 CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemRelease, *handle);
+                memory_op_leave();
                 return CUDA_ERROR_OUT_OF_MEMORY;
             }
         } else {
             release_device_memory(dev, size);
         }
+        memory_op_leave();
     }
     return res;
 }
 
 CUresult cuMemRelease(CUmemGenericAllocationHandle handle) {
     LOG_INFO("cuMemRelease:%llx", handle);
+    memory_op_enter();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemRelease, handle);
     if (res == CUDA_SUCCESS) {
         vmm_handle_released(handle);
     }
+    memory_op_leave();
     return res;
 }
 
@@ -576,10 +596,12 @@ CUresult cuMemMap( CUdeviceptr ptr, size_t size, size_t offset, CUmemGenericAllo
 
 CUresult cuMemUnmap(CUdeviceptr ptr, size_t size) {
     LOG_INFO("cuMemUnmap:%lld(%llx)", size, ptr);
+    memory_op_enter();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemUnmap, ptr, size);
     if (res == CUDA_SUCCESS) {
         vmm_unmapped(ptr, size);
     }
+    memory_op_leave();
     return res;
 }
 
