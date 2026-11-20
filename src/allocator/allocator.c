@@ -98,6 +98,89 @@ void release_device_memory(CUdevice dev, size_t size) {
     unlock_shrreg();
 }
 
+static CUresult reserve_module_memory_impl(CUdevice dev, size_t size) {
+    lock_shrreg();
+    if (oom_check_impl(dev, size, 1)) {
+        unlock_shrreg();
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+    add_gpu_device_memory_usage(getpid(), dev, size, 1);
+    unlock_shrreg();
+    return CUDA_SUCCESS;
+}
+
+CUresult reserve_module_memory(CUdevice dev, size_t size) {
+    graph_reclaim(0);
+    CUresult ret = reserve_module_memory_impl(dev, size);
+    if (ret != CUDA_SUCCESS) {
+        unsigned int trim_mask = graph_trim_mask(dev, size);
+        if (trim_mask != 0) graph_reclaim(trim_mask);
+        ret = reserve_module_memory_impl(dev, size);
+    }
+    return ret;
+}
+
+void release_module_memory(CUdevice dev, size_t size) {
+    lock_shrreg();
+    rm_gpu_device_memory_usage(getpid(), dev, size, 1);
+    unlock_shrreg();
+}
+
+static pthread_mutex_t mem_op_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t mem_op_cond = PTHREAD_COND_INITIALIZER;
+static pthread_once_t mem_op_atfork_once = PTHREAD_ONCE_INIT;
+static int mem_op_inflight = 0;
+static int mem_op_sampling = 0;
+
+static void reset_memory_ops_after_fork(void) {
+    mem_op_mutex = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+    mem_op_cond = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
+    mem_op_inflight = 0;
+    mem_op_sampling = 0;
+}
+
+static void register_memory_ops_atfork(void) {
+    pthread_atfork(NULL, NULL, reset_memory_ops_after_fork);
+}
+
+void memory_op_enter(void) {
+    pthread_once(&mem_op_atfork_once, register_memory_ops_atfork);
+    pthread_mutex_lock(&mem_op_mutex);
+    while (mem_op_sampling > 0) {
+        pthread_cond_wait(&mem_op_cond, &mem_op_mutex);
+    }
+    mem_op_inflight++;
+    pthread_mutex_unlock(&mem_op_mutex);
+}
+
+void memory_op_leave(void) {
+    pthread_mutex_lock(&mem_op_mutex);
+    mem_op_inflight--;
+    if (mem_op_inflight == 0 && mem_op_sampling > 0) {
+        pthread_cond_broadcast(&mem_op_cond);
+    }
+    pthread_mutex_unlock(&mem_op_mutex);
+}
+
+void memory_sampling_enter(void) {
+    pthread_once(&mem_op_atfork_once, register_memory_ops_atfork);
+    pthread_mutex_lock(&mem_op_mutex);
+    mem_op_sampling++;
+    while (mem_op_inflight > 0) {
+        pthread_cond_wait(&mem_op_cond, &mem_op_mutex);
+    }
+    pthread_mutex_unlock(&mem_op_mutex);
+}
+
+void memory_sampling_leave(void) {
+    pthread_mutex_lock(&mem_op_mutex);
+    mem_op_sampling--;
+    if (mem_op_sampling == 0) {
+        pthread_cond_broadcast(&mem_op_cond);
+    }
+    pthread_mutex_unlock(&mem_op_mutex);
+}
+
 void allocator_init() {
     LOG_DEBUG("Allocator_init\n");
 
@@ -145,14 +228,18 @@ int add_chunk(CUdeviceptr *address, size_t size) {
     /* Reserve under the shared-region lock so concurrent processes cannot
      * both pass oom_check before either commits usage. CUDA alloc stays
      * outside the lock. */
-    if (reserve_device_memory(dev, size) != 0)
+    memory_op_enter();
+    if (reserve_device_memory(dev, size) != 0) {
+        memory_op_leave();
         return CUDA_ERROR_OUT_OF_MEMORY;
+    }
 
     /* GPU allocation outside lock, the expensive part */
     res = cuMemoryAllocate(address, size, NULL);
     if (res != CUDA_SUCCESS) {
         LOG_ERROR("cuMemoryAllocate failed res=%d", res);
         release_device_memory(dev, size);
+        memory_op_leave();
         return res;
     }
 
@@ -162,11 +249,13 @@ int add_chunk(CUdeviceptr *address, size_t size) {
         pthread_mutex_unlock(&mutex);
         cuMemoryFree(*address);
         release_device_memory(dev, size);
+        memory_op_leave();
         return -1;
     }
     e->entry->address = *address;
     LIST_ADD(device_overallocated, e);
     pthread_mutex_unlock(&mutex);
+    memory_op_leave();
     return 0;
 }
 
@@ -206,6 +295,7 @@ int remove_chunk(allocated_list *a_list, CUdeviceptr dptr) {
         return cuMemoryFree(dptr);
     }
 
+    memory_op_enter();
     pthread_mutex_lock(&mutex);
 
     allocated_list_entry *val;
@@ -220,6 +310,7 @@ int remove_chunk(allocated_list *a_list, CUdeviceptr dptr) {
 
             /* GPU free outside lock */
             cuMemoryFree(dptr);
+            memory_op_leave();
             return 0;
         }
     }
@@ -230,7 +321,9 @@ int remove_chunk(allocated_list *a_list, CUdeviceptr dptr) {
      * returning -1, which leaves the allocation live and surfaces to the caller
      * as an unrecognized CUresult. Mirrors the not-found path in
      * remove_chunk_async. */
-    return cuMemoryFree(dptr);
+    int ret = cuMemoryFree(dptr);
+    memory_op_leave();
+    return ret;
 }
 
 int remove_chunk_only(CUdeviceptr dptr) {
@@ -415,10 +508,12 @@ int remove_chunk_async(
 
 /** Keep asynchronous free tracking within the capture transition lock. */
 int free_raw_async(CUdeviceptr dptr, CUstream hStream) {
+    memory_op_enter();
     pthread_mutex_lock(&mutex);
     unsigned int tmp = remove_chunk_async(device_allocasync, dptr, hStream);
     if (tmp == CUDA_SUCCESS) graph_ptr_freed_async(dptr, hStream);
     pthread_mutex_unlock(&mutex);
+    memory_op_leave();
     return tmp;
 }
 
@@ -2003,16 +2098,187 @@ int add_chunk_from_pool_async(CUdeviceptr *address, size_t size, CUmemoryPool po
 
 int allocate_async_raw(CUdeviceptr *dptr, size_t size, CUstream hStream) {
     int tmp;
+    memory_op_enter();
     pthread_mutex_lock(&mutex);
     tmp = add_chunk_async(dptr,size,hStream);
     pthread_mutex_unlock(&mutex);
+    memory_op_leave();
     return tmp;
 }
 
 int allocate_from_pool_async_raw(CUdeviceptr *dptr, size_t size, CUmemoryPool pool, CUstream hStream) {
     int tmp;
+    memory_op_enter();
     pthread_mutex_lock(&mutex);
     tmp = add_chunk_from_pool_async(dptr, size, pool, hStream);
     pthread_mutex_unlock(&mutex);
+    memory_op_leave();
     return tmp;
+}
+
+typedef struct module_alloc_entry {
+    CUmodule handle;
+    CUcontext ctx;
+    cuuint64_t ctx_id;
+    CUdevice dev;
+    size_t size;
+    struct module_alloc_entry *next;
+} module_alloc_entry_t;
+
+static pthread_mutex_t module_load_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t module_list_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_once_t module_atfork_once = PTHREAD_ONCE_INIT;
+static module_alloc_entry_t *module_alloc_list;
+static CUcontext module_primary_ctx[CUDA_DEVICE_MAX_COUNT];
+static cuuint64_t module_primary_ctx_id[CUDA_DEVICE_MAX_COUNT];
+static pid_t module_owner_pid;
+
+static void clear_local_module_entries_locked(void) {
+    while (module_alloc_list != NULL) {
+        module_alloc_entry_t *next = module_alloc_list->next;
+        free(module_alloc_list);
+        module_alloc_list = next;
+    }
+    memset(module_primary_ctx, 0, sizeof(module_primary_ctx));
+    memset(module_primary_ctx_id, 0, sizeof(module_primary_ctx_id));
+}
+
+static void reset_module_tracking_after_fork(void) {
+    module_load_mutex = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+    module_list_mutex = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+    clear_local_module_entries_locked();
+    module_owner_pid = getpid();
+}
+
+static void register_module_atfork(void) {
+    pthread_atfork(NULL, NULL, reset_module_tracking_after_fork);
+}
+
+static void reset_module_list_if_forked_locked(void) {
+    pid_t self = getpid();
+    if (module_owner_pid != 0 && module_owner_pid != self) {
+        clear_local_module_entries_locked();
+    }
+    module_owner_pid = self;
+}
+
+void module_load_lock(void) {
+    pthread_once(&module_atfork_once, register_module_atfork);
+    pthread_mutex_lock(&module_load_mutex);
+}
+
+void module_load_unlock(void) {
+    pthread_mutex_unlock(&module_load_mutex);
+}
+
+CUresult module_admit_loaded(CUmodule handle, CUcontext ctx, cuuint64_t ctx_id,
+                             CUdevice dev, size_t size) {
+    if (handle == NULL || size == 0) {
+        return CUDA_SUCCESS;
+    }
+    module_alloc_entry_t *entry = malloc(sizeof(*entry));
+    if (entry == NULL) {
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+    CUresult ret = reserve_module_memory(dev, size);
+    if (ret != CUDA_SUCCESS) {
+        free(entry);
+        return ret;
+    }
+    entry->handle = handle;
+    entry->ctx = ctx;
+    entry->ctx_id = ctx_id;
+    entry->dev = dev;
+    entry->size = size;
+
+    pthread_mutex_lock(&module_list_mutex);
+    reset_module_list_if_forked_locked();
+    entry->next = module_alloc_list;
+    module_alloc_list = entry;
+    pthread_mutex_unlock(&module_list_mutex);
+    return CUDA_SUCCESS;
+}
+
+void module_release_unloaded(CUmodule handle) {
+    if (handle == NULL) {
+        return;
+    }
+    module_alloc_entry_t *victim = NULL;
+    pthread_mutex_lock(&module_list_mutex);
+    reset_module_list_if_forked_locked();
+    module_alloc_entry_t **pp = &module_alloc_list;
+    while (*pp != NULL) {
+        if ((*pp)->handle == handle) {
+            victim = *pp;
+            *pp = victim->next;
+            break;
+        }
+        pp = &(*pp)->next;
+    }
+    pthread_mutex_unlock(&module_list_mutex);
+
+    if (victim != NULL) {
+        release_module_memory(victim->dev, victim->size);
+        free(victim);
+    }
+}
+
+void module_context_destroyed(CUcontext ctx, cuuint64_t id) {
+    if (ctx == NULL) {
+        return;
+    }
+    module_alloc_entry_t *detached = NULL;
+    pthread_mutex_lock(&module_list_mutex);
+    reset_module_list_if_forked_locked();
+    module_alloc_entry_t **pp = &module_alloc_list;
+    while (*pp != NULL) {
+        module_alloc_entry_t *cur = *pp;
+        if (cur->ctx == ctx && cur->ctx_id == id) {
+            *pp = cur->next;
+            cur->next = detached;
+            detached = cur;
+        } else {
+            pp = &cur->next;
+        }
+    }
+    pthread_mutex_unlock(&module_list_mutex);
+
+    while (detached != NULL) {
+        module_alloc_entry_t *next = detached->next;
+        release_module_memory(detached->dev, detached->size);
+        free(detached);
+        detached = next;
+    }
+}
+
+void module_primary_context(CUdevice dev, CUcontext ctx) {
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        return;
+    }
+    cuuint64_t id = graph_context_id(ctx);
+    pthread_mutex_lock(&module_list_mutex);
+    reset_module_list_if_forked_locked();
+    module_primary_ctx[dev] = ctx;
+    module_primary_ctx_id[dev] = id;
+    pthread_mutex_unlock(&module_list_mutex);
+}
+
+void module_primary_context_released(CUdevice dev, int reset) {
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        return;
+    }
+    pthread_mutex_lock(&module_list_mutex);
+    reset_module_list_if_forked_locked();
+    CUcontext ctx = module_primary_ctx[dev];
+    cuuint64_t id = module_primary_ctx_id[dev];
+    if (!reset) {
+        module_primary_ctx[dev] = NULL;
+        module_primary_ctx_id[dev] = 0;
+    }
+    pthread_mutex_unlock(&module_list_mutex);
+
+    module_context_destroyed(ctx, id);
+    if (reset && ctx != NULL) {
+        module_primary_context(dev, ctx);
+    }
 }

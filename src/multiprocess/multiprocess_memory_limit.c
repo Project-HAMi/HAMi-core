@@ -436,6 +436,42 @@ size_t get_gpu_memory_usage(const int dev) {
     return total;
 }
 
+int get_self_device_memory_snapshot(int cudadev, int32_t *hostpid, uint64_t *used_total) {
+    if (hostpid == NULL || used_total == NULL) {
+        return -1;
+    }
+    int dev = cuda_to_nvml_map(cudadev);
+    ensure_initialized();
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        return -1;
+    }
+    lock_shrreg();
+    shrreg_proc_slot_t *slot = get_current_proc_slot();
+    if (slot == NULL) {
+        unlock_shrreg();
+        return -1;
+    }
+    uint64_t seq1, seq2, total;
+    int32_t hpid;
+    do {
+        do {
+            seq1 = atomic_load_explicit(&slot->seqlock, memory_order_acquire);
+        } while (seq1 & 1);
+        total = atomic_load_explicit(&slot->used[dev].total, memory_order_acquire);
+        hpid = atomic_load_explicit(&slot->hostpid, memory_order_acquire);
+        atomic_thread_fence(memory_order_acquire);
+        seq2 = atomic_load_explicit(&slot->seqlock, memory_order_acquire);
+    } while (seq1 != seq2);
+    unlock_shrreg();
+
+    if (hpid <= 0) {
+        return -1;
+    }
+    *hostpid = hpid;
+    *used_total = total;
+    return 0;
+}
+
 // Lock-free memory monitor update
 int set_gpu_device_memory_monitor(int32_t pid,int dev,size_t monitor){
     int i;

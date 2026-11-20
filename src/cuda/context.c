@@ -107,6 +107,7 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev) {
     driver_admission_release(&lease_fd);
     if (res == CUDA_SUCCESS) {
         graph_primary_context(dev, *pctx);
+        module_primary_context(dev, *pctx);
         if (dev >= 0 && dev < CUDA_DEVICE_MAX_COUNT)
             __atomic_add_fetch(&primary_context_retains[dev], 1, __ATOMIC_RELAXED);
     }
@@ -160,8 +161,10 @@ CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
             __atomic_load_n(&primary_context_retains[dev], __ATOMIC_RELAXED) > 0)
             __atomic_sub_fetch(&primary_context_retains[dev], 1, __ATOMIC_RELAXED);
         if (CUDA_OVERRIDE_CALL(cuda_library_entry, cuDevicePrimaryCtxGetState, dev,
-                               &flags, &active) == CUDA_SUCCESS && !active)
+                               &flags, &active) == CUDA_SUCCESS && !active) {
             graph_primary_context_released(dev, 0);
+            module_primary_context_released(dev, 0);
+        }
     }
     pthread_cleanup_pop(1);
     pthread_cleanup_pop(1);
@@ -189,7 +192,10 @@ CUresult cuDevicePrimaryCtxReset_v2(CUdevice dev) {
     driver_admission_release(&lease_fd);
     // The driver keeps its retain count across a reset, so the count here
     // stays as it is and releases after the reset count down as before.
-    if (res == CUDA_SUCCESS) graph_primary_context_released(dev, 1);
+    if (res == CUDA_SUCCESS) {
+        graph_primary_context_released(dev, 1);
+        module_primary_context_released(dev, 1);
+    }
     pthread_cleanup_pop(1);
     pthread_cleanup_pop(1);
     return res;
@@ -238,7 +244,10 @@ CUresult cuGreenCtxDestroy(CUgreenCtx green) {
     cuuint64_t id = graph_context_id(ctx);
     graph_context_prepare_destroy(ctx, id);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGreenCtxDestroy, green);
-    if (res == CUDA_SUCCESS && ctx != NULL) graph_context_destroyed(ctx, id);
+    if (res == CUDA_SUCCESS && ctx != NULL) {
+        graph_context_destroyed(ctx, id);
+        module_context_destroyed(ctx, id);
+    }
     return res;
 }
 #endif
@@ -261,7 +270,10 @@ CUresult cuCtxDestroy_v2 ( CUcontext ctx ){
     LOG_DEBUG("into cuCtxDestroy_v2 ctx=%p",ctx);
     graph_context_prepare_destroy(ctx, id);
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxDestroy_v2, ctx);
-    if (res == CUDA_SUCCESS) graph_context_destroyed(ctx, id);
+    if (res == CUDA_SUCCESS) {
+        graph_context_destroyed(ctx, id);
+        module_context_destroyed(ctx, id);
+    }
     if (legacy != NULL) pthread_mutex_unlock(legacy);
     return res;
 }
