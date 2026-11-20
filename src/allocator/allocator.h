@@ -101,8 +101,6 @@ int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, cuuint64_t capid
                       graph_charge_entry **out);
 void graph_alloc_end(graph_charge_entry *entry, CUdeviceptr ptr, CUresult result);
 void graph_mark_free(CUgraph graph, CUdeviceptr ptr);
-void graph_ptr_freed(CUdeviceptr ptr);
-void graph_ptr_freed_async(CUdeviceptr ptr, CUstream hStream);
 void graph_release(CUgraph graph);
 typedef struct graph_exec_state graph_exec_state;
 int graph_exec_prepare(CUgraph graph, graph_exec_state **out);

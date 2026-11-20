@@ -133,7 +133,6 @@ CUresult cuMemFree_v2(CUdeviceptr dptr) {
         return CUDA_SUCCESS;
     }
     CUresult res = free_raw(dptr);
-    if (res == CUDA_SUCCESS) graph_ptr_freed(dptr);
     LOG_INFO("after free_raw dptr=%p res=%d",(void *)dptr,res);
     return res;
 }

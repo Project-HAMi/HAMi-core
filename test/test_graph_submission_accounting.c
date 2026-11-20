@@ -81,7 +81,7 @@ static void test_context_external_free(int mode, int completed, int newer) {
     REQUIRE(reserve_device_memory(0, 300 * MIB) ==
         (completed && !newer ? CUDA_SUCCESS : CUDA_ERROR_OUT_OF_MEMORY));
     if (completed && !newer) release_device_memory(0, 300 * MIB);
-    else graph_ptr_freed(ptr);
+    else REQUIRE(cuMemFree_v2(ptr) == CUDA_SUCCESS);
     completed_stream = NULL;
     destroy(a, x); destroy(b, y); clean();
 }
@@ -110,7 +110,7 @@ static void test_context_cleanup_guards(int failure) {
         REQUIRE(cuStreamEndCapture((CUstream)10, &captured) == CUDA_SUCCESS);
         REQUIRE(cuGraphDestroy(captured) == CUDA_SUCCESS);
     }
-    graph_ptr_freed(ptr);
+    REQUIRE(cuMemFree_v2(ptr) == CUDA_SUCCESS);
     completed_stream = NULL;
     destroy(a, x); destroy(b, y); clean();
 }
@@ -619,6 +619,132 @@ static void *submit_once(void *exec) {
     REQUIRE(cuGraphLaunch(exec, (CUstream)10) == CUDA_SUCCESS);
     return NULL;
 }
+
+static int pause_free, free_entered, replay_ready, replay_submitted;
+static CUresult pointer_free_result;
+
+/** Pause a native free at its return boundary or report an injected failure. */
+static CUresult driver_paused_free(CUdeviceptr ptr) {
+    REQUIRE(ptr != 0);
+    pthread_mutex_lock(&submit_gate);
+    free_entered = 1;
+    pthread_cond_broadcast(&submit_cond);
+    while (pause_free) pthread_cond_wait(&submit_cond, &submit_gate);
+    pthread_mutex_unlock(&submit_gate);
+    return pointer_free_result;
+}
+
+/** Simulate an asynchronous free on the replay stream. */
+static CUresult driver_paused_free_async(CUdeviceptr ptr, CUstream stream) {
+    REQUIRE(stream == (CUstream)10);
+    return driver_paused_free(ptr);
+}
+
+/** Record a replay reaching the driver. */
+static CUresult driver_observe_replay(CUgraphExec exec, CUstream stream) {
+    pthread_mutex_lock(&submit_gate);
+    replay_submitted = 1;
+    pthread_cond_broadcast(&submit_cond);
+    pthread_mutex_unlock(&submit_gate);
+    return driver_submit(exec, stream);
+}
+
+typedef struct output_free {
+    CUdeviceptr ptr;
+    int async;
+    CUresult result;
+} output_free;
+
+/** Free one graph output through the public wrapper. */
+static void *free_output(void *arg) {
+    output_free *output = arg;
+    output->result = output->async ? cuMemFreeAsync(output->ptr, (CUstream)10) : cuMemFree_v2(output->ptr);
+    return NULL;
+}
+
+/** Signal before replay so the test can observe whether it reaches the driver. */
+static void *replay_output(void *exec) {
+    pthread_mutex_lock(&submit_gate);
+    replay_ready = 1;
+    pthread_cond_broadcast(&submit_cond);
+    pthread_mutex_unlock(&submit_gate);
+    return submit_once(exec);
+}
+
+/** Require free and accounting to finish before the same output can be relaunched. */
+static void test_output_free_order(int async) {
+    CUgraph graph = make_graph();
+    output_free output = {.async = async};
+    REQUIRE(add(graph, 600, 0, &output.ptr) == CUDA_SUCCESS);
+    CUgraphExec exec = instantiate(graph);
+    REQUIRE(cuGraphLaunch(exec, (CUstream)10) == CUDA_SUCCESS);
+    cuda_library_entry[OVERRIDE_cuMemFree_v2].fn_ptr = driver_paused_free;
+    cuda_library_entry[OVERRIDE_cuMemFreeAsync].fn_ptr = driver_paused_free_async;
+    pointer_free_result = CUDA_ERROR_INVALID_VALUE;
+    free_output(&output);
+    REQUIRE(output.result == CUDA_ERROR_INVALID_VALUE && used == 856 * MIB);
+    pointer_free_result = CUDA_SUCCESS;
+    pause_free = 1;
+    free_entered = replay_ready = replay_submitted = 0;
+    cuda_library_entry[OVERRIDE_cuGraphLaunch].fn_ptr = driver_observe_replay;
+    pthread_t freeing, replaying;
+    REQUIRE(pthread_create(&freeing, NULL, free_output, &output) == 0);
+    pthread_mutex_lock(&submit_gate);
+    while (!free_entered) pthread_cond_wait(&submit_cond, &submit_gate);
+    REQUIRE(pthread_create(&replaying, NULL, replay_output, exec) == 0);
+    while (!replay_ready) pthread_cond_wait(&submit_cond, &submit_gate);
+    struct timespec deadline;
+    clock_gettime(CLOCK_REALTIME, &deadline);
+    deadline.tv_sec++;
+    int waited = 0;
+    while (!replay_submitted && waited == 0)
+        waited = pthread_cond_timedwait(&submit_cond, &submit_gate, &deadline);
+    REQUIRE(!replay_submitted && waited == ETIMEDOUT);
+    pause_free = 0;
+    pthread_cond_broadcast(&submit_cond);
+    pthread_mutex_unlock(&submit_gate);
+    REQUIRE(pthread_join(freeing, NULL) == 0 && pthread_join(replaying, NULL) == 0);
+    REQUIRE(output.result == CUDA_SUCCESS && replay_submitted && used == 856 * MIB);
+    cuda_library_entry[OVERRIDE_cuGraphLaunch].fn_ptr = driver_submit;
+    cuda_library_entry[OVERRIDE_cuMemFree_v2].fn_ptr = driver_free_pointer;
+    cuda_library_entry[OVERRIDE_cuMemFreeAsync].fn_ptr = NULL;
+    REQUIRE(cuMemFree_v2(output.ptr) == CUDA_SUCCESS);
+    destroy(graph, exec);
+    clean();
+}
+
+/** Keep a newly registered allocation charged when it reuses the address of an in-flight free. */
+static void test_output_address_reuse(void) {
+    CUgraph graph = make_graph();
+    output_free output = {0};
+    REQUIRE(add(graph, 300, 0, &output.ptr) == CUDA_SUCCESS);
+    CUgraphExec exec = instantiate(graph);
+    REQUIRE(cuGraphLaunch(exec, (CUstream)10) == CUDA_SUCCESS);
+    destroy(graph, exec);
+    cuda_library_entry[OVERRIDE_cuMemFree_v2].fn_ptr = driver_paused_free;
+    pause_free = 1;
+    free_entered = 0;
+    pthread_t freeing;
+    REQUIRE(pthread_create(&freeing, NULL, free_output, &output) == 0);
+    pthread_mutex_lock(&submit_gate);
+    while (!free_entered) pthread_cond_wait(&submit_cond, &submit_gate);
+    pthread_mutex_unlock(&submit_gate);
+
+    graph = make_graph();
+    graph_charge_entry *replacement;
+    REQUIRE(graph_alloc_begin(graph, 0, 100 * MIB, 0, 0, &replacement) == CUDA_SUCCESS);
+    graph_alloc_end(replacement, output.ptr, CUDA_SUCCESS);
+    pthread_mutex_lock(&submit_gate);
+    pause_free = 0;
+    pthread_cond_broadcast(&submit_cond);
+    pthread_mutex_unlock(&submit_gate);
+    REQUIRE(pthread_join(freeing, NULL) == 0);
+    REQUIRE(output.result == CUDA_SUCCESS && used == 356 * MIB);
+    cuda_library_entry[OVERRIDE_cuMemFree_v2].fn_ptr = driver_free_pointer;
+    REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
+    clean();
+}
+
 /** Perform one stream or context synchronization in a test thread. */
 static void *sync_once(void *whole_context) {
     if (whole_context != NULL) REQUIRE(cuCtxSynchronize() == CUDA_SUCCESS);
@@ -722,7 +848,7 @@ static void test_persistent(int mode) {
     }
     REQUIRE(used == 768 * MIB);
     destroy(a, x);
-    graph_ptr_freed(p); graph_ptr_freed(q);
+    REQUIRE(cuMemFree_v2(p) == CUDA_SUCCESS); REQUIRE(cuMemFree_v2(q) == CUDA_SUCCESS);
     clean();
 }
 
@@ -738,7 +864,7 @@ static void test_submission_failure(void) {
     submit_result = CUDA_SUCCESS;
     REQUIRE(used == 656 * MIB);
     destroy(a, x); destroy(b, y);
-    graph_ptr_freed(p); graph_ptr_freed(q);
+    REQUIRE(cuMemFree_v2(p) == CUDA_SUCCESS); REQUIRE(cuMemFree_v2(q) == CUDA_SUCCESS);
     clean();
 }
 
@@ -749,7 +875,7 @@ static void test_persistent_replay_after_free(void) {
     REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
     REQUIRE(used == 768 * MIB);
     reserved = 512 * MIB;
-    graph_ptr_freed(ptr); /* Preserve metadata, release the live allocation. */
+    REQUIRE(cuMemFree_v2(ptr) == CUDA_SUCCESS); /* Preserve metadata, release the live allocation. */
     REQUIRE(used == 768 * MIB); /* The driver still retains the physical pool. */
     gpu_done = 1;
     REQUIRE(cuDeviceGraphMemTrim(0) == CUDA_SUCCESS);
@@ -761,7 +887,7 @@ static void test_persistent_replay_after_free(void) {
     release_device_memory(0, 600 * MIB);
     REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
     REQUIRE(used == 768 * MIB);
-    destroy(graph, exec); graph_ptr_freed(ptr);
+    destroy(graph, exec); REQUIRE(cuMemFree_v2(ptr) == CUDA_SUCCESS);
     clean();
 }
 
@@ -954,6 +1080,7 @@ int main(void) {
     test_capture_context_failure(); test_event_failure(); test_serial_and_overlap();
     for (int mode = 0; mode < 3; mode++) test_persistent(mode);
     test_submission_failure(); test_persistent_replay_after_free(); test_destroy_inflight();
+    test_output_free_order(0); test_output_free_order(1); test_output_address_reuse();
     test_context_lifetime();
 #if CUDA_VERSION >= 12040
     DRIVER(cuCtxFromGreenCtx, driver_green_context);

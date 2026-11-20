@@ -50,11 +50,6 @@ int free_raw_async(CUdeviceptr ptr, CUstream stream) {
     REQUIRE(ptr == 101); return record_stream(stream);
 }
 
-/** Record cleanup after a successful asynchronous free. */
-void graph_ptr_freed_async(CUdeviceptr ptr, CUstream stream) {
-    REQUIRE(ptr == 101 && stream == seen_stream); completions++;
-}
-
 /** Record graph tracking after successful native instantiation. */
 int graph_exec_created(CUgraph graph, CUgraphExec exec) {
     REQUIRE(graph == (CUgraph)8 && exec == (CUgraphExec)9); completions++; return 0;

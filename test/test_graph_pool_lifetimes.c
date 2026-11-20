@@ -29,14 +29,14 @@ static void test_output_replay(void) {
     CUgraphExec exec = instantiate(graph);
     REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
     reserved = 512 * MIB;
-    graph_ptr_freed(ptr);
+    REQUIRE(cuMemFree_v2(ptr) == CUDA_SUCCESS);
     REQUIRE(used == 768 * MIB);
     gpu_done = 1;
     REQUIRE(cuDeviceGraphMemTrim(0) == CUDA_SUCCESS);
     REQUIRE(used == 256 * MIB);
     REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
     REQUIRE(used == 768 * MIB);
-    destroy(graph, exec); graph_ptr_freed(ptr);
+    destroy(graph, exec); REQUIRE(cuMemFree_v2(ptr) == CUDA_SUCCESS);
     clean();
 }
 
@@ -82,7 +82,7 @@ static void test_graph_handle_reuse(void) {
     REQUIRE(add(graph, 300, 1, NULL) == CUDA_SUCCESS);
     REQUIRE(used == 656 * MIB);
     REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
-    graph_ptr_freed(old_ptr);
+    REQUIRE(cuMemFree_v2(old_ptr) == CUDA_SUCCESS);
     clean();
 }
 
@@ -114,7 +114,7 @@ static void test_persistent_and_pending(void) {
     REQUIRE(add(b, 300, 1, NULL) == CUDA_SUCCESS); other = instantiate(b);
     REQUIRE(cuGraphLaunch(other, NULL) == CUDA_SUCCESS);
     REQUIRE(used == 956 * MIB);
-    destroy(b, other); destroy(a, exec); graph_ptr_freed(ptr); clean();
+    destroy(b, other); destroy(a, exec); REQUIRE(cuMemFree_v2(ptr) == CUDA_SUCCESS); clean();
 }
 
 /** Preserve cached backing across rebuilds and trim it only for a refused reservation. */
@@ -158,7 +158,7 @@ static void test_output_admission(int mode) {
         destroy(b, y);
     }
     REQUIRE(used == 768 * MIB);
-    destroy(a, x); graph_ptr_freed(p); graph_ptr_freed(q); clean();
+    destroy(a, x); REQUIRE(cuMemFree_v2(p) == CUDA_SUCCESS); REQUIRE(cuMemFree_v2(q) == CUDA_SUCCESS); clean();
 }
 
 /** Restore the prospective charge when the native submission fails. */
@@ -172,7 +172,9 @@ static void test_output_submission_failure(void) {
     REQUIRE(cuGraphLaunch(y, NULL) == submit_result);
     submit_result = CUDA_SUCCESS;
     REQUIRE(used == 656 * MIB);
-    destroy(a, x); destroy(b, y); graph_ptr_freed(p); graph_ptr_freed(q); clean();
+    destroy(a, x); destroy(b, y);
+    REQUIRE(cuMemFree_v2(p) == CUDA_SUCCESS); REQUIRE(cuMemFree_v2(q) == CUDA_SUCCESS);
+    clean();
 }
 
 /** Return from a deliberately paused native output submission. */
@@ -198,7 +200,7 @@ static void test_output_host_lifetime(void) {
     pthread_mutex_unlock(&submit_gate);
     REQUIRE(pthread_join(thread, NULL) == 0);
     REQUIRE(used == 856 * MIB);
-    graph_ptr_freed(ptr); clean();
+    REQUIRE(cuMemFree_v2(ptr) == CUDA_SUCCESS); clean();
 }
 
 /** Skip futile eviction while retaining trims that cover only the quota shortfall. */

@@ -382,10 +382,6 @@ int allocate_raw(CUdeviceptr *dptr, size_t size) {
     return add_chunk(dptr, size);
 }
 
-int free_raw(CUdeviceptr dptr) {
-    return remove_chunk(device_overallocated, dptr);
-}
-
 int remove_chunk_async(
     allocated_list *a_list, CUdeviceptr dptr, CUstream hStream) {
     size_t t_size;
@@ -413,15 +409,6 @@ int remove_chunk_async(
     return CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFreeAsync, dptr, hStream);
 }
 
-/** Keep asynchronous free tracking within the capture transition lock. */
-int free_raw_async(CUdeviceptr dptr, CUstream hStream) {
-    pthread_mutex_lock(&mutex);
-    unsigned int tmp = remove_chunk_async(device_allocasync, dptr, hStream);
-    if (tmp == CUDA_SUCCESS) graph_ptr_freed_async(dptr, hStream);
-    pthread_mutex_unlock(&mutex);
-    return tmp;
-}
-
 typedef struct graph_group {
     CUgraph graph;
     CUgraph owner;
@@ -432,6 +419,14 @@ typedef struct graph_group {
     size_t pending[CUDA_DEVICE_MAX_COUNT];
     struct graph_group *next;
 } graph_group;
+
+typedef struct graph_lifetime {
+    pthread_mutex_t mutex;
+    CUdeviceptr ptr;
+    uint64_t publication;
+    unsigned int refs;
+    struct graph_lifetime *next;
+} graph_lifetime;
 
 struct graph_charge_entry {
     CUgraph graph;       /* NULL once the graph is destroyed */
@@ -448,7 +443,8 @@ struct graph_charge_entry {
     int held;
     uint64_t freed;
     uint64_t generation;
-    pthread_mutex_t lifetime_mutex;
+    graph_lifetime *lifetime;
+    uint64_t publication;
     graph_group *group;
     struct graph_charge_entry *next;
 };
@@ -520,6 +516,7 @@ typedef struct capture_link {
 static capture_link *capture_links;
 static uint64_t capture_serial;
 static graph_charge_entry *graph_charges;
+static graph_lifetime *graph_lifetimes;
 static graph_group *graph_groups;
 static graph_exec_state *graph_states;
 static graph_exec_state *graph_active;
@@ -864,6 +861,26 @@ void graph_pool_trimmed(void) {
     graph_reclaim(0);
 }
 
+/** Find a published pointer lock with graph_mutex held. */
+static graph_lifetime *graph_find_lifetime(CUdeviceptr ptr) {
+    for (graph_lifetime *l = graph_lifetimes; l != NULL; l = l->next) {
+        if (l->ptr == ptr) return l;
+    }
+    return NULL;
+}
+
+/** Drop a pointer lock after its final entry or in-flight free releases it. */
+static void graph_lifetime_put(graph_lifetime *l) {
+    if (--l->refs != 0) return;
+    if (l->ptr != 0) {
+        graph_lifetime **pp = &graph_lifetimes;
+        while (*pp != l) pp = &(*pp)->next;
+        *pp = l->next;
+    }
+    pthread_mutex_destroy(&l->mutex);
+    free(l);
+}
+
 /** Remove an allocation and its executable references from cached demand. */
 static void graph_drop_entry(graph_charge_entry *e) {
     for (graph_exec_state *s = graph_states; s != NULL; s = s->next) {
@@ -894,7 +911,7 @@ static void graph_drop_entry(graph_charge_entry *e) {
         if (e->resident) graph_persistent[e->dev] -= e->size;
         else graph_pending_remove(group, e->dev, e->size);
     }
-    pthread_mutex_destroy(&e->lifetime_mutex);
+    graph_lifetime_put(e->lifetime);
     free(e);
     graph_group_put(group);
 }
@@ -910,10 +927,13 @@ int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, cuuint64_t capid
     if (dev >= count) return CUDA_SUCCESS;
     graph_charge_entry *g = calloc(1, sizeof(*g));
     if (g == NULL) return CUDA_ERROR_OUT_OF_MEMORY;
-    if (pthread_mutex_init(&g->lifetime_mutex, NULL) != 0) {
+    g->lifetime = calloc(1, sizeof(*g->lifetime));
+    if (g->lifetime == NULL || pthread_mutex_init(&g->lifetime->mutex, NULL) != 0) {
+        free(g->lifetime);
         free(g);
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
+    g->lifetime->refs = 1;
     g->graph = graph;
     g->dev = dev;
     g->size = size;
@@ -928,7 +948,7 @@ int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, cuuint64_t capid
     if (group == NULL) {
         group = calloc(1, sizeof(*group));
         if (group == NULL) {
-            pthread_mutex_destroy(&g->lifetime_mutex);
+            graph_lifetime_put(g->lifetime);
             free(g);
             pthread_mutex_unlock(&graph_mutex);
             return CUDA_ERROR_OUT_OF_MEMORY;
@@ -960,12 +980,30 @@ int graph_alloc_begin(CUgraph graph, CUdevice dev, size_t size, cuuint64_t capid
     return ret;
 }
 
+/** Share a lock across allocation records that refer to the same device address. */
+static void graph_publish_pointer(graph_charge_entry *entry, CUdeviceptr ptr) {
+    if (ptr == 0) return;
+    graph_lifetime *l = graph_find_lifetime(ptr);
+    if (l == NULL) {
+        l = entry->lifetime;
+        l->ptr = ptr;
+        l->next = graph_lifetimes;
+        graph_lifetimes = l;
+    } else {
+        graph_lifetime_put(entry->lifetime);
+        entry->lifetime = l;
+        l->refs++;
+    }
+    entry->ptr = ptr;
+    entry->publication = ++l->publication;
+}
+
 /** Commit a graph allocation or roll back its reservation after native failure. */
 void graph_alloc_end(graph_charge_entry *entry, CUdeviceptr ptr, CUresult result) {
     if (entry == NULL) return;
     pthread_mutex_lock(&graph_mutex);
     if (result == CUDA_SUCCESS) {
-        entry->ptr = ptr;
+        graph_publish_pointer(entry, ptr);
     } else {
         int capturing = entry->capturing;
         graph_drop_entry(entry);
@@ -998,12 +1036,34 @@ void graph_mark_free(CUgraph graph, CUdeviceptr ptr) {
     pthread_mutex_unlock(&graph_mutex);
 }
 
-/** Update graph allocation lifetimes after an external pointer free. */
-void graph_ptr_freed(CUdeviceptr ptr) {
+/** Pin the pointer lock and acquire it before calling the driver. */
+static graph_lifetime *graph_free_begin(CUdeviceptr ptr, uint64_t *publication) {
     pthread_mutex_lock(&graph_mutex);
-    for (graph_charge_entry *g = graph_charges, *n; g != NULL; g = n) {
+    graph_lifetime *l = graph_find_lifetime(ptr);
+    if (l != NULL) {
+        l->refs++;
+        *publication = l->publication;
+    }
+    pthread_mutex_unlock(&graph_mutex);
+    if (l != NULL) pthread_mutex_lock(&l->mutex);
+    return l;
+}
+
+/** Release the free's reference after unlocking the pointer. */
+static void graph_free_unlock(graph_lifetime *l) {
+    if (l == NULL) return;
+    pthread_mutex_unlock(&l->mutex);
+    pthread_mutex_lock(&graph_mutex);
+    graph_lifetime_put(l);
+    pthread_mutex_unlock(&graph_mutex);
+}
+
+/** Apply a successful free only to records present when the free began. */
+static void graph_free_commit(graph_lifetime *lifetime, uint64_t publication) {
+    pthread_mutex_lock(&graph_mutex);
+    for (graph_charge_entry *g = lifetime != NULL ? graph_charges : NULL, *n; g != NULL; g = n) {
         n = g->next;
-        if (g->ptr != ptr) continue;
+        if (g->lifetime != lifetime || g->publication > publication) continue;
         if (g->graph == NULL && g->nexec == 0 && g->launching == 0) {
             graph_drop_entry(g);
         } else {
@@ -1020,6 +1080,16 @@ void graph_ptr_freed(CUdeviceptr ptr) {
     graph_refresh();
     graph_rebalance(0);
     pthread_mutex_unlock(&graph_mutex);
+}
+
+/** Order synchronous graph output frees with launches and uploads. */
+int free_raw(CUdeviceptr dptr) {
+    uint64_t publication = 0;
+    graph_lifetime *l = graph_free_begin(dptr, &publication);
+    CUresult res = remove_chunk(device_overallocated, dptr);
+    if (res == CUDA_SUCCESS) graph_free_commit(l, publication);
+    graph_free_unlock(l);
+    return res;
 }
 
 /** Return native capture state while preserving query failures. */
@@ -1142,17 +1212,24 @@ cuuint64_t graph_capture_id_of(CUgraph graph) {
     return id;
 }
 
-/** Record a captured free node or release the pointer's ordinary graph charge. */
-void graph_ptr_freed_async(CUdeviceptr ptr, CUstream hStream) {
-    CUstreamCaptureStatus cap;
-    cuuint64_t id;
-    CUgraph graph;
-    graph_capture_info(hStream, &cap, &id, &graph);
-    if (cap != CU_STREAM_CAPTURE_STATUS_NONE) {
-        graph_mark_free(graph, ptr);
-    } else {
-        graph_ptr_freed(ptr);
+/** Order asynchronous frees with submissions while preserving capture tracking. */
+int free_raw_async(CUdeviceptr dptr, CUstream stream) {
+    uint64_t publication = 0;
+    graph_lifetime *l = graph_free_begin(dptr, &publication);
+    pthread_mutex_lock(&mutex);
+    CUresult res = remove_chunk_async(device_allocasync, dptr, stream);
+    if (res == CUDA_SUCCESS) {
+        CUstreamCaptureStatus cap;
+        cuuint64_t id;
+        CUgraph graph;
+        if (graph_capture_info(stream, &cap, &id, &graph) == CUDA_SUCCESS) {
+            if (cap == CU_STREAM_CAPTURE_STATUS_ACTIVE) graph_mark_free(graph, dptr);
+            if (cap == CU_STREAM_CAPTURE_STATUS_NONE) graph_free_commit(l, publication);
+        }
     }
+    pthread_mutex_unlock(&mutex);
+    graph_free_unlock(l);
+    return res;
 }
 
 /** Retain an allocation or external free in the executable's immutable snapshot. */
@@ -1285,7 +1362,7 @@ int graph_exec_prepare(CUgraph graph, graph_exec_state **out) {
     for (graph_exec_link *l = s->entries; l != NULL; l = l->next) {
         if (l->is_free || !l->has_free) {
             graph_exec_link **position = &s->updates;
-            while (*position != NULL && (uintptr_t)(*position)->entry < (uintptr_t)l->entry)
+            while (*position != NULL && (uintptr_t)(*position)->entry->lifetime < (uintptr_t)l->entry->lifetime)
                 position = &(*position)->update_next;
             l->update_next = *position;
             *position = l;
@@ -1532,22 +1609,27 @@ static void graph_exec_put_user(graph_exec_state *s) {
     pthread_mutex_unlock(&graph_mutex);
 }
 
-/** Release pointer locks after native submission state has been committed. */
-static void graph_unlock_entries(graph_exec_state *s) {
-    for (graph_exec_link *l = s->updates; l != NULL; l = l->update_next)
-        pthread_mutex_unlock(&l->entry->lifetime_mutex);
+/** Visit each shared pointer lock once in the same order for every executable. */
+static void graph_lock_entries(graph_exec_state *s, int lock) {
+    graph_lifetime *previous = NULL;
+    for (graph_exec_link *l = s->updates; l != NULL; l = l->update_next) {
+        graph_lifetime *lifetime = l->entry->lifetime;
+        if (lifetime == previous) continue;
+        if (lock) pthread_mutex_lock(&lifetime->mutex);
+        else pthread_mutex_unlock(&lifetime->mutex);
+        previous = lifetime;
+    }
 }
 
 /** Serialize submissions without holding the global graph lock while waiting. */
 static int graph_exec_lock_and_reserve(graph_exec_state *s, CUstream stream, int upload) {
     pthread_mutex_lock(&s->submit_mutex);
-    for (graph_exec_link *l = s->updates; l != NULL; l = l->update_next)
-        pthread_mutex_lock(&l->entry->lifetime_mutex);
+    graph_lock_entries(s, 1);
     pthread_mutex_lock(&graph_mutex);
     int ret = s->retired ? CUDA_ERROR_INVALID_HANDLE : graph_exec_reserve_locked(s, stream, upload);
     pthread_mutex_unlock(&graph_mutex);
     if (ret != 0) {
-        graph_unlock_entries(s);
+        graph_lock_entries(s, 0);
         pthread_mutex_unlock(&s->submit_mutex);
         graph_exec_put_user(s);
     }
@@ -1657,7 +1739,7 @@ void graph_exec_end(graph_exec_state *s, CUstream stream, CUresult result) {
         graph_rebalance(0);
     }
     pthread_mutex_unlock(&graph_mutex);
-    graph_unlock_entries(s);
+    graph_lock_entries(s, 0);
     pthread_mutex_unlock(&s->submit_mutex);
     graph_exec_put_user(s);
 }

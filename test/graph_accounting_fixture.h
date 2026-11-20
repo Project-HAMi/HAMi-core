@@ -20,6 +20,7 @@
 } while (0)
 
 cuda_entry_t cuda_library_entry[CUDA_ENTRY_END];
+static allocated_list sync_allocations, async_allocations;
 static size_t used = 256 * MIB, reserved;
 static uintptr_t serial = 10;
 static int nodes, instantiations, gpu_done;
@@ -129,6 +130,12 @@ static CUresult driver_node_type(CUgraphNode node, CUgraphNodeType *type) {
 static CUresult driver_free_params(CUgraphNode node, CUdeviceptr *ptr) {
     REQUIRE((uintptr_t)node < 8192); *ptr = graph_nodes[(uintptr_t)node].ptr; return CUDA_SUCCESS;
 }
+
+/** Simulate a successful external free of a graph allocation. */
+static CUresult driver_free_pointer(CUdeviceptr ptr) {
+    REQUIRE(ptr != 0);
+    return CUDA_SUCCESS;
+}
 static CUresult driver_child_graph(CUgraphNode node, CUgraph *graph) {
     REQUIRE((uintptr_t)node < 8192); *graph = graph_nodes[(uintptr_t)node].child; return CUDA_SUCCESS;
 }
@@ -147,6 +154,9 @@ static CUresult driver_generic_node(CUgraphNode *node, CUgraph graph, const CUgr
     return CUDA_SUCCESS;
 }
 static void setup_graph_queries(void) {
+    device_overallocated = &sync_allocations;
+    device_allocasync = &async_allocations;
+    cuda_library_entry[OVERRIDE_cuMemFree_v2].fn_ptr = driver_free_pointer;
     cuda_library_entry[OVERRIDE_cuGraphGetNodes].fn_ptr = driver_graph_nodes;
     cuda_library_entry[OVERRIDE_cuGraphNodeGetType].fn_ptr = driver_node_type;
     cuda_library_entry[OVERRIDE_cuGraphMemFreeNodeGetParams].fn_ptr = driver_free_params;
