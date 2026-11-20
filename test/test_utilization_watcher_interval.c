@@ -1,7 +1,7 @@
 /*
  * GPU-free test for the utilization watcher poll interval.
- * The watcher needs 120 ms ticks only when a device has a core limit below
- * 100; otherwise it polls once a second.  The watcher source is included to
+ * The watcher needs 120 ms ticks only when a device has a core limit from 1
+ * to 99; otherwise it polls once a second.  The watcher source is included to
  * reach its static helper; the shared region is stubbed below.
  */
 #include <stdio.h>

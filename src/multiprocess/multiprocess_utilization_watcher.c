@@ -286,8 +286,8 @@ int get_used_gpu_utilization(int *userutil,int *sysprocnum) {
 
 /*
  * The limiter only needs 120 ms ticks on a device with a core limit from 1 to 99.
- * Otherwise the watcher only refreshes sm_util and monitorused, so once a
- * second is enough.
+ * Otherwise the watcher only refreshes sm_util and monitorused and retries the
+ * host pid lookup, so once a second is enough.
  */
 static void choose_watcher_interval(const int *limits, unsigned int count, struct timespec *out) {
     unsigned int dev;
