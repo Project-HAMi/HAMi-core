@@ -1913,13 +1913,50 @@ static CUresult graph_capture_observe(CUstream stream, cuuint64_t id, CUgraph gr
     cuuint64_t cached;
     uint64_t token;
     CUresult res = graph_capture_resolve(stream, &cached, &token);
-    if (res != CUDA_SUCCESS || token == 0 || cached != 0) return res;
+    if (res != CUDA_SUCCESS) return res;
+    if (token != 0) {
+        if (cached != 0) return CUDA_SUCCESS;
+        pthread_mutex_lock(&graph_mutex);
+        for (capture_link *l = capture_links; l != NULL; l = l->next) {
+            if (l->token != token) continue;
+            l->id = id;
+            l->graph = graph;
+            break;
+        }
+        pthread_mutex_unlock(&graph_mutex);
+        return CUDA_SUCCESS;
+    }
+    if (id == 0) return CUDA_SUCCESS;
+
+    CUcontext ctx = NULL;
+    if (stream == CU_STREAM_PER_THREAD) {
+        if (CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxGetCurrent, &ctx) != CUDA_SUCCESS) return CUDA_SUCCESS;
+    } else if (CUDA_FIND_ENTRY(cuda_library_entry, cuStreamGetCtx) != NULL &&
+               CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCtx, stream, &ctx) != CUDA_SUCCESS) {
+        ctx = NULL;
+    }
+    cuuint64_t ctx_id = ctx != NULL ? graph_context_id(ctx) : 0;
+    if (ctx_id == UINT64_MAX) return CUDA_SUCCESS;
+
     pthread_mutex_lock(&graph_mutex);
     for (capture_link *l = capture_links; l != NULL; l = l->next) {
-        if (l->token != token) continue;
-        l->id = id;
-        l->graph = graph;
-        break;
+        if (l->id == id || (graph != NULL && l->graph == graph)) {
+            pthread_mutex_unlock(&graph_mutex);
+            return CUDA_SUCCESS;
+        }
+    }
+    capture_link *match = NULL;
+    size_t matches = 0;
+    for (capture_link *l = capture_links; l != NULL; l = l->next) {
+        if (l->id != 0 || l->ctx_id == UINT64_MAX ||
+            !(ctx == NULL || l->ctx == NULL ||
+              (l->ctx == ctx && l->ctx_id == ctx_id))) continue;
+        match = l;
+        matches++;
+    }
+    if (matches == 1) {
+        match->id = id;
+        match->graph = graph;
     }
     pthread_mutex_unlock(&graph_mutex);
     return CUDA_SUCCESS;

@@ -27,6 +27,10 @@ static _Thread_local cuuint64_t capture_ids[3];
 static _Atomic unsigned int serial = 10;
 static CUresult begin_result, end_result, info_result, context_result;
 static int end_calls;
+static int recover_unknown_origin, fail_origin_query, capture_invalidated;
+static int fail_thread_local_queries, joined_stream_observation;
+static int joined_capture_ready, joined_allocation_done;
+static CUresult joined_allocation_result;
 static int keep_capture, ready, finish, allocating, release_allocation, requested, begin_calls;
 static allocated_list async_list;
 
@@ -51,8 +55,31 @@ CUresult cuCtxGetDevice(CUdevice *dev) { *dev = 0; return CUDA_SUCCESS; }
 static CUresult native_info(CUstream stream, CUstreamCaptureStatus *status, cuuint64_t *id,
                             CUgraph *graph, const CUgraphNode **deps,
                             const CUgraphEdgeData **data, size_t *count) {
-    (void)stream; (void)deps; (void)data; (void)count;
+    (void)deps; (void)data; (void)count;
+    if (capture_invalidated) {
+        *status = CU_STREAM_CAPTURE_STATUS_INVALIDATED;
+        *graph = NULL;
+        *id = 0;
+        return CUDA_SUCCESS;
+    }
+    if (stream == CU_STREAM_PER_THREAD) {
+        pthread_mutex_lock(&gate);
+        int fail_query = fail_thread_local_queries > 0;
+        if (fail_query) fail_thread_local_queries--;
+        pthread_mutex_unlock(&gate);
+        if (fail_query) return CUDA_ERROR_UNKNOWN;
+    }
     if (info_result != CUDA_SUCCESS) return info_result;
+    if (recover_unknown_origin && stream == (CUstream)10 && fail_origin_query) {
+        fail_origin_query = 0;
+        return CUDA_ERROR_UNKNOWN;
+    }
+    if ((recover_unknown_origin || joined_stream_observation) && stream == (CUstream)20) {
+        *status = CU_STREAM_CAPTURE_STATUS_ACTIVE;
+        *graph = capture;
+        *id = 42;
+        return CUDA_SUCCESS;
+    }
     *status = capture ? CU_STREAM_CAPTURE_STATUS_ACTIVE : CU_STREAM_CAPTURE_STATUS_NONE;
     *graph = capture; *id = capture_id;
     return CUDA_SUCCESS;
@@ -66,7 +93,7 @@ static CUresult native_begin(CUstream stream, CUstreamCaptureMode mode) {
     pthread_cond_broadcast(&changed);
     pthread_mutex_unlock(&gate);
     if (begin_result != CUDA_SUCCESS) return begin_result;
-    capture_id = atomic_fetch_add(&serial, 1);
+    capture_id = recover_unknown_origin ? 42 : atomic_fetch_add(&serial, 1);
     capture = (CUgraph)(uintptr_t)capture_id;
     return CUDA_SUCCESS;
 }
@@ -119,6 +146,81 @@ static void check_failed_end(void) {
     end_result = CUDA_ERROR_STREAM_CAPTURE_WRONG_THREAD;
     REQUIRE(cuStreamEndCapture((CUstream)10, &graph) == end_result);
     REQUIRE(graph_capture_token((CUstream)10, &id) == 0 && used == 256 * MIB);
+    end_result = CUDA_SUCCESS;
+}
+
+/** Recover an origin ID after its initial query failed and a joined stream allocated. */
+static void check_unknown_origin_id(void) {
+    CUgraph graph;
+    CUdeviceptr ptr;
+    cuuint64_t id;
+    recover_unknown_origin = 1;
+    fail_origin_query = 1;
+    REQUIRE(cuStreamBeginCapture_v2((CUstream)10, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);
+    REQUIRE(graph_capture_token((CUstream)10, &id) != 0 && id == 0);
+    REQUIRE(allocate_async_raw(&ptr, 100 * MIB, (CUstream)20) == CUDA_SUCCESS);
+    REQUIRE(used == 356 * MIB);
+    capture_invalidated = 1;
+    end_result = CUDA_ERROR_STREAM_CAPTURE_INVALIDATED;
+    REQUIRE(cuStreamEndCapture((CUstream)10, &graph) == end_result);
+    REQUIRE(used == 256 * MIB);
+    REQUIRE(graph_capture_token((CUstream)10, &id) == 0);
+    capture_invalidated = 0;
+    end_result = CUDA_SUCCESS;
+    recover_unknown_origin = 0;
+}
+
+/** Keep ambiguous thread-local captures unresolved after a joined-stream allocation. */
+static void *ambiguous_thread_local_capture(void *arg) {
+    int owner = *(int *)arg;
+    CUgraph graph;
+    CUdeviceptr ptr;
+    cuuint64_t id;
+    REQUIRE(cuStreamBeginCapture_v2(CU_STREAM_PER_THREAD, CU_STREAM_CAPTURE_MODE_THREAD_LOCAL) == CUDA_SUCCESS);
+    REQUIRE(graph_capture_token(CU_STREAM_PER_THREAD, &id) != 0 && id == 0);
+
+    pthread_mutex_lock(&gate);
+    joined_capture_ready++;
+    pthread_cond_broadcast(&changed);
+    if (owner == 0) {
+        while (joined_capture_ready != 2) pthread_cond_wait(&changed, &gate);
+        pthread_mutex_unlock(&gate);
+        joined_allocation_result = allocate_async_raw(&ptr, 100 * MIB, (CUstream)20);
+        REQUIRE(joined_allocation_result == CUDA_SUCCESS);
+        REQUIRE(graph_capture_token(CU_STREAM_PER_THREAD, &id) != 0 && id == 0);
+        pthread_mutex_lock(&gate);
+        joined_allocation_done = 1;
+        pthread_cond_broadcast(&changed);
+    } else {
+        while (!joined_allocation_done) pthread_cond_wait(&changed, &gate);
+    }
+    pthread_mutex_unlock(&gate);
+
+    REQUIRE(graph_capture_token(CU_STREAM_PER_THREAD, &id) != 0 && id == 0);
+    REQUIRE(cuStreamEndCapture(CU_STREAM_PER_THREAD, &graph) == end_result);
+    REQUIRE(graph_capture_token(CU_STREAM_PER_THREAD, &id) == 0);
+    return NULL;
+}
+
+/** Count unresolved captures across threads rather than guessing by caller thread. */
+static void check_ambiguous_thread_local_observe(void) {
+    pthread_t threads[2];
+    int owners[2] = {0, 1};
+    pthread_mutex_lock(&gate);
+    fail_thread_local_queries = 2;
+    joined_capture_ready = 0;
+    joined_allocation_done = 0;
+    joined_allocation_result = CUDA_ERROR_UNKNOWN;
+    pthread_mutex_unlock(&gate);
+    joined_stream_observation = 1;
+    end_result = CUDA_ERROR_STREAM_CAPTURE_INVALIDATED;
+    REQUIRE(pthread_create(&threads[0], NULL, ambiguous_thread_local_capture, &owners[0]) == 0);
+    REQUIRE(pthread_create(&threads[1], NULL, ambiguous_thread_local_capture, &owners[1]) == 0);
+    REQUIRE(pthread_join(threads[0], NULL) == 0 && pthread_join(threads[1], NULL) == 0);
+    joined_stream_observation = 0;
+    REQUIRE(joined_allocation_result == CUDA_SUCCESS && used == 356 * MIB);
+    graph_capture_end(42, NULL);
+    REQUIRE(used == 256 * MIB);
     end_result = CUDA_SUCCESS;
 }
 
@@ -198,7 +300,8 @@ static void check_context_failure(void) {
 
 /** Pause an actual allocator call immediately before native allocation. */
 static CUresult native_allocate(CUdeviceptr *ptr, size_t bytes, CUstream stream) {
-    (void)bytes; (void)stream;
+    (void)stream;
+    if (bytes != 16) { *ptr = 3; return CUDA_SUCCESS; }
     pthread_mutex_lock(&gate);
     allocating = 1; pthread_cond_broadcast(&changed);
     while (!release_allocation) pthread_cond_wait(&changed, &gate);
@@ -267,7 +370,8 @@ int main(void) {
     REQUIRE(cuStreamEndCapture((CUstream)10, &graph) == CUDA_SUCCESS);
     REQUIRE(cuStreamBeginCapture_ptsz(NULL) == CUDA_SUCCESS);
     REQUIRE(cuStreamEndCapture_ptsz(NULL, &graph) == CUDA_SUCCESS);
-    check_failed_end(); check_thread_identity(); check_context_identity();
+    check_failed_end(); check_unknown_origin_id(); check_ambiguous_thread_local_observe();
+    check_thread_identity(); check_context_identity();
     check_context_failure(); check_transition_serialization();
     puts("PASS: capture identity, terminal errors, and allocation transition ordering");
     return 0;
