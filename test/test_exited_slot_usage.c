@@ -8,7 +8,10 @@
  * still holds must keep counting.  That covers a process that has already
  * run exit_handler from atexit, and a process whose main thread has exited
  * (the leader shows Z) while another thread still runs.  A process past
- * exit_handler must also not block in ENSURE_RUNNING's status wait.
+ * exit_handler must also not block in ENSURE_RUNNING's status wait, even
+ * when a suspend signal arrives after it.  A reader must not hang on the
+ * seqlock of an owner killed mid-update, and cleaning up must never move a
+ * live slot, whose owner updates it without the lock.
  */
 #include <errno.h>
 #include <fcntl.h>
@@ -37,11 +40,13 @@ typedef enum {
     END_WAIT_FOR_KILL,
     END_EXIT_HANDLER_THEN_WAIT,
     END_MAIN_THREAD_ONLY,
+    END_ODD_SEQLOCK_THEN_WAIT,
 } child_end_t;
 
 typedef struct {
     _Atomic int charged;
     _Atomic int runs_after_exit_handler;
+    _Atomic int suspend_resume_ok;
 } test_state_t;
 
 static test_state_t *state;
@@ -198,11 +203,28 @@ static pid_t spawn_charged_child(child_end_t end) {
             _exit(3);
         }
         if (end == END_EXIT_HANDLER_THEN_WAIT) {
+            shrreg_proc_slot_t *self = find_slot(getpid());
+            int suspended, resumed;
+
+            /* Suspend and resume still work before the exit mark. */
+            raise(SIGUSR2);
+            suspended = atomic_load_explicit(&self->status, memory_order_acquire) == 2;
+            raise(SIGUSR1);
+            resumed = atomic_load_explicit(&self->status, memory_order_acquire) == 1;
+            atomic_store_explicit(&state->suspend_resume_ok, suspended && resumed,
+                                  memory_order_release);
             /* What atexit runs before the driver tears the context down. */
             exit_handler();
+            /* A suspend signal handled after the mark must not undo it. */
+            raise(SIGUSR2);
             /* ENSURE_RUNNING spins on this; teardown calls must not block. */
             atomic_store_explicit(&state->runs_after_exit_handler,
                                   wait_status_self(1), memory_order_release);
+        }
+        if (end == END_ODD_SEQLOCK_THEN_WAIT) {
+            /* As if killed between the two increments of an update. */
+            atomic_fetch_add_explicit(&find_slot(getpid())->seqlock, 1,
+                                      memory_order_release);
         }
         if (end == END_MAIN_THREAD_ONLY &&
             pthread_create(&thread, NULL, block_forever, NULL) != 0) {
@@ -220,6 +242,7 @@ static pid_t spawn_charged_child(child_end_t end) {
             break;
         case END_WAIT_FOR_KILL:
         case END_EXIT_HANDLER_THEN_WAIT:
+        case END_ODD_SEQLOCK_THEN_WAIT:
             break;
         }
         for (;;) {
@@ -275,9 +298,12 @@ static void test_exit_handler_keeps_counting_until_gone(void) {
     slot = find_slot(child);
     expect_true("exiting: exit_handler dropped the slot's pid", slot != NULL);
     if (slot != NULL) {
-        expect_true("exiting: exit_handler did not mark the slot",
+        expect_true("exiting: exit mark lost (to a late SIGUSR2?)",
                     atomic_load_explicit(&slot->status, memory_order_acquire) == 0);
     }
+    expect_true("exiting: suspend or resume stopped working",
+                atomic_load_explicit(&state->suspend_resume_ok,
+                                     memory_order_acquire) == 1);
     expect_true("exiting: CUDA calls after exit_handler would block",
                 atomic_load_explicit(&state->runs_after_exit_handler,
                                      memory_order_acquire) == 1);
@@ -341,6 +367,62 @@ static void test_zombie_leader_with_live_thread(void) {
     }
     expect_gone("leader zombie, last thread gone", child);
     reap(child);
+}
+
+/*
+ * An owner killed between the two increments of an update leaves its
+ * seqlock odd.  Neither the reporting path nor the OOM path may wait on it.
+ */
+static void test_dead_writer_does_not_hang_readers(void) {
+    pid_t child = spawn_charged_child(END_ODD_SEQLOCK_THEN_WAIT);
+    double start;
+    uint64_t usage;
+
+    if (child < 0) {
+        failures++;
+        return;
+    }
+    kill(child, SIGKILL);
+    reap(child);
+
+    start = now_ms();
+    usage = get_gpu_memory_usage(DEV);
+    expect_true("dead writer: oom view waited on the seqlock",
+                now_ms() - start < 1000.0);
+    expect_u64("dead writer: oom view", usage, 0);
+    start = now_ms();
+    usage = report();
+    expect_true("dead writer: report waited on the seqlock",
+                now_ms() - start < 1000.0);
+    expect_u64("dead writer: report", usage, 0);
+    expect_gone("dead writer", child);
+}
+
+/*
+ * Cleaning up after a dead process must not move a live slot: its owner
+ * writes through a pointer it validated without the lock.  The dead slot is
+ * zeroed in place and only trailing dead slots leave the table.
+ */
+static void test_reap_keeps_live_slot_in_place(void) {
+    pid_t dead = spawn_charged_child(END_WAIT_FOR_KILL);
+    pid_t live = spawn_charged_child(END_WAIT_FOR_KILL);
+    shrreg_proc_slot_t *before;
+
+    if (dead < 0 || live < 0) {
+        failures++;
+        return;
+    }
+    before = find_slot(live);
+    kill(dead, SIGKILL);
+    reap(dead);
+    expect_u64("in place: report", report(), CHARGE);
+    expect_true("in place: dead slot still in use", find_slot(dead) == NULL);
+    expect_true("in place: live slot was moved", find_slot(live) == before);
+    expect_true("in place: table changed size", proc_num() == 3);
+
+    kill(live, SIGKILL);
+    reap(live);
+    expect_gone("in place, then trailing", live);
 }
 
 /* A reader must not wait for the lock; it still reports the right value. */
@@ -413,6 +495,8 @@ int main(void) {
     test_ended_child("SIGKILL zombie", END_WAIT_FOR_KILL, 1, 1);
     test_zombie_leader_with_live_thread();
     test_reader_does_not_wait_for_lock();
+    test_dead_writer_does_not_hang_readers();
+    test_reap_keeps_live_slot_in_place();
 
     unlink(cache_path);
     munmap(region, SHARED_REGION_SIZE_MAGIC);
