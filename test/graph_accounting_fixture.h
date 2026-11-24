@@ -36,6 +36,7 @@ static struct {
     CUgraph graph, child;
     CUgraphNodeType type;
     CUdeviceptr ptr;
+    unsigned int grid, block;
 } graph_nodes[8192];
 static CUresult graph_query_result;
 static int graph_node_queries;
@@ -62,6 +63,17 @@ static CUresult capture_info_result;
 static int keep_capture, block_capture_begin, block_capture_end, capture_entered;
 static int capture_ready, capture_finish;
 
+/* Graph launches go through the compute limiter; it is off unless a test sets pidfound. */
+int pidfound;
+static int64_t limited_threads;
+static int limited_launches;
+void pre_launch_kernel(void) {}
+int is_gpu_core_limit_enabled(void) { return 0; }
+int wait_status_self(int status) { (void)status; return 1; }
+void rate_limiter(int64_t grids, int64_t blocks) {
+    limited_threads += grids * blocks;
+    limited_launches++;
+}
 void ensure_initialized(void) {}
 void ensure_hostpid(void) {}
 /* context.c asks for driver admission; the broker is off in these tests. */
@@ -132,6 +144,13 @@ static CUresult driver_free_params(CUgraphNode node, CUdeviceptr *ptr) {
 static CUresult driver_child_graph(CUgraphNode node, CUgraph *graph) {
     REQUIRE((uintptr_t)node < 8192); *graph = graph_nodes[(uintptr_t)node].child; return CUDA_SUCCESS;
 }
+static CUresult driver_kernel_params(CUgraphNode node, CUDA_KERNEL_NODE_PARAMS *params) {
+    REQUIRE((uintptr_t)node < 8192);
+    *params = (CUDA_KERNEL_NODE_PARAMS){0};
+    params->gridDimX = graph_nodes[(uintptr_t)node].grid; params->gridDimY = 1; params->gridDimZ = 1;
+    params->blockDimX = graph_nodes[(uintptr_t)node].block; params->blockDimY = 1; params->blockDimZ = 1;
+    return CUDA_SUCCESS;
+}
 /** Record generic child and free nodes in the simulated native graph. */
 static CUresult driver_generic_node(CUgraphNode *node, CUgraph graph, const CUgraphNode *deps,
                                     const CUgraphEdgeData *edges, size_t count, CUgraphNodeParams *params) {
@@ -151,6 +170,7 @@ static void setup_graph_queries(void) {
     cuda_library_entry[OVERRIDE_cuGraphNodeGetType].fn_ptr = driver_node_type;
     cuda_library_entry[OVERRIDE_cuGraphMemFreeNodeGetParams].fn_ptr = driver_free_params;
     cuda_library_entry[OVERRIDE_cuGraphChildGraphNodeGetGraph].fn_ptr = driver_child_graph;
+    cuda_library_entry[OVERRIDE_cuGraphKernelNodeGetParams_v2].fn_ptr = driver_kernel_params;
     cuda_library_entry[OVERRIDE_cuGraphAddNode_v2].fn_ptr = driver_generic_node;
 }
 static CUresult driver_instantiate(CUgraphExec *exec, CUgraph graph, cuuint64_t flags) {
