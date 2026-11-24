@@ -391,6 +391,7 @@ static size_t sum_gpu_memory_usage(const int dev, int skip_exited,
         uint64_t proc_usage;
         uint64_t seq1, seq2;
         int retry_count = 0;
+        int writer_dead = 0;
 
         // Seqlock read protocol: retry until we get a consistent snapshot
         // CRITICAL: Memory checks require accurate data, cannot use stale reads
@@ -420,11 +421,20 @@ static size_t sum_gpu_memory_usage(const int dev, int skip_exited,
                     // Log if we're spinning for a very long time
                     if (retry_count % 100 == 0) {
                         LOG_DEBUG("Seqlock spinning for slot %d, retry %d (writer active)", i, retry_count);
+                        // Only the owner writes its slot.  One killed between
+                        // its two increments leaves the count odd for good.
+                        if (proc_slot_exited(atomic_load_explicit(&slot->pid, memory_order_acquire))) {
+                            writer_dead = 1;
+                            break;
+                        }
                     }
                 }
 
                 retry_count++;
                 seq1 = atomic_load_explicit(&slot->seqlock, memory_order_acquire);
+            }
+            if (writer_dead) {
+                break;
             }
 
             // Read the data with acquire semantics
@@ -438,6 +448,14 @@ static size_t sum_gpu_memory_usage(const int dev, int skip_exited,
 
             // If sequence numbers match and still even, read was consistent
         } while (seq1 != seq2);
+
+        if (writer_dead) {
+            LOG_WARN("Skip slot %d: its owner died during an update", i);
+            if (exited_seen != NULL) {
+                *exited_seen = 1;
+            }
+            continue;
+        }
 
         // Consistent read obtained
         int32_t pid = atomic_load_explicit(&slot->pid, memory_order_acquire);
