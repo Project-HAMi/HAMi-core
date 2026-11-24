@@ -38,6 +38,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     elseif (TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
             OR TEST_TARGET_NAME STREQUAL "test_fork_reinit_leak"
+            OR TEST_TARGET_NAME STREQUAL "test_exited_slot_usage"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
             OR TEST_TARGET_NAME STREQUAL "test_shrreg_debug"
             OR TEST_TARGET_NAME STREQUAL "test_limit_env_parsing"
@@ -94,7 +95,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             # Read a scratch file, never the production /overrideEnv.
             target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
                 ENV_OVERRIDE_FILE=\"${CMAKE_CURRENT_BINARY_DIR}/override_env.test\")
-        elseif (TEST_TARGET_NAME STREQUAL "test_fork_reinit_leak")
+        elseif (TEST_TARGET_NAME STREQUAL "test_fork_reinit_leak"
+                OR TEST_TARGET_NAME STREQUAL "test_exited_slot_usage")
             # A file nothing creates, so no override can move the cache path
             # this test inspects.
             target_compile_definitions(${TEST_TARGET_NAME} PRIVATE
@@ -305,6 +307,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_postinit_owner_death"
             OR TEST_TARGET_NAME STREQUAL "test_fork_child_exit_cleanup"
             OR TEST_TARGET_NAME STREQUAL "test_fork_reinit_leak"
+            OR TEST_TARGET_NAME STREQUAL "test_exited_slot_usage"
             OR TEST_TARGET_NAME STREQUAL "test_hostpid_fallback_lock"
             OR TEST_TARGET_NAME STREQUAL "test_device_id_guard"
             OR TEST_TARGET_NAME STREQUAL "test_shrreg_debug"
@@ -355,6 +358,21 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
 endforeach()
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
+# The exited slot checks again without pidfds, as on kernels before 5.3 or
+# under a seccomp profile that denies pidfd_open.
+add_executable(test_exited_slot_usage_procfs
+    ${TEST_CPP_SOURCE_DIR}/test_exited_slot_usage.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/multiprocess/multiprocess_memory_limit.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
+target_compile_definitions(test_exited_slot_usage_procfs PRIVATE
+    _GNU_SOURCE PROC_ALIVE_NO_PIDFD
+    ENV_OVERRIDE_FILE=\"${CMAKE_CURRENT_BINARY_DIR}/override_env.absent\")
+target_compile_options(test_exited_slot_usage_procfs PRIVATE
+    -ffunction-sections -fdata-sections ${TEST_COMPILE_FLAGS})
+set_target_properties(test_exited_slot_usage_procfs PROPERTIES
+    LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
+target_link_libraries(test_exited_slot_usage_procfs -lrt -lpthread)
+
 add_test(NAME shared_region_concurrency
     COMMAND test_shared_region_concurrency)
 # The test waits on the start barrier and on registration in sequence, each
@@ -400,6 +418,15 @@ set_tests_properties(fork_child_exit_cleanup PROPERTIES TIMEOUT 20)
 add_test(NAME fork_reinit_leak
     COMMAND test_fork_reinit_leak)
 set_tests_properties(fork_reinit_leak PROPERTIES TIMEOUT 20)
+
+# A process that exited must stop counting in NVML and cuMemGetInfo before a
+# new process registers (issue #432).
+add_test(NAME exited_slot_usage
+    COMMAND test_exited_slot_usage)
+add_test(NAME exited_slot_usage_procfs
+    COMMAND test_exited_slot_usage_procfs)
+set_tests_properties(exited_slot_usage exited_slot_usage_procfs
+    PROPERTIES TIMEOUT 20)
 
 add_test(NAME dlsym_rtld_next
     COMMAND test_dlsym_rtld_next)

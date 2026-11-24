@@ -358,14 +358,28 @@ size_t get_gpu_memory_monitor(const int dev) {
     return total;
 }
 
-// Lock-free memory usage aggregation with seqlock for consistent snapshots
-size_t get_gpu_memory_usage(const int dev) {
-    LOG_INFO("get_gpu_memory_usage dev=%d", dev);
-    ensure_initialized();
-    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
-        LOG_ERROR("Illegal device id: %d", dev);
+/*
+ * A slot outlives its process until a new process registers and compacts
+ * the table in init_proc_slot_withlock, and nothing else removes it.  Once
+ * the whole process is gone the driver has freed its memory, so a reader
+ * must not count the slot.  Checking costs a few syscalls per slot (see
+ * proc_alive), so only the reporting path asks for it; the OOM path keeps
+ * counting until an overflow makes it sweep dead slots itself.  The check
+ * assumes the writers share this process's PID namespace, as that sweep does.
+ */
+static int proc_slot_exited(int32_t pid) {
+    if (pid == 0) {
+        return 1;
+    }
+    if (pid == getpid()) {
         return 0;
     }
+    return proc_alive(pid) == PROC_STATE_NONALIVE;
+}
+
+// Lock-free memory usage aggregation with seqlock for consistent snapshots
+static size_t sum_gpu_memory_usage(const int dev, int skip_exited,
+                                   int *exited_seen) {
     int i=0;
     size_t total=0;
 
@@ -426,14 +440,32 @@ size_t get_gpu_memory_usage(const int dev) {
         } while (seq1 != seq2);
 
         // Consistent read obtained
-        int32_t pid = atomic_load_explicit(&slot->pid, memory_order_relaxed);
+        int32_t pid = atomic_load_explicit(&slot->pid, memory_order_acquire);
         int32_t hostpid = atomic_load_explicit(&slot->hostpid, memory_order_relaxed);
+
+        if (skip_exited && proc_slot_exited(pid)) {
+            LOG_DEBUG("dev=%d skip exited slot %d pid=%d i=%lu", dev, i, pid, proc_usage);
+            if (exited_seen != NULL) {
+                *exited_seen = 1;
+            }
+            continue;
+        }
 
         LOG_INFO("dev=%d pid=%d host pid=%d i=%lu", dev, pid, hostpid, proc_usage);
         total+=proc_usage;
     }
 
     return total;
+}
+
+size_t get_gpu_memory_usage(const int dev) {
+    LOG_INFO("get_gpu_memory_usage dev=%d", dev);
+    ensure_initialized();
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_ERROR("Illegal device id: %d", dev);
+        return 0;
+    }
+    return sum_gpu_memory_usage(dev, 0, NULL);
 }
 
 // Lock-free memory monitor update
@@ -1548,16 +1580,34 @@ uint64_t get_current_device_memory_monitor(const int dev) {
     return result;
 }
 
+/*
+ * Drop exited slots from the table so later readers, and the host monitor
+ * that maps this file, stop seeing them.  Readers must never wait here, so
+ * give up if the lock is taken; the sum already skipped those slots.
+ */
+static void reap_exited_proc_slots(void) {
+    if (try_lock_shrreg() != 0) {
+        return;
+    }
+    clear_proc_slot_nolock(1);
+    unlock_shrreg();
+}
+
+// Reporting path for nvmlDeviceGetMemoryInfo and cuMemGetInfo.
 uint64_t get_current_device_memory_usage(const int dev) {
     clock_t start,finish;
     uint64_t result;
+    int exited_seen = 0;
     start = clock();
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
         return 0;
     }
-    result = get_gpu_memory_usage(dev);
+    result = sum_gpu_memory_usage(dev, 1, &exited_seen);
+    if (exited_seen) {
+        reap_exited_proc_slots();
+    }
     finish=clock();
     LOG_DEBUG("get_current_device_memory_usage:tick=%lu result=%lu\n",finish-start,result);
     return result;
