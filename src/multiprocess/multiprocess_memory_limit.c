@@ -875,22 +875,19 @@ void exit_handler() {
         }
     }
 
-    // 2. Mark our process slot as exited (atomic, no lock needed)
-    // Set PID to 0 so it's detected as dead by clear_proc_slot_nolock()
+    // 2. Mark our process slot as exiting (atomic, no lock needed).
+    // Keep the PID: atexit runs before the driver tears the context down, so
+    // the memory in used[] is still held, and the teardown's own frees still
+    // need to find this slot.  Readers and clear_proc_slot_nolock() drop the
+    // slot once proc_alive() reports the whole process gone.
     for (int slot = 0; slot < SHARED_REGION_MAX_PROCESS_NUM; slot++) {
         int32_t slot_pid = atomic_load_explicit(&region->procs[slot].pid, memory_order_acquire);
         if (slot_pid == my_pid) {
-            LOG_DEBUG("Marking process slot %d as dead (PID %d)", slot, my_pid);
-            // Atomically set PID to 0 - this marks the slot as available
-            atomic_store_explicit(&region->procs[slot].pid, 0, memory_order_release);
-            // Also set status to 0 (inactive)
+            LOG_DEBUG("Marking process slot %d as exiting (PID %d)", slot, my_pid);
             atomic_store_explicit(&region->procs[slot].status, 0, memory_order_release);
             break;
         }
     }
-
-    // That's it! The slot will be physically removed by clear_proc_slot_nolock()
-    // when the next process acquires the lock. This is lazy cleanup.
 
     LOG_MSG("Exit cleanup complete for PID %d", my_pid);
 }
@@ -1026,7 +1023,7 @@ int clear_proc_slot_nolock(int do_clear) {
     while (slot < region->proc_num) {
         int32_t pid = atomic_load_explicit(&region->procs[slot].pid, memory_order_acquire);
 
-        // Skip slots that are already marked as dead (PID=0) by exit cleanup
+        // Older libraries mark exited slots with PID=0 in exit cleanup
         if (pid == 0) {
             LOG_DEBUG("Removing slot %d with PID=0 (marked dead by exit cleanup)", slot);
             cleaned_pid_zero++;
@@ -1608,7 +1605,8 @@ int wait_status_self(int status){
     shrreg_proc_slot_t* slot = get_current_proc_slot();
     if (slot != NULL) {
         int32_t cur = atomic_load_explicit(&slot->status, memory_order_acquire);
-        return (cur == status) ? 1 : 0;
+        // 0 is exit_handler's mark; CUDA calls after it must not block.
+        return (cur == status || cur == 0) ? 1 : 0;
     }
     return -1;
 }
