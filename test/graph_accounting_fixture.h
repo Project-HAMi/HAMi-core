@@ -158,6 +158,20 @@ static CUresult driver_generic_node(CUgraphNode *node, CUgraph graph, const CUgr
     if (add_result != CUDA_SUCCESS) return add_result;
     if (params->type == CU_GRAPH_NODE_TYPE_MEM_FREE)
         return driver_free_node(node, graph, deps, count, params->free.dptr);
+#if CUDA_VERSION >= 12030
+    if (params->type == CU_GRAPH_NODE_TYPE_CONDITIONAL) {
+        /* The driver creates and owns the body graphs and reports them in phGraph_out. */
+        static CUgraph bodies[64][4];
+        static int created;
+        REQUIRE(created < 64 && params->conditional.size <= 4);
+        for (unsigned int i = 0; i < params->conditional.size; i++) bodies[created][i] = (CUgraph)++serial;
+        params->conditional.phGraph_out = bodies[created++];
+        *node = (CUgraphNode)++serial;
+        graph_nodes[serial].graph = graph;
+        graph_nodes[serial].type = CU_GRAPH_NODE_TYPE_CONDITIONAL;
+        return CUDA_SUCCESS;
+    }
+#endif
     REQUIRE(params->type == CU_GRAPH_NODE_TYPE_GRAPH);
     *node = (CUgraphNode)++serial;
     graph_nodes[serial].graph = graph;
@@ -172,6 +186,11 @@ static void setup_graph_queries(void) {
     cuda_library_entry[OVERRIDE_cuGraphChildGraphNodeGetGraph].fn_ptr = driver_child_graph;
     cuda_library_entry[OVERRIDE_cuGraphKernelNodeGetParams_v2].fn_ptr = driver_kernel_params;
     cuda_library_entry[OVERRIDE_cuGraphAddNode_v2].fn_ptr = driver_generic_node;
+}
+static CUresult update_result;
+static CUresult driver_exec_update(CUgraphExec exec, CUgraph graph, CUgraphExecUpdateResultInfo *info) {
+    (void)exec; (void)graph; (void)info;
+    return update_result;
 }
 static CUresult driver_instantiate(CUgraphExec *exec, CUgraph graph, cuuint64_t flags) {
     (void)graph; (void)flags; instantiations++;

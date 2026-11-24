@@ -423,6 +423,8 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     DLSYM_HOOK_FUNC(cuGraphUpload);
     DLSYM_HOOK_FUNC(cuGraphLaunch);
     DLSYM_HOOK_FUNC(cuGraphExecDestroy);
+    DLSYM_HOOK_FUNC(cuGraphExecUpdate_v2);
+    DLSYM_HOOK_FUNC(cuGraphExecUpdate);
     DLSYM_HOOK_FUNC(cuGraphDestroy);
     DLSYM_HOOK_FUNC(cuDeviceGraphMemTrim);
 #ifdef HOOK_MEMINFO_ENABLE

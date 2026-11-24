@@ -298,6 +298,8 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuGraphLaunch_ptsz"},
     {.name = "cuStreamBeginCapture_v2_ptsz"},
     {.name = "cuGraphExecDestroy"},
+    {.name = "cuGraphExecUpdate_v2"},
+    {.name = "cuGraphExecUpdate"},
     {.name = "cuGraphDestroy"},
 
     {.name = "cuGetProcAddress"},
@@ -390,6 +392,8 @@ void *find_symbols_in_table(const char *symbol) {
         strcmp(symbol, "cuGraphUpload") != 0 &&
         strcmp(symbol, "cuGraphUpload_ptsz") != 0 &&
         strcmp(symbol, "cuGraphExecDestroy") != 0 &&
+        strcmp(symbol, "cuGraphExecUpdate") != 0 &&
+        strcmp(symbol, "cuGraphExecUpdate_v2") != 0 &&
         strcmp(symbol, "cuGraphDestroy") != 0) {
         return NULL;
     }

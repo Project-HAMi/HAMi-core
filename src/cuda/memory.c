@@ -670,6 +670,11 @@ static CUresult graph_add_node(cuda_sym_t add, int edges, CUgraphNode *node, CUg
     graph_alloc_end(entry, res == CUDA_SUCCESS && charge ? params->alloc.dptr : 0, res);
     if (res == CUDA_SUCCESS && params != NULL && params->type == CU_GRAPH_NODE_TYPE_MEM_FREE)
         graph_mark_free(graph, params->free.dptr);
+#if CUDA_VERSION >= 12030
+    /* Conditional bodies are only reported here; the compute limiter needs them for launch costs. */
+    if (res == CUDA_SUCCESS && params != NULL && params->type == CU_GRAPH_NODE_TYPE_CONDITIONAL)
+        graph_conditional_added(*node, graph, params->conditional.phGraph_out, params->conditional.size);
+#endif
     return res;
 }
 

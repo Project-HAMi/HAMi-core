@@ -82,6 +82,65 @@ static void test_destroy_keeps_other_costs(void) {
     for (int i = 1; i < N; i += 2) destroy(graphs[i], execs[i]);
 }
 
+#if CUDA_VERSION >= 12030
+/** A conditional node is charged its largest body, since at most one body runs per evaluation. */
+static void test_conditional_bodies(void) {
+    CUgraph graph = make_graph();
+    add_kernel(graph, 4, 32);
+    CUgraphNodeParams params = {0};
+    params.type = CU_GRAPH_NODE_TYPE_CONDITIONAL;
+    params.conditional.type = CU_GRAPH_COND_TYPE_IF;
+    params.conditional.size = 2;
+    CUgraphNode node;
+    REQUIRE(cuGraphAddNode_v2(&node, graph, NULL, NULL, 0, &params) == CUDA_SUCCESS);
+    CUgraph then_body = params.conditional.phGraph_out[0];
+    CUgraph else_body = params.conditional.phGraph_out[1];
+    add_kernel(then_body, 8, 64);
+    add_kernel(else_body, 2, 64);
+    CUgraphExec exec = instantiate(graph);
+    reset_limits();
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_launches == 1 && limited_threads == 4 * 32 + 8 * 64);
+    destroy(graph, exec);
+    graph = make_graph();
+    add_kernel(graph, 4, 32);
+    exec = instantiate(graph);
+    reset_limits();
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_threads == 4 * 32);
+    destroy(graph, exec);
+}
+#endif
+
+/** An executable graph updated in place is charged for its new graph. */
+static void test_exec_update(void) {
+    CUgraph first = make_graph();
+    add_kernel(first, 4, 64);
+    CUgraphExec exec = instantiate(first);
+    CUgraph second = make_graph();
+    add_kernel(second, 16, 64);
+    CUgraphExecUpdateResultInfo info;
+    REQUIRE(cuGraphExecUpdate_v2(exec, second, &info) == CUDA_SUCCESS);
+    reset_limits();
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_threads == 16 * 64);
+    CUgraph empty = make_graph();
+    REQUIRE(cuGraphExecUpdate(exec, empty, NULL, NULL) == CUDA_SUCCESS);
+    reset_limits();
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_launches == 0);
+    update_result = CUDA_ERROR_GRAPH_EXEC_UPDATE_FAILURE;
+    REQUIRE(cuGraphExecUpdate_v2(exec, second, &info) == CUDA_ERROR_GRAPH_EXEC_UPDATE_FAILURE);
+    update_result = CUDA_SUCCESS;
+    reset_limits();
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_launches == 0);
+    REQUIRE(cuGraphExecDestroy(exec) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(first) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(second) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(empty) == CUDA_SUCCESS);
+}
+
 /** A full cost table leaves new graphs uncharged, and destroying an exec still returns. */
 static void test_full_table(void) {
     enum { SLOTS = 65536 };
@@ -115,11 +174,18 @@ int main(void) {
     DRIVER(cuGraphUpload, driver_submit);
     DRIVER(cuGraphDestroy, driver_destroy);
     DRIVER(cuGraphExecDestroy, driver_destroy);
+    DRIVER(cuGraphExecUpdate_v2, driver_exec_update);
+    DRIVER(cuGraphExecUpdate, driver_exec_update);
+    DRIVER(cuGraphAddNode_v2, driver_generic_node);
 #undef DRIVER
     pidfound = 1;
     test_launch_charges_kernel_threads();
     test_uncharged_launches();
     test_destroy_keeps_other_costs();
+#if CUDA_VERSION >= 12030
+    test_conditional_bodies();
+#endif
+    test_exec_update();
     test_full_table();
     printf("graph launch limit: ok\n");
     return 0;
