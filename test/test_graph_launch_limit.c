@@ -82,6 +82,30 @@ static void test_destroy_keeps_other_costs(void) {
     for (int i = 1; i < N; i += 2) destroy(graphs[i], execs[i]);
 }
 
+/** A full cost table leaves new graphs uncharged, and destroying an exec still returns. */
+static void test_full_table(void) {
+    enum { SLOTS = 65536 };
+    static CUgraphExec execs[SLOTS];
+    CUgraph graph = make_graph();
+    add_kernel(graph, 2, 16);
+    for (int i = 0; i < SLOTS - 1; i++) execs[i] = instantiate(graph);
+    CUgraphExec overflow = instantiate(graph);
+    reset_limits();
+    REQUIRE(cuGraphLaunch(overflow, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_launches == 0);
+    REQUIRE(cuGraphLaunch(execs[0], NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_launches == 1 && limited_threads == 2 * 16);
+    REQUIRE(cuGraphExecDestroy(execs[0]) == CUDA_SUCCESS);
+    CUgraphExec fresh = instantiate(graph);
+    reset_limits();
+    REQUIRE(cuGraphLaunch(fresh, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_launches == 1 && limited_threads == 2 * 16);
+    REQUIRE(cuGraphExecDestroy(fresh) == CUDA_SUCCESS);
+    REQUIRE(cuGraphExecDestroy(overflow) == CUDA_SUCCESS);
+    for (int i = 1; i < SLOTS - 1; i++) REQUIRE(cuGraphExecDestroy(execs[i]) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
+}
+
 int main(void) {
     log_utils_init();
     setup_graph_queries();
@@ -96,6 +120,7 @@ int main(void) {
     test_launch_charges_kernel_threads();
     test_uncharged_launches();
     test_destroy_keeps_other_costs();
+    test_full_table();
     printf("graph launch limit: ok\n");
     return 0;
 }

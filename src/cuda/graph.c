@@ -274,6 +274,7 @@ typedef struct {
 
 static launch_cost_slot launch_costs[LAUNCH_COST_SLOTS];
 static pthread_mutex_t launch_cost_mutex = PTHREAD_MUTEX_INITIALIZER;
+static size_t launch_cost_used;
 static int launch_cost_full_logged;
 
 static size_t launch_cost_home(CUgraphExec exec) {
@@ -336,7 +337,10 @@ static void launch_cost_put(CUgraphExec exec, int64_t threads) {
     pthread_mutex_lock(&launch_cost_mutex);
     size_t i = launch_cost_home(exec);
     for (size_t n = 0; n < LAUNCH_COST_SLOTS; n++, i = (i + 1) & (LAUNCH_COST_SLOTS - 1)) {
+        /* Keep one slot empty so every probe, including the shift in launch_cost_drop, ends. */
+        if (launch_costs[i].exec == NULL && launch_cost_used >= LAUNCH_COST_SLOTS - 1) break;
         if (launch_costs[i].exec == NULL || launch_costs[i].exec == exec) {
+            if (launch_costs[i].exec == NULL) launch_cost_used++;
             launch_costs[i].exec = exec;
             launch_costs[i].threads = threads;
             pthread_mutex_unlock(&launch_cost_mutex);
@@ -390,6 +394,7 @@ static void launch_cost_drop(CUgraphExec exec) {
     }
     launch_costs[hole].exec = NULL;
     launch_costs[hole].threads = 0;
+    launch_cost_used--;
     pthread_mutex_unlock(&launch_cost_mutex);
 }
 
