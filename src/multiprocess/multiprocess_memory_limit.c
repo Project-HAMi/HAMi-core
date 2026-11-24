@@ -108,12 +108,26 @@ void set_current_gpu_status(int status){
     }
 }
 
+/*
+ * Suspend (1 -> 2) and resume (2 -> 1) never touch exit_handler's 0: a
+ * SIGUSR2 handled during exit would make the remaining CUDA calls wait in
+ * ENSURE_RUNNING for a SIGUSR1 that may never come.
+ */
+static void swap_current_gpu_status(int32_t from, int32_t to) {
+    shrreg_proc_slot_t* slot = get_current_proc_slot();
+    if (slot != NULL) {
+        atomic_compare_exchange_strong_explicit(&slot->status, &from, to,
+                                                memory_order_acq_rel,
+                                                memory_order_acquire);
+    }
+}
+
 void sig_restore_stub(int signo){
-    set_current_gpu_status(1);
+    swap_current_gpu_status(2, 1);
 }
 
 void sig_swap_stub(int signo){
-    set_current_gpu_status(2);
+    swap_current_gpu_status(1, 2);
 }
 
 
