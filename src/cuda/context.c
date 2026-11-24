@@ -138,17 +138,12 @@ CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
     CUresult res;
     // Only the final release destroys the context. A wrong count only
     // decides whether this call takes a permit; the call never fails.
-    // Wait for the permit first so the usage is not undercounted meanwhile.
     if (primary_context_release_is_final(dev)) {
         lease_fd = driver_admission_acquire(HOSTPID_DRIVER_ADMISSION_RELEASE);
     }
     pthread_cleanup_push(driver_admission_cleanup, &lease_fd);
     lock_primary_context(dev, &locks);
     pthread_cleanup_push(unlock_primary_context, &locks);
-    if (ctx_activate[dev] == 1) {
-        rm_gpu_device_memory_usage(getpid(),dev,context_size,0);
-    }
-    ctx_activate[dev] = 0;
     graph_primary_context_prepare_release(dev);
     res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDevicePrimaryCtxRelease_v2,dev);
     driver_admission_release(&lease_fd);
@@ -159,9 +154,16 @@ CUresult cuDevicePrimaryCtxRelease_v2( CUdevice dev ){
         if (dev >= 0 && dev < CUDA_DEVICE_MAX_COUNT &&
             __atomic_load_n(&primary_context_retains[dev], __ATOMIC_RELAXED) > 0)
             __atomic_sub_fetch(&primary_context_retains[dev], 1, __ATOMIC_RELAXED);
+        // Keep the charge while the context lives, so a release that
+        // leaves another reference does not uncount it.
         if (CUDA_OVERRIDE_CALL(cuda_library_entry, cuDevicePrimaryCtxGetState, dev,
-                               &flags, &active) == CUDA_SUCCESS && !active)
+                               &flags, &active) == CUDA_SUCCESS && !active) {
+            if (ctx_activate[dev] == 1) {
+                rm_gpu_device_memory_usage(getpid(),dev,context_size,0);
+            }
+            ctx_activate[dev] = 0;
             graph_primary_context_released(dev, 0);
+        }
     }
     pthread_cleanup_pop(1);
     pthread_cleanup_pop(1);

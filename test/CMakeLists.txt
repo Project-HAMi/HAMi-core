@@ -172,10 +172,16 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             target_sources(${TEST_TARGET_NAME} PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/stream.c)
         endif()
-    elseif (TEST_TARGET_NAME STREQUAL "test_device_total_mem")
+    elseif (TEST_TARGET_NAME STREQUAL "test_device_total_mem"
+            OR TEST_TARGET_NAME STREQUAL "test_primary_context_charge")
+        if (TEST_TARGET_NAME STREQUAL "test_device_total_mem")
+            set(HOOK_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/device.c)
+        else()
+            set(HOOK_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/context.c)
+        endif()
         add_executable(${TEST_TARGET_NAME}
             ${TEST_SCRIPT}
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/device.c
+            ${HOOK_SOURCE}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE _GNU_SOURCE)
         target_compile_options(${TEST_TARGET_NAME} PRIVATE
@@ -326,6 +332,7 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_rate_limiter_recent_kernel"
             OR TEST_TARGET_NAME STREQUAL "test_cuda_memory_compat"
             OR TEST_TARGET_NAME STREQUAL "test_device_total_mem"
+            OR TEST_TARGET_NAME STREQUAL "test_primary_context_charge"
             OR TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle"
             OR TEST_TARGET_NAME STREQUAL "test_graph_pool_lifetimes"
             OR TEST_TARGET_NAME STREQUAL "test_graph_submission_accounting")
@@ -507,6 +514,7 @@ add_custom_target(python_test ALL
     COMMAND cp -r ${CMAKE_CURRENT_SOURCE_DIR}/python ${CMAKE_CURRENT_BINARY_DIR})
 
 add_test(NAME device_total_mem COMMAND test_device_total_mem)
+add_test(NAME primary_context_charge COMMAND test_primary_context_charge)
 add_test(NAME cuda_memory_compat COMMAND test_cuda_memory_compat)
 set_tests_properties(cuda_memory_compat PROPERTIES
     ENVIRONMENT "LIBCUDA_LOG_LEVEL=4"

@@ -480,7 +480,7 @@ int main(void) {
         }
         run_case(operation, 1, 0);
         if (operation == HOSTPID_DRIVER_ADMISSION_RELEASE) {
-            // Release holds its permit across the usage update too.
+            // A cancel in the usage update after the call still unlocks.
             run_case(operation, 1, 1);
         }
         printf("%s: cancelled call returns its lease\n", names[operation]);
