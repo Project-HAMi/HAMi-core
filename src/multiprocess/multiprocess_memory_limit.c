@@ -1602,12 +1602,34 @@ uint64_t get_current_device_memory_monitor(const int dev) {
  * Drop exited slots from the table so later readers, and the host monitor
  * that maps this file, stop seeing them.  Readers must never wait here, so
  * give up if the lock is taken; the sum already skipped those slots.
+ *
+ * Unlike clear_proc_slot_nolock, never move a live slot: its owner updates
+ * it without the lock through a pointer it validated earlier, so a move
+ * would send that update to the old index.  A dead slot is zeroed in place
+ * with PID 0, which the next registration compacts, and dead slots at the
+ * end of the table are dropped.
  */
 static void reap_exited_proc_slots(void) {
     if (try_lock_shrreg() != 0) {
         return;
     }
-    clear_proc_slot_nolock(1);
+    shared_region_t* region = region_info.shared_region;
+    int proc_num = atomic_load_explicit(&region->proc_num, memory_order_acquire);
+    for (int i = 0; i < proc_num; i++) {
+        shrreg_proc_slot_t* slot = &region->procs[i];
+        int32_t pid = atomic_load_explicit(&slot->pid, memory_order_acquire);
+        if (pid != 0 && proc_slot_exited(pid)) {
+            LOG_INFO("Reap exited slot %d (pid %d)", i, pid);
+            clear_proc_slot_atomic(slot);
+            // An owner killed mid-update left the count odd.
+            atomic_store_explicit(&slot->seqlock, 0, memory_order_release);
+        }
+    }
+    while (proc_num > 0 &&
+           atomic_load_explicit(&region->procs[proc_num - 1].pid, memory_order_acquire) == 0) {
+        proc_num--;
+    }
+    atomic_store_explicit(&region->proc_num, proc_num, memory_order_release);
     unlock_shrreg();
 }
 
