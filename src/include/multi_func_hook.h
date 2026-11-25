@@ -30,6 +30,9 @@ static CudaFuncMapEntry g_func_map[] = {
     {"cuGraphExecUpdate", 10000, 11999, "cuGraphExecUpdate"},
     {"cuGraphExecUpdate", 12000, 99999, "cuGraphExecUpdate_v2"},
 
+    {"cuGraphExecKernelNodeSetParams", 10000, 11999, "cuGraphExecKernelNodeSetParams"},
+    {"cuGraphExecKernelNodeSetParams", 12000, 99999, "cuGraphExecKernelNodeSetParams_v2"},
+
     // Boundaries follow cudaTypedefs.h: cuCtxCreate is _v2 below 11.4, _v3
     // from 11.4 and _v4 from 12.5; cuMemAdvise and cuMemPrefetchAsync switch
     // to _v2 at 12.2.  find_symbols_in_table() only probes _v3, _v2 and the

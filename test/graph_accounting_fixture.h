@@ -192,6 +192,20 @@ static CUresult driver_exec_update(CUgraphExec exec, CUgraph graph, CUgraphExecU
     (void)exec; (void)graph; (void)info;
     return update_result;
 }
+static CUresult driver_exec_update_legacy(CUgraphExec exec, CUgraph graph, CUgraphNode *error_node,
+                                          CUgraphExecUpdateResult *result) {
+    (void)exec; (void)graph; (void)error_node; (void)result;
+    return update_result;
+}
+static CUresult set_params_result;
+static CUresult driver_exec_kernel_params(CUgraphExec exec, CUgraphNode node, const void *params) {
+    (void)exec; (void)node; (void)params;
+    return set_params_result;
+}
+static CUresult driver_exec_node_params(CUgraphExec exec, CUgraphNode node, CUgraphNodeParams *params) {
+    (void)exec; (void)node; (void)params;
+    return set_params_result;
+}
 static CUresult driver_instantiate(CUgraphExec *exec, CUgraph graph, cuuint64_t flags) {
     (void)graph; (void)flags; instantiations++;
     *exec = (CUgraphExec)++serial;

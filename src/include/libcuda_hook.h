@@ -333,6 +333,9 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuGraphExecDestroy),
     CUDA_OVERRIDE_ENUM(cuGraphExecUpdate_v2),
     CUDA_OVERRIDE_ENUM(cuGraphExecUpdate),
+    CUDA_OVERRIDE_ENUM(cuGraphExecKernelNodeSetParams_v2),
+    CUDA_OVERRIDE_ENUM(cuGraphExecKernelNodeSetParams),
+    CUDA_OVERRIDE_ENUM(cuGraphExecNodeSetParams),
     CUDA_OVERRIDE_ENUM(cuGraphDestroy),
 
     CUDA_OVERRIDE_ENUM(cuGetProcAddress),
@@ -370,6 +373,9 @@ CUresult cuGraphInstantiate(CUgraphExec *phGraphExec, CUgraph hGraph, CUgraphNod
 #undef cuGraphExecUpdate
 CUresult cuGraphExecUpdate(CUgraphExec hGraphExec, CUgraph hGraph, CUgraphNode *hErrorNode_out,
                            CUgraphExecUpdateResult *updateResult_out);
+#undef cuGraphExecKernelNodeSetParams
+CUresult cuGraphExecKernelNodeSetParams(CUgraphExec hGraphExec, CUgraphNode hNode,
+                                        const CUDA_KERNEL_NODE_PARAMS_v1 *nodeParams);
 
 
 #undef cuStreamBeginCapture

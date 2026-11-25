@@ -268,13 +268,27 @@ CUresult cuGraphDestroyNode(CUgraphNode hNode) {
  * Each executable graph is charged, at every launch, the summed threads
  * (grid x block) of the kernel nodes it was instantiated from: the unit
  * cuLaunchKernel is charged per kernel. Costs live in an open-addressing table
- * keyed by CUgraphExec; deletion shifts entries back so lookups stay short. */
+ * keyed by CUgraphExec; deletion shifts entries back so lookups stay short.
+ * The cost of each top-level kernel node is kept too, because
+ * cuGraphExec*NodeSetParams changes one node of the exec without a new graph. */
 #define LAUNCH_COST_SLOTS 65536  /* power of two */
 #define LAUNCH_COST_MAX_DEPTH 8  /* child-graph nesting followed when summing */
 
 typedef struct {
+    CUgraphNode node;
+    int64_t threads;
+} kernel_cost;
+
+typedef struct {
+    kernel_cost *items;  /* sorted by node */
+    size_t len, cap;
+    int64_t rest;        /* child graphs and conditional bodies */
+} graph_cost;
+
+typedef struct {
     CUgraphExec exec;
     int64_t threads;
+    graph_cost cost;
 } launch_cost_slot;
 
 static launch_cost_slot launch_costs[LAUNCH_COST_SLOTS];
@@ -292,6 +306,40 @@ static size_t launch_cost_home(CUgraphExec exec) {
 
 static int64_t saturating_add(int64_t a, int64_t b) {
     return a > INT64_MAX - b ? INT64_MAX : a + b;
+}
+
+static int64_t kernel_threads(unsigned int gx, unsigned int gy, unsigned int gz,
+                              unsigned int bx, unsigned int by, unsigned int bz) {
+    int64_t grid = (int64_t)gx * gy * gz;
+    int64_t block = (int64_t)bx * by * bz;
+    return (block != 0 && grid > INT64_MAX / block) ? INT64_MAX : grid * block;
+}
+
+static int64_t graph_cost_total(const graph_cost *c) {
+    int64_t total = c->rest;
+    for (size_t i = 0; i < c->len; i++) total = saturating_add(total, c->items[i].threads);
+    return total;
+}
+
+static int kernel_cost_cmp(const void *a, const void *b) {
+    uintptr_t x = (uintptr_t)((const kernel_cost *)a)->node, y = (uintptr_t)((const kernel_cost *)b)->node;
+    return x < y ? -1 : x > y;
+}
+
+/** Keep a node's cost; without memory the node is folded into rest and cannot be changed later. */
+static void graph_cost_add(graph_cost *c, CUgraphNode node, int64_t threads) {
+    if (c->len == c->cap) {
+        size_t grown = c->cap ? c->cap * 2 : 16;
+        kernel_cost *items = realloc(c->items, grown * sizeof(*items));
+        if (items == NULL) {
+            c->rest = saturating_add(c->rest, threads);
+            return;
+        }
+        c->items = items;
+        c->cap = grown;
+    }
+    c->items[c->len].node = node;
+    c->items[c->len++].threads = threads;
 }
 
 /* Body graphs of conditional nodes. The driver hands them out only when the node is
@@ -370,7 +418,7 @@ static void conditional_forget(CUgraph graph, CUgraphNode node) {
 }
 
 /** Largest launch cost among a conditional node's bodies; at most one body runs per evaluation. */
-static int64_t graph_kernel_threads(CUgraph graph, int depth);
+static int64_t graph_kernel_threads(CUgraph graph, int depth, graph_cost *top);
 static int64_t conditional_threads(CUgraphNode node, int depth) {
     CUgraph *bodies = NULL;
     unsigned int size = 0;
@@ -387,15 +435,16 @@ static int64_t conditional_threads(CUgraphNode node, int depth) {
     pthread_mutex_unlock(&conditional_mutex);
     int64_t most = 0;
     for (unsigned int i = 0; i < size; i++) {
-        int64_t threads = graph_kernel_threads(bodies[i], depth + 1);
+        int64_t threads = graph_kernel_threads(bodies[i], depth + 1, NULL);
         if (threads > most) most = threads;
     }
     free(bodies);
     return most;
 }
 
-/** Sum grid x block over the kernel nodes of a graph and its child graphs. */
-static int64_t graph_kernel_threads(CUgraph graph, int depth) {
+/** Sum grid x block over the kernel nodes of a graph and its child graphs.
+ * With top, the graph's own kernel nodes are listed there one by one and the rest summed. */
+static int64_t graph_kernel_threads(CUgraph graph, int depth, graph_cost *top) {
     size_t count = 0;
     if (depth > LAUNCH_COST_MAX_DEPTH) return 0;
     /* A driver without the node queries leaves the graph uncharged, as before. */
@@ -420,29 +469,39 @@ static int64_t graph_kernel_threads(CUgraph graph, int depth) {
                 if (CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphKernelNodeGetParams_v2, nodes[i], &p) !=
                     CUDA_SUCCESS)
                     continue;
-                int64_t grid = (int64_t)p.gridDimX * p.gridDimY * p.gridDimZ;
-                int64_t block = (int64_t)p.blockDimX * p.blockDimY * p.blockDimZ;
-                int64_t threads = (block != 0 && grid > INT64_MAX / block) ? INT64_MAX : grid * block;
+                int64_t threads = kernel_threads(p.gridDimX, p.gridDimY, p.gridDimZ,
+                                                 p.blockDimX, p.blockDimY, p.blockDimZ);
                 total = saturating_add(total, threads);
+                if (top != NULL) graph_cost_add(top, nodes[i], threads);
+                continue;
 #if CUDA_VERSION >= 12030
             } else if (type == CU_GRAPH_NODE_TYPE_CONDITIONAL) {
-                total = saturating_add(total, conditional_threads(nodes[i], depth));
+                int64_t threads = conditional_threads(nodes[i], depth);
+                total = saturating_add(total, threads);
+                if (top != NULL) top->rest = saturating_add(top->rest, threads);
 #endif
             } else if (type == CU_GRAPH_NODE_TYPE_GRAPH) {
                 CUgraph child;
                 if (CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphChildGraphNodeGetGraph, nodes[i], &child) ==
-                    CUDA_SUCCESS)
-                    total = saturating_add(total, graph_kernel_threads(child, depth + 1));
+                    CUDA_SUCCESS) {
+                    int64_t threads = graph_kernel_threads(child, depth + 1, NULL);
+                    total = saturating_add(total, threads);
+                    if (top != NULL) top->rest = saturating_add(top->rest, threads);
+                }
             }
         }
     }
     free(nodes);
+    if (top != NULL && top->len > 1) qsort(top->items, top->len, sizeof(*top->items), kernel_cost_cmp);
     return total;
 }
 
-/** Remember the launch cost of an executable graph; a zero cost is not stored. */
-static void launch_cost_put(CUgraphExec exec, int64_t threads) {
-    if (exec == NULL || threads <= 0) return;
+/** Remember the launch cost of an executable graph, taking ownership of cost; zero is not stored. */
+static void launch_cost_put(CUgraphExec exec, int64_t threads, graph_cost cost) {
+    if (exec == NULL || threads <= 0) {
+        free(cost.items);
+        return;
+    }
     pthread_mutex_lock(&launch_cost_mutex);
     size_t i = launch_cost_home(exec);
     for (size_t n = 0; n < LAUNCH_COST_SLOTS; n++, i = (i + 1) & (LAUNCH_COST_SLOTS - 1)) {
@@ -450,8 +509,10 @@ static void launch_cost_put(CUgraphExec exec, int64_t threads) {
         if (launch_costs[i].exec == NULL && launch_cost_used >= LAUNCH_COST_SLOTS - 1) break;
         if (launch_costs[i].exec == NULL || launch_costs[i].exec == exec) {
             if (launch_costs[i].exec == NULL) launch_cost_used++;
+            free(launch_costs[i].cost.items);
             launch_costs[i].exec = exec;
             launch_costs[i].threads = threads;
+            launch_costs[i].cost = cost;
             pthread_mutex_unlock(&launch_cost_mutex);
             return;
         }
@@ -461,6 +522,7 @@ static void launch_cost_put(CUgraphExec exec, int64_t threads) {
         LOG_WARN("graph launch cost table full: graphs instantiated from now on are not rate limited");
     }
     pthread_mutex_unlock(&launch_cost_mutex);
+    free(cost.items);
 }
 
 /** Launch cost of an executable graph, or 0 when none was recorded. */
@@ -491,6 +553,7 @@ static void launch_cost_drop(CUgraphExec exec) {
         pthread_mutex_unlock(&launch_cost_mutex);
         return;
     }
+    free(launch_costs[i].cost.items);
     size_t hole = i;
     for (size_t j = (hole + 1) & (LAUNCH_COST_SLOTS - 1); launch_costs[j].exec != NULL;
          j = (j + 1) & (LAUNCH_COST_SLOTS - 1)) {
@@ -503,17 +566,40 @@ static void launch_cost_drop(CUgraphExec exec) {
     }
     launch_costs[hole].exec = NULL;
     launch_costs[hole].threads = 0;
+    launch_costs[hole].cost = (graph_cost){0};
     launch_cost_used--;
     pthread_mutex_unlock(&launch_cost_mutex);
 }
 
 /** Store a new launch cost for exec, or forget it when the graph has no kernels. */
 static void launch_cost_record(CUgraphExec exec, CUgraph graph) {
-    int64_t threads = graph_kernel_threads(graph, 0);
-    if (threads > 0)
-        launch_cost_put(exec, threads);
-    else
+    graph_cost cost = {0};
+    int64_t threads = graph_kernel_threads(graph, 0, &cost);
+    if (threads > 0) {
+        launch_cost_put(exec, threads, cost);
+    } else {
+        free(cost.items);
         launch_cost_drop(exec);
+    }
+}
+
+/** Charge one kernel node of exec its new launch size; nodes exec was not built with keep their cost. */
+static void launch_cost_set_kernel(CUgraphExec exec, CUgraphNode node, int64_t threads) {
+    pthread_mutex_lock(&launch_cost_mutex);
+    size_t i = launch_cost_home(exec);
+    for (size_t n = 0; n < LAUNCH_COST_SLOTS && launch_costs[i].exec != NULL;
+         n++, i = (i + 1) & (LAUNCH_COST_SLOTS - 1)) {
+        if (launch_costs[i].exec != exec) continue;
+        graph_cost *c = &launch_costs[i].cost;
+        kernel_cost key = {.node = node};
+        kernel_cost *k = c->len ? bsearch(&key, c->items, c->len, sizeof(*c->items), kernel_cost_cmp) : NULL;
+        if (k != NULL) {
+            k->threads = threads;
+            launch_costs[i].threads = graph_cost_total(c);
+        }
+        break;
+    }
+    pthread_mutex_unlock(&launch_cost_mutex);
 }
 
 /** Commit executable-graph tracking on success or discard it after native failure. */
@@ -690,6 +776,8 @@ CUresult cuGraphExecDestroy(CUgraphExec hGraphExec) {
 /** Recharge an executable graph after its topology or parameters were replaced. */
 CUresult cuGraphExecUpdate_v2(CUgraphExec hGraphExec, CUgraph hGraph, CUgraphExecUpdateResultInfo *resultInfo) {
     LOG_DEBUG("cuGraphExecUpdate_v2");
+    /* Drivers before 12.0 only export the legacy signature, which takes different arguments. */
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuGraphExecUpdate_v2) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecUpdate_v2, hGraphExec, hGraph, resultInfo);
     if (res == CUDA_SUCCESS) launch_cost_record(hGraphExec, hGraph);
     return res;
@@ -702,6 +790,44 @@ CUresult cuGraphExecUpdate(CUgraphExec hGraphExec, CUgraph hGraph, CUgraphNode *
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecUpdate, hGraphExec, hGraph, hErrorNode_out,
                                       updateResult_out);
     if (res == CUDA_SUCCESS) launch_cost_record(hGraphExec, hGraph);
+    return res;
+}
+
+/** Recharge one kernel node of an executable graph after its launch size changed. */
+CUresult cuGraphExecKernelNodeSetParams_v2(CUgraphExec hGraphExec, CUgraphNode hNode,
+                                           const CUDA_KERNEL_NODE_PARAMS *nodeParams) {
+    LOG_DEBUG("cuGraphExecKernelNodeSetParams_v2");
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuGraphExecKernelNodeSetParams_v2) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecKernelNodeSetParams_v2, hGraphExec, hNode,
+                                      nodeParams);
+    if (res == CUDA_SUCCESS)
+        launch_cost_set_kernel(hGraphExec, hNode, kernel_threads(nodeParams->gridDimX, nodeParams->gridDimY,
+            nodeParams->gridDimZ, nodeParams->blockDimX, nodeParams->blockDimY, nodeParams->blockDimZ));
+    return res;
+}
+
+/** Recharge one kernel node through the pre-12.0 signature. */
+CUresult cuGraphExecKernelNodeSetParams(CUgraphExec hGraphExec, CUgraphNode hNode,
+                                        const CUDA_KERNEL_NODE_PARAMS_v1 *nodeParams) {
+    LOG_DEBUG("cuGraphExecKernelNodeSetParams");
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecKernelNodeSetParams, hGraphExec, hNode,
+                                      nodeParams);
+    if (res == CUDA_SUCCESS)
+        launch_cost_set_kernel(hGraphExec, hNode, kernel_threads(nodeParams->gridDimX, nodeParams->gridDimY,
+            nodeParams->gridDimZ, nodeParams->blockDimX, nodeParams->blockDimY, nodeParams->blockDimZ));
+    return res;
+}
+
+/** Recharge a kernel node changed through the generic node setter. */
+CUresult cuGraphExecNodeSetParams(CUgraphExec hGraphExec, CUgraphNode hNode, CUgraphNodeParams *nodeParams) {
+    LOG_DEBUG("cuGraphExecNodeSetParams");
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuGraphExecNodeSetParams) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecNodeSetParams, hGraphExec, hNode, nodeParams);
+    if (res == CUDA_SUCCESS && nodeParams->type == CU_GRAPH_NODE_TYPE_KERNEL) {
+        const CUDA_KERNEL_NODE_PARAMS_v3 *k = &nodeParams->kernel;
+        launch_cost_set_kernel(hGraphExec, hNode, kernel_threads(k->gridDimX, k->gridDimY, k->gridDimZ,
+                                                                 k->blockDimX, k->blockDimY, k->blockDimZ));
+    }
     return res;
 }
 

@@ -112,7 +112,7 @@ static void test_conditional_bodies(void) {
 }
 #endif
 
-/** An executable graph updated in place is charged for its new graph. */
+/** An executable graph updated in place is charged for its new graph; a failed update keeps the old cost. */
 static void test_exec_update(void) {
     CUgraph first = make_graph();
     add_kernel(first, 4, 64);
@@ -124,21 +124,74 @@ static void test_exec_update(void) {
     reset_limits();
     REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
     REQUIRE(limited_threads == 16 * 64);
-    CUgraph empty = make_graph();
-    REQUIRE(cuGraphExecUpdate(exec, empty, NULL, NULL) == CUDA_SUCCESS);
+    CUgraph third = make_graph();
+    add_kernel(third, 8, 32);
+    CUgraphExecUpdateResult result;
+    CUgraphNode error_node;
+    REQUIRE(cuGraphExecUpdate(exec, third, &error_node, &result) == CUDA_SUCCESS);
     reset_limits();
     REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
-    REQUIRE(limited_launches == 0);
+    REQUIRE(limited_launches == 1 && limited_threads == 8 * 32);
+    /* The driver rejects an update whose node count differs, so the exec keeps its kernel. */
+    CUgraph empty = make_graph();
     update_result = CUDA_ERROR_GRAPH_EXEC_UPDATE_FAILURE;
-    REQUIRE(cuGraphExecUpdate_v2(exec, second, &info) == CUDA_ERROR_GRAPH_EXEC_UPDATE_FAILURE);
+    REQUIRE(cuGraphExecUpdate_v2(exec, empty, &info) == CUDA_ERROR_GRAPH_EXEC_UPDATE_FAILURE);
+    REQUIRE(cuGraphExecUpdate(exec, empty, &error_node, &result) == CUDA_ERROR_GRAPH_EXEC_UPDATE_FAILURE);
     update_result = CUDA_SUCCESS;
     reset_limits();
     REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
-    REQUIRE(limited_launches == 0);
+    REQUIRE(limited_launches == 1 && limited_threads == 8 * 32);
     REQUIRE(cuGraphExecDestroy(exec) == CUDA_SUCCESS);
     REQUIRE(cuGraphDestroy(first) == CUDA_SUCCESS);
     REQUIRE(cuGraphDestroy(second) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(third) == CUDA_SUCCESS);
     REQUIRE(cuGraphDestroy(empty) == CUDA_SUCCESS);
+}
+
+/** Changing one kernel node of an exec recharges that node only; failed or unknown changes keep the cost. */
+static void test_exec_kernel_set_params(void) {
+    CUgraph child = make_graph();
+    add_kernel(child, 2, 32);
+    CUgraph graph = make_graph();
+    add_kernel(graph, 4, 128);
+    CUgraphNode resized = (CUgraphNode)serial;
+    add_kernel(graph, 3, 64);
+    add_child(graph, child);
+    CUgraphExec exec = instantiate(graph);
+
+    CUDA_KERNEL_NODE_PARAMS p = {.gridDimX = 10, .gridDimY = 2, .gridDimZ = 1,
+                                 .blockDimX = 32, .blockDimY = 1, .blockDimZ = 1};
+    REQUIRE(cuGraphExecKernelNodeSetParams_v2(exec, resized, &p) == CUDA_SUCCESS);
+    reset_limits();
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_threads == 20 * 32 + 3 * 64 + 2 * 32);
+
+    CUDA_KERNEL_NODE_PARAMS_v1 legacy = {.gridDimX = 1, .gridDimY = 1, .gridDimZ = 1,
+                                         .blockDimX = 16, .blockDimY = 1, .blockDimZ = 1};
+    REQUIRE(cuGraphExecKernelNodeSetParams(exec, resized, &legacy) == CUDA_SUCCESS);
+    reset_limits();
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_threads == 16 + 3 * 64 + 2 * 32);
+
+    CUgraphNodeParams generic = {0};
+    generic.type = CU_GRAPH_NODE_TYPE_KERNEL;
+    generic.kernel.gridDimX = 5; generic.kernel.gridDimY = 1; generic.kernel.gridDimZ = 1;
+    generic.kernel.blockDimX = 64; generic.kernel.blockDimY = 1; generic.kernel.blockDimZ = 1;
+    REQUIRE(cuGraphExecNodeSetParams(exec, resized, &generic) == CUDA_SUCCESS);
+    reset_limits();
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_threads == 5 * 64 + 3 * 64 + 2 * 32);
+
+    set_params_result = CUDA_ERROR_INVALID_VALUE;
+    p.gridDimX = 1000;
+    REQUIRE(cuGraphExecKernelNodeSetParams_v2(exec, resized, &p) == CUDA_ERROR_INVALID_VALUE);
+    set_params_result = CUDA_SUCCESS;
+    REQUIRE(cuGraphExecKernelNodeSetParams_v2(exec, (CUgraphNode)7, &p) == CUDA_SUCCESS);
+    reset_limits();
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_threads == 5 * 64 + 3 * 64 + 2 * 32);
+    destroy(graph, exec);
+    REQUIRE(cuGraphDestroy(child) == CUDA_SUCCESS);
 }
 
 /** A full cost table leaves new graphs uncharged, and destroying an exec still returns. */
@@ -175,7 +228,10 @@ int main(void) {
     DRIVER(cuGraphDestroy, driver_destroy);
     DRIVER(cuGraphExecDestroy, driver_destroy);
     DRIVER(cuGraphExecUpdate_v2, driver_exec_update);
-    DRIVER(cuGraphExecUpdate, driver_exec_update);
+    DRIVER(cuGraphExecUpdate, driver_exec_update_legacy);
+    DRIVER(cuGraphExecKernelNodeSetParams_v2, driver_exec_kernel_params);
+    DRIVER(cuGraphExecKernelNodeSetParams, driver_exec_kernel_params);
+    DRIVER(cuGraphExecNodeSetParams, driver_exec_node_params);
     DRIVER(cuGraphAddNode_v2, driver_generic_node);
 #undef DRIVER
     pidfound = 1;
@@ -186,6 +242,7 @@ int main(void) {
     test_conditional_bodies();
 #endif
     test_exec_update();
+    test_exec_kernel_set_params();
     test_full_table();
     printf("graph launch limit: ok\n");
     return 0;
