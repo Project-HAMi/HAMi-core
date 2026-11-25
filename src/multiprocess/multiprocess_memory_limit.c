@@ -108,12 +108,26 @@ void set_current_gpu_status(int status){
     }
 }
 
+/*
+ * Suspend (1 -> 2) and resume (2 -> 1) never touch exit_handler's 0: a
+ * SIGUSR2 handled during exit would make the remaining CUDA calls wait in
+ * ENSURE_RUNNING for a SIGUSR1 that may never come.
+ */
+static void swap_current_gpu_status(int32_t from, int32_t to) {
+    shrreg_proc_slot_t* slot = get_current_proc_slot();
+    if (slot != NULL) {
+        atomic_compare_exchange_strong_explicit(&slot->status, &from, to,
+                                                memory_order_acq_rel,
+                                                memory_order_acquire);
+    }
+}
+
 void sig_restore_stub(int signo){
-    set_current_gpu_status(1);
+    swap_current_gpu_status(2, 1);
 }
 
 void sig_swap_stub(int signo){
-    set_current_gpu_status(2);
+    swap_current_gpu_status(1, 2);
 }
 
 
@@ -358,14 +372,28 @@ size_t get_gpu_memory_monitor(const int dev) {
     return total;
 }
 
-// Lock-free memory usage aggregation with seqlock for consistent snapshots
-size_t get_gpu_memory_usage(const int dev) {
-    LOG_INFO("get_gpu_memory_usage dev=%d", dev);
-    ensure_initialized();
-    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
-        LOG_ERROR("Illegal device id: %d", dev);
+/*
+ * A slot outlives its process until a new process registers and compacts
+ * the table in init_proc_slot_withlock, and nothing else removes it.  Once
+ * the whole process is gone the driver has freed its memory, so a reader
+ * must not count the slot.  Checking costs a few syscalls per slot (see
+ * proc_alive), so only the reporting path asks for it; the OOM path keeps
+ * counting until an overflow makes it sweep dead slots itself.  The check
+ * assumes the writers share this process's PID namespace, as that sweep does.
+ */
+static int proc_slot_exited(int32_t pid) {
+    if (pid == 0) {
+        return 1;
+    }
+    if (pid == getpid()) {
         return 0;
     }
+    return proc_alive(pid) == PROC_STATE_NONALIVE;
+}
+
+// Lock-free memory usage aggregation with seqlock for consistent snapshots
+static size_t sum_gpu_memory_usage(const int dev, int skip_exited,
+                                   int *exited_seen) {
     int i=0;
     size_t total=0;
 
@@ -377,6 +405,7 @@ size_t get_gpu_memory_usage(const int dev) {
         uint64_t proc_usage;
         uint64_t seq1, seq2;
         int retry_count = 0;
+        int writer_dead = 0;
 
         // Seqlock read protocol: retry until we get a consistent snapshot
         // CRITICAL: Memory checks require accurate data, cannot use stale reads
@@ -406,11 +435,20 @@ size_t get_gpu_memory_usage(const int dev) {
                     // Log if we're spinning for a very long time
                     if (retry_count % 100 == 0) {
                         LOG_DEBUG("Seqlock spinning for slot %d, retry %d (writer active)", i, retry_count);
+                        // Only the owner writes its slot.  One killed between
+                        // its two increments leaves the count odd for good.
+                        if (proc_slot_exited(atomic_load_explicit(&slot->pid, memory_order_acquire))) {
+                            writer_dead = 1;
+                            break;
+                        }
                     }
                 }
 
                 retry_count++;
                 seq1 = atomic_load_explicit(&slot->seqlock, memory_order_acquire);
+            }
+            if (writer_dead) {
+                break;
             }
 
             // Read the data with acquire semantics
@@ -425,15 +463,41 @@ size_t get_gpu_memory_usage(const int dev) {
             // If sequence numbers match and still even, read was consistent
         } while (seq1 != seq2);
 
+        if (writer_dead) {
+            LOG_WARN("Skip slot %d: its owner died during an update", i);
+            if (exited_seen != NULL) {
+                *exited_seen = 1;
+            }
+            continue;
+        }
+
         // Consistent read obtained
-        int32_t pid = atomic_load_explicit(&slot->pid, memory_order_relaxed);
+        int32_t pid = atomic_load_explicit(&slot->pid, memory_order_acquire);
         int32_t hostpid = atomic_load_explicit(&slot->hostpid, memory_order_relaxed);
+
+        if (skip_exited && proc_slot_exited(pid)) {
+            LOG_DEBUG("dev=%d skip exited slot %d pid=%d i=%lu", dev, i, pid, proc_usage);
+            if (exited_seen != NULL) {
+                *exited_seen = 1;
+            }
+            continue;
+        }
 
         LOG_INFO("dev=%d pid=%d host pid=%d i=%lu", dev, pid, hostpid, proc_usage);
         total+=proc_usage;
     }
 
     return total;
+}
+
+size_t get_gpu_memory_usage(const int dev) {
+    LOG_INFO("get_gpu_memory_usage dev=%d", dev);
+    ensure_initialized();
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_ERROR("Illegal device id: %d", dev);
+        return 0;
+    }
+    return sum_gpu_memory_usage(dev, 0, NULL);
 }
 
 // Lock-free memory monitor update
@@ -875,22 +939,19 @@ void exit_handler() {
         }
     }
 
-    // 2. Mark our process slot as exited (atomic, no lock needed)
-    // Set PID to 0 so it's detected as dead by clear_proc_slot_nolock()
+    // 2. Mark our process slot as exiting (atomic, no lock needed).
+    // Keep the PID: atexit runs before the driver tears the context down, so
+    // the memory in used[] is still held, and the teardown's own frees still
+    // need to find this slot.  Readers and clear_proc_slot_nolock() drop the
+    // slot once proc_alive() reports the whole process gone.
     for (int slot = 0; slot < SHARED_REGION_MAX_PROCESS_NUM; slot++) {
         int32_t slot_pid = atomic_load_explicit(&region->procs[slot].pid, memory_order_acquire);
         if (slot_pid == my_pid) {
-            LOG_DEBUG("Marking process slot %d as dead (PID %d)", slot, my_pid);
-            // Atomically set PID to 0 - this marks the slot as available
-            atomic_store_explicit(&region->procs[slot].pid, 0, memory_order_release);
-            // Also set status to 0 (inactive)
+            LOG_DEBUG("Marking process slot %d as exiting (PID %d)", slot, my_pid);
             atomic_store_explicit(&region->procs[slot].status, 0, memory_order_release);
             break;
         }
     }
-
-    // That's it! The slot will be physically removed by clear_proc_slot_nolock()
-    // when the next process acquires the lock. This is lazy cleanup.
 
     LOG_MSG("Exit cleanup complete for PID %d", my_pid);
 }
@@ -1026,7 +1087,7 @@ int clear_proc_slot_nolock(int do_clear) {
     while (slot < region->proc_num) {
         int32_t pid = atomic_load_explicit(&region->procs[slot].pid, memory_order_acquire);
 
-        // Skip slots that are already marked as dead (PID=0) by exit cleanup
+        // Older libraries mark exited slots with PID=0 in exit cleanup
         if (pid == 0) {
             LOG_DEBUG("Removing slot %d with PID=0 (marked dead by exit cleanup)", slot);
             cleaned_pid_zero++;
@@ -1551,16 +1612,56 @@ uint64_t get_current_device_memory_monitor(const int dev) {
     return result;
 }
 
+/*
+ * Drop exited slots from the table so later readers, and the host monitor
+ * that maps this file, stop seeing them.  Readers must never wait here, so
+ * give up if the lock is taken; the sum already skipped those slots.
+ *
+ * Unlike clear_proc_slot_nolock, never move a live slot: its owner updates
+ * it without the lock through a pointer it validated earlier, so a move
+ * would send that update to the old index.  A dead slot is zeroed in place
+ * with PID 0, which the next registration compacts, and dead slots at the
+ * end of the table are dropped.
+ */
+static void reap_exited_proc_slots(void) {
+    if (try_lock_shrreg() != 0) {
+        return;
+    }
+    shared_region_t* region = region_info.shared_region;
+    int proc_num = atomic_load_explicit(&region->proc_num, memory_order_acquire);
+    for (int i = 0; i < proc_num; i++) {
+        shrreg_proc_slot_t* slot = &region->procs[i];
+        int32_t pid = atomic_load_explicit(&slot->pid, memory_order_acquire);
+        if (pid != 0 && proc_slot_exited(pid)) {
+            LOG_INFO("Reap exited slot %d (pid %d)", i, pid);
+            clear_proc_slot_atomic(slot);
+            // An owner killed mid-update left the count odd.
+            atomic_store_explicit(&slot->seqlock, 0, memory_order_release);
+        }
+    }
+    while (proc_num > 0 &&
+           atomic_load_explicit(&region->procs[proc_num - 1].pid, memory_order_acquire) == 0) {
+        proc_num--;
+    }
+    atomic_store_explicit(&region->proc_num, proc_num, memory_order_release);
+    unlock_shrreg();
+}
+
+// Reporting path for nvmlDeviceGetMemoryInfo and cuMemGetInfo.
 uint64_t get_current_device_memory_usage(const int dev) {
     clock_t start,finish;
     uint64_t result;
+    int exited_seen = 0;
     start = clock();
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
         LOG_ERROR("Illegal device id: %d", dev);
         return 0;
     }
-    result = get_gpu_memory_usage(dev);
+    result = sum_gpu_memory_usage(dev, 1, &exited_seen);
+    if (exited_seen) {
+        reap_exited_proc_slots();
+    }
     finish=clock();
     LOG_DEBUG("get_current_device_memory_usage:tick=%lu result=%lu\n",finish-start,result);
     return result;
@@ -1608,7 +1709,8 @@ int wait_status_self(int status){
     shrreg_proc_slot_t* slot = get_current_proc_slot();
     if (slot != NULL) {
         int32_t cur = atomic_load_explicit(&slot->status, memory_order_acquire);
-        return (cur == status) ? 1 : 0;
+        // 0 is exit_handler's mark; CUDA calls after it must not block.
+        return (cur == status || cur == 0) ? 1 : 0;
     }
     return -1;
 }
