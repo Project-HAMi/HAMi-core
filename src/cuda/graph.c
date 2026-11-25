@@ -277,6 +277,7 @@ CUresult cuGraphDestroyNode(CUgraphNode hNode) {
 typedef struct {
     CUgraphNode node;
     int64_t threads;
+    size_t seq;  /* position among the listed nodes in cuGraphGetNodes order */
 } node_cost;
 
 typedef struct {
@@ -339,7 +340,9 @@ static void graph_cost_add(graph_cost *c, CUgraphNode node, int64_t threads) {
         c->cap = grown;
     }
     c->items[c->len].node = node;
-    c->items[c->len++].threads = threads;
+    c->items[c->len].threads = threads;
+    c->items[c->len].seq = c->len;
+    c->len++;
 }
 
 /* Body graphs of conditional nodes. The driver hands them out only when the node is
@@ -571,10 +574,34 @@ static void launch_cost_drop(CUgraphExec exec) {
     pthread_mutex_unlock(&launch_cost_mutex);
 }
 
+/** After cuGraphExecUpdate, key the new costs by the nodes exec was instantiated with.
+ * cuGraphExec*NodeSetParams keeps taking those nodes, not the ones of the update graph.
+ * The update needs the same topology, so nodes are paired by their position in
+ * cuGraphGetNodes, which lists them in the order they were added. */
+static void launch_cost_keep_nodes(CUgraphExec exec, graph_cost *cost) {
+    pthread_mutex_lock(&launch_cost_mutex);
+    size_t i = launch_cost_home(exec);
+    for (size_t n = 0; n < LAUNCH_COST_SLOTS && launch_costs[i].exec != NULL;
+         n++, i = (i + 1) & (LAUNCH_COST_SLOTS - 1)) {
+        if (launch_costs[i].exec != exec) continue;
+        const graph_cost *old = &launch_costs[i].cost;
+        CUgraphNode *keys = old->len == cost->len && cost->len > 0 ? malloc(cost->len * sizeof(*keys)) : NULL;
+        if (keys != NULL) {
+            for (size_t j = 0; j < old->len; j++) keys[old->items[j].seq] = old->items[j].node;
+            for (size_t j = 0; j < cost->len; j++) cost->items[j].node = keys[cost->items[j].seq];
+            free(keys);
+            qsort(cost->items, cost->len, sizeof(*cost->items), node_cost_cmp);
+        }
+        break;
+    }
+    pthread_mutex_unlock(&launch_cost_mutex);
+}
+
 /** Store a new launch cost for exec, or forget it when the graph has no kernels. */
-static void launch_cost_record(CUgraphExec exec, CUgraph graph) {
+static void launch_cost_record(CUgraphExec exec, CUgraph graph, int updated) {
     graph_cost cost = {0};
     int64_t threads = graph_kernel_threads(graph, 0, &cost);
+    if (updated) launch_cost_keep_nodes(exec, &cost);
     if (threads > 0) {
         launch_cost_put(exec, threads, cost);
     } else {
@@ -606,7 +633,7 @@ static void launch_cost_set_node(CUgraphExec exec, CUgraphNode node, int64_t thr
 static CUresult track_exec(CUresult res, graph_exec_state *state, CUgraph graph, CUgraphExec *phGraphExec) {
     if (res == CUDA_SUCCESS) {
         graph_exec_commit(state, *phGraphExec);
-        launch_cost_record(*phGraphExec, graph);
+        launch_cost_record(*phGraphExec, graph, 0);
     } else {
         graph_exec_discard(state);
     }
@@ -779,7 +806,7 @@ CUresult cuGraphExecUpdate_v2(CUgraphExec hGraphExec, CUgraph hGraph, CUgraphExe
     /* Drivers before 12.0 only export the legacy signature, which takes different arguments. */
     if (CUDA_FIND_ENTRY(cuda_library_entry, cuGraphExecUpdate_v2) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecUpdate_v2, hGraphExec, hGraph, resultInfo);
-    if (res == CUDA_SUCCESS) launch_cost_record(hGraphExec, hGraph);
+    if (res == CUDA_SUCCESS) launch_cost_record(hGraphExec, hGraph, 1);
     return res;
 }
 
@@ -789,7 +816,7 @@ CUresult cuGraphExecUpdate(CUgraphExec hGraphExec, CUgraph hGraph, CUgraphNode *
     LOG_DEBUG("cuGraphExecUpdate");
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecUpdate, hGraphExec, hGraph, hErrorNode_out,
                                       updateResult_out);
-    if (res == CUDA_SUCCESS) launch_cost_record(hGraphExec, hGraph);
+    if (res == CUDA_SUCCESS) launch_cost_record(hGraphExec, hGraph, 1);
     return res;
 }
 

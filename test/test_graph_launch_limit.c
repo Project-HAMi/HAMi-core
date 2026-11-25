@@ -194,6 +194,44 @@ static void test_exec_kernel_set_params(void) {
     REQUIRE(cuGraphDestroy(child) == CUDA_SUCCESS);
 }
 
+/** After a whole-graph update, setters still name nodes of the instantiation graph and recharge the updated cost. */
+static void test_set_params_after_update(void) {
+    CUgraph first = make_graph();
+    add_kernel(first, 1, 64);
+    CUgraphNode a = (CUgraphNode)serial;
+    add_kernel(first, 2, 64);
+    CUgraphNode b = (CUgraphNode)serial;
+    CUgraphExec exec = instantiate(first);
+    CUgraph second = make_graph();
+    add_kernel(second, 4, 64);
+    add_kernel(second, 8, 64);
+    CUgraphExecUpdateResultInfo info;
+    REQUIRE(cuGraphExecUpdate_v2(exec, second, &info) == CUDA_SUCCESS);
+    reset_limits();
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_threads == 4 * 64 + 8 * 64);
+
+    CUDA_KERNEL_NODE_PARAMS p = {.gridDimX = 64, .gridDimY = 1, .gridDimZ = 1,
+                                 .blockDimX = 64, .blockDimY = 1, .blockDimZ = 1};
+    REQUIRE(cuGraphExecKernelNodeSetParams_v2(exec, a, &p) == CUDA_SUCCESS);
+    reset_limits();
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_threads == 64 * 64 + 8 * 64);
+
+    CUgraph third = make_graph();
+    add_kernel(third, 3, 64);
+    add_kernel(third, 5, 64);
+    REQUIRE(cuGraphExecUpdate_v2(exec, third, &info) == CUDA_SUCCESS);
+    REQUIRE(cuGraphExecKernelNodeSetParams_v2(exec, b, &p) == CUDA_SUCCESS);
+    reset_limits();
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_threads == 3 * 64 + 64 * 64);
+    REQUIRE(cuGraphExecDestroy(exec) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(first) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(second) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(third) == CUDA_SUCCESS);
+}
+
 /** Replacing a child graph of an exec recharges that node with the new child's kernels. */
 static void test_exec_child_set_params(void) {
     CUgraph child = make_graph();
@@ -307,6 +345,7 @@ int main(void) {
     test_exec_update();
     test_exec_kernel_set_params();
     test_exec_child_set_params();
+    test_set_params_after_update();
     test_capture_not_charged();
     test_full_table();
     printf("graph launch limit: ok\n");
