@@ -420,7 +420,9 @@ static void conditional_forget(CUgraph graph, CUgraphNode node) {
     free(queue);
 }
 
-/** Largest launch cost among a conditional node's bodies; at most one body runs per evaluation. */
+/** Largest launch cost among a conditional node's bodies; IF and SWITCH run at most one body.
+ * A WHILE node reruns its body until the condition is false. The number of runs is not
+ * known at launch, so only one is charged and loops are undercharged. */
 static int64_t graph_kernel_threads(CUgraph graph, int depth, graph_cost *top);
 static int64_t conditional_threads(CUgraphNode node, int depth) {
     CUgraph *bodies = NULL;
@@ -576,8 +578,9 @@ static void launch_cost_drop(CUgraphExec exec) {
 
 /** After cuGraphExecUpdate, key the new costs by the nodes exec was instantiated with.
  * cuGraphExec*NodeSetParams keeps taking those nodes, not the ones of the update graph.
- * The update needs the same topology, so nodes are paired by their position in
- * cuGraphGetNodes, which lists them in the order they were added. */
+ * Nodes are paired by their position in cuGraphGetNodes, which matches the driver when both
+ * graphs add their nodes in the same order. The driver pairs by edges, so if the order
+ * differs the total stays right, but a later setter may replace another node's cost. */
 static void launch_cost_keep_nodes(CUgraphExec exec, graph_cost *cost) {
     pthread_mutex_lock(&launch_cost_mutex);
     size_t i = launch_cost_home(exec);
