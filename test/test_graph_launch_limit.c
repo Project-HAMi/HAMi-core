@@ -194,6 +194,26 @@ static void test_exec_kernel_set_params(void) {
     REQUIRE(cuGraphDestroy(child) == CUDA_SUCCESS);
 }
 
+static CUresult driver_launch_kernel(CUfunction f, unsigned int gx, unsigned int gy, unsigned int gz,
+                                     unsigned int bx, unsigned int by, unsigned int bz, unsigned int shared,
+                                     CUstream stream, void **params, void **extra) {
+    (void)f; (void)gx; (void)gy; (void)gz; (void)bx; (void)by; (void)bz;
+    (void)shared; (void)stream; (void)params; (void)extra;
+    return CUDA_SUCCESS;
+}
+
+/** A kernel recorded into a capturing stream is not charged; the graph launch charges it. */
+static void test_capture_not_charged(void) {
+    reset_limits();
+    REQUIRE(cuLaunchKernel((CUfunction)1, 4, 1, 1, 32, 1, 1, 0, NULL, NULL, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_launches == 1 && limited_threads == 4 * 32);
+    capturing = make_graph();
+    reset_limits();
+    REQUIRE(cuLaunchKernel((CUfunction)1, 4, 1, 1, 32, 1, 1, 0, NULL, NULL, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_launches == 0);
+    capturing = NULL;
+}
+
 /** A full cost table leaves new graphs uncharged, and destroying an exec still returns. */
 static void test_full_table(void) {
     enum { SLOTS = 65536 };
@@ -232,6 +252,8 @@ int main(void) {
     DRIVER(cuGraphExecKernelNodeSetParams_v2, driver_exec_kernel_params);
     DRIVER(cuGraphExecKernelNodeSetParams, driver_exec_kernel_params);
     DRIVER(cuGraphExecNodeSetParams, driver_exec_node_params);
+    DRIVER(cuStreamGetCaptureInfo_v3, driver_capture);
+    DRIVER(cuLaunchKernel, driver_launch_kernel);
     DRIVER(cuGraphAddNode_v2, driver_generic_node);
 #undef DRIVER
     pidfound = 1;
@@ -243,6 +265,7 @@ int main(void) {
 #endif
     test_exec_update();
     test_exec_kernel_set_params();
+    test_capture_not_charged();
     test_full_table();
     printf("graph launch limit: ok\n");
     return 0;
