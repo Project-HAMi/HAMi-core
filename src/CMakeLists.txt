@@ -19,6 +19,9 @@ target_compile_options(${LIBVGPU} PUBLIC ${LIBRARY_COMPILE_FLAGS})
 target_link_libraries(${LIBVGPU} PUBLIC -lcuda -lnvidia-ml -lpthread)
 
 if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+set(LIBVGPU_VERSION_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/libvgpu.map)
+target_link_options(${LIBVGPU} PRIVATE -Wl,--version-script=${LIBVGPU_VERSION_SCRIPT})
+set_property(TARGET ${LIBVGPU} APPEND PROPERTY LINK_DEPENDS ${LIBVGPU_VERSION_SCRIPT})
 add_custom_target(strip_symbol ALL
     COMMAND strip -x ${CMAKE_BINARY_DIR}/lib${LIBVGPU}.so
     DEPENDS ${LIBVGPU})
