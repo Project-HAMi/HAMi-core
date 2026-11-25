@@ -206,6 +206,10 @@ static CUresult driver_exec_node_params(CUgraphExec exec, CUgraphNode node, CUgr
     (void)exec; (void)node; (void)params;
     return set_params_result;
 }
+static CUresult driver_exec_child_params(CUgraphExec exec, CUgraphNode node, CUgraph child) {
+    (void)exec; (void)node; (void)child;
+    return set_params_result;
+}
 static CUresult driver_instantiate(CUgraphExec *exec, CUgraph graph, cuuint64_t flags) {
     (void)graph; (void)flags; instantiations++;
     *exec = (CUgraphExec)++serial;

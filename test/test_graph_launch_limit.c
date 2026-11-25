@@ -194,6 +194,46 @@ static void test_exec_kernel_set_params(void) {
     REQUIRE(cuGraphDestroy(child) == CUDA_SUCCESS);
 }
 
+/** Replacing a child graph of an exec recharges that node with the new child's kernels. */
+static void test_exec_child_set_params(void) {
+    CUgraph child = make_graph();
+    add_kernel(child, 1, 32);
+    CUgraph graph = make_graph();
+    add_kernel(graph, 4, 64);
+    add_child(graph, child);
+    CUgraphNode child_node = (CUgraphNode)serial;
+    CUgraphExec exec = instantiate(graph);
+
+    CUgraph bigger = make_graph();
+    add_kernel(bigger, 16, 256);
+    CUgraphNodeParams generic = {0};
+    generic.type = CU_GRAPH_NODE_TYPE_GRAPH;
+    generic.graph.graph = bigger;
+    REQUIRE(cuGraphExecNodeSetParams(exec, child_node, &generic) == CUDA_SUCCESS);
+    reset_limits();
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_threads == 4 * 64 + 16 * 256);
+
+    CUgraph smaller = make_graph();
+    add_kernel(smaller, 2, 64);
+    REQUIRE(cuGraphExecChildGraphNodeSetParams(exec, child_node, smaller) == CUDA_SUCCESS);
+    reset_limits();
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_threads == 4 * 64 + 2 * 64);
+
+    set_params_result = CUDA_ERROR_INVALID_VALUE;
+    REQUIRE(cuGraphExecChildGraphNodeSetParams(exec, child_node, bigger) == CUDA_ERROR_INVALID_VALUE);
+    REQUIRE(cuGraphExecNodeSetParams(exec, child_node, &generic) == CUDA_ERROR_INVALID_VALUE);
+    set_params_result = CUDA_SUCCESS;
+    reset_limits();
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_threads == 4 * 64 + 2 * 64);
+    destroy(graph, exec);
+    REQUIRE(cuGraphDestroy(child) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(bigger) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(smaller) == CUDA_SUCCESS);
+}
+
 static CUresult driver_launch_kernel(CUfunction f, unsigned int gx, unsigned int gy, unsigned int gz,
                                      unsigned int bx, unsigned int by, unsigned int bz, unsigned int shared,
                                      CUstream stream, void **params, void **extra) {
@@ -252,6 +292,7 @@ int main(void) {
     DRIVER(cuGraphExecKernelNodeSetParams_v2, driver_exec_kernel_params);
     DRIVER(cuGraphExecKernelNodeSetParams, driver_exec_kernel_params);
     DRIVER(cuGraphExecNodeSetParams, driver_exec_node_params);
+    DRIVER(cuGraphExecChildGraphNodeSetParams, driver_exec_child_params);
     DRIVER(cuStreamGetCaptureInfo_v3, driver_capture);
     DRIVER(cuLaunchKernel, driver_launch_kernel);
     DRIVER(cuGraphAddNode_v2, driver_generic_node);
@@ -265,6 +306,7 @@ int main(void) {
 #endif
     test_exec_update();
     test_exec_kernel_set_params();
+    test_exec_child_set_params();
     test_capture_not_charged();
     test_full_table();
     printf("graph launch limit: ok\n");

@@ -336,6 +336,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuGraphExecKernelNodeSetParams_v2),
     CUDA_OVERRIDE_ENUM(cuGraphExecKernelNodeSetParams),
     CUDA_OVERRIDE_ENUM(cuGraphExecNodeSetParams),
+    CUDA_OVERRIDE_ENUM(cuGraphExecChildGraphNodeSetParams),
     CUDA_OVERRIDE_ENUM(cuGraphDestroy),
 
     CUDA_OVERRIDE_ENUM(cuGetProcAddress),

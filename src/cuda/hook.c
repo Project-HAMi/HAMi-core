@@ -303,6 +303,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuGraphExecKernelNodeSetParams_v2"},
     {.name = "cuGraphExecKernelNodeSetParams"},
     {.name = "cuGraphExecNodeSetParams"},
+    {.name = "cuGraphExecChildGraphNodeSetParams"},
     {.name = "cuGraphDestroy"},
 
     {.name = "cuGetProcAddress"},
@@ -403,6 +404,7 @@ void *find_symbols_in_table(const char *symbol) {
         strcmp(symbol, "cuGraphExecKernelNodeSetParams") != 0 &&
         strcmp(symbol, "cuGraphExecKernelNodeSetParams_v2") != 0 &&
         strcmp(symbol, "cuGraphExecNodeSetParams") != 0 &&
+        strcmp(symbol, "cuGraphExecChildGraphNodeSetParams") != 0 &&
         strcmp(symbol, "cuGraphDestroy") != 0) {
         return NULL;
     }

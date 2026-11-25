@@ -269,7 +269,7 @@ CUresult cuGraphDestroyNode(CUgraphNode hNode) {
  * (grid x block) of the kernel nodes it was instantiated from: the unit
  * cuLaunchKernel is charged per kernel. Costs live in an open-addressing table
  * keyed by CUgraphExec; deletion shifts entries back so lookups stay short.
- * The cost of each top-level kernel node is kept too, because
+ * The cost of each top-level kernel and child-graph node is kept too, because
  * cuGraphExec*NodeSetParams changes one node of the exec without a new graph. */
 #define LAUNCH_COST_SLOTS 65536  /* power of two */
 #define LAUNCH_COST_MAX_DEPTH 8  /* child-graph nesting followed when summing */
@@ -277,12 +277,12 @@ CUresult cuGraphDestroyNode(CUgraphNode hNode) {
 typedef struct {
     CUgraphNode node;
     int64_t threads;
-} kernel_cost;
+} node_cost;
 
 typedef struct {
-    kernel_cost *items;  /* sorted by node */
+    node_cost *items;  /* sorted by node */
     size_t len, cap;
-    int64_t rest;        /* child graphs and conditional bodies */
+    int64_t rest;        /* conditional bodies */
 } graph_cost;
 
 typedef struct {
@@ -321,8 +321,8 @@ static int64_t graph_cost_total(const graph_cost *c) {
     return total;
 }
 
-static int kernel_cost_cmp(const void *a, const void *b) {
-    uintptr_t x = (uintptr_t)((const kernel_cost *)a)->node, y = (uintptr_t)((const kernel_cost *)b)->node;
+static int node_cost_cmp(const void *a, const void *b) {
+    uintptr_t x = (uintptr_t)((const node_cost *)a)->node, y = (uintptr_t)((const node_cost *)b)->node;
     return x < y ? -1 : x > y;
 }
 
@@ -330,7 +330,7 @@ static int kernel_cost_cmp(const void *a, const void *b) {
 static void graph_cost_add(graph_cost *c, CUgraphNode node, int64_t threads) {
     if (c->len == c->cap) {
         size_t grown = c->cap ? c->cap * 2 : 16;
-        kernel_cost *items = realloc(c->items, grown * sizeof(*items));
+        node_cost *items = realloc(c->items, grown * sizeof(*items));
         if (items == NULL) {
             c->rest = saturating_add(c->rest, threads);
             return;
@@ -443,7 +443,7 @@ static int64_t conditional_threads(CUgraphNode node, int depth) {
 }
 
 /** Sum grid x block over the kernel nodes of a graph and its child graphs.
- * With top, the graph's own kernel nodes are listed there one by one and the rest summed. */
+ * With top, the graph's own kernel and child-graph nodes are listed there one by one and the rest summed. */
 static int64_t graph_kernel_threads(CUgraph graph, int depth, graph_cost *top) {
     size_t count = 0;
     if (depth > LAUNCH_COST_MAX_DEPTH) return 0;
@@ -486,13 +486,13 @@ static int64_t graph_kernel_threads(CUgraph graph, int depth, graph_cost *top) {
                     CUDA_SUCCESS) {
                     int64_t threads = graph_kernel_threads(child, depth + 1, NULL);
                     total = saturating_add(total, threads);
-                    if (top != NULL) top->rest = saturating_add(top->rest, threads);
+                    if (top != NULL) graph_cost_add(top, nodes[i], threads);
                 }
             }
         }
     }
     free(nodes);
-    if (top != NULL && top->len > 1) qsort(top->items, top->len, sizeof(*top->items), kernel_cost_cmp);
+    if (top != NULL && top->len > 1) qsort(top->items, top->len, sizeof(*top->items), node_cost_cmp);
     return total;
 }
 
@@ -583,16 +583,16 @@ static void launch_cost_record(CUgraphExec exec, CUgraph graph) {
     }
 }
 
-/** Charge one kernel node of exec its new launch size; nodes exec was not built with keep their cost. */
-static void launch_cost_set_kernel(CUgraphExec exec, CUgraphNode node, int64_t threads) {
+/** Charge one kernel or child-graph node of exec its new launch size; nodes exec was not built with keep their cost. */
+static void launch_cost_set_node(CUgraphExec exec, CUgraphNode node, int64_t threads) {
     pthread_mutex_lock(&launch_cost_mutex);
     size_t i = launch_cost_home(exec);
     for (size_t n = 0; n < LAUNCH_COST_SLOTS && launch_costs[i].exec != NULL;
          n++, i = (i + 1) & (LAUNCH_COST_SLOTS - 1)) {
         if (launch_costs[i].exec != exec) continue;
         graph_cost *c = &launch_costs[i].cost;
-        kernel_cost key = {.node = node};
-        kernel_cost *k = c->len ? bsearch(&key, c->items, c->len, sizeof(*c->items), kernel_cost_cmp) : NULL;
+        node_cost key = {.node = node};
+        node_cost *k = c->len ? bsearch(&key, c->items, c->len, sizeof(*c->items), node_cost_cmp) : NULL;
         if (k != NULL) {
             k->threads = threads;
             launch_costs[i].threads = graph_cost_total(c);
@@ -801,7 +801,7 @@ CUresult cuGraphExecKernelNodeSetParams_v2(CUgraphExec hGraphExec, CUgraphNode h
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecKernelNodeSetParams_v2, hGraphExec, hNode,
                                       nodeParams);
     if (res == CUDA_SUCCESS)
-        launch_cost_set_kernel(hGraphExec, hNode, kernel_threads(nodeParams->gridDimX, nodeParams->gridDimY,
+        launch_cost_set_node(hGraphExec, hNode, kernel_threads(nodeParams->gridDimX, nodeParams->gridDimY,
             nodeParams->gridDimZ, nodeParams->blockDimX, nodeParams->blockDimY, nodeParams->blockDimZ));
     return res;
 }
@@ -813,21 +813,33 @@ CUresult cuGraphExecKernelNodeSetParams(CUgraphExec hGraphExec, CUgraphNode hNod
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecKernelNodeSetParams, hGraphExec, hNode,
                                       nodeParams);
     if (res == CUDA_SUCCESS)
-        launch_cost_set_kernel(hGraphExec, hNode, kernel_threads(nodeParams->gridDimX, nodeParams->gridDimY,
+        launch_cost_set_node(hGraphExec, hNode, kernel_threads(nodeParams->gridDimX, nodeParams->gridDimY,
             nodeParams->gridDimZ, nodeParams->blockDimX, nodeParams->blockDimY, nodeParams->blockDimZ));
     return res;
 }
 
-/** Recharge a kernel node changed through the generic node setter. */
+/** Recharge a kernel or child-graph node changed through the generic node setter. */
 CUresult cuGraphExecNodeSetParams(CUgraphExec hGraphExec, CUgraphNode hNode, CUgraphNodeParams *nodeParams) {
     LOG_DEBUG("cuGraphExecNodeSetParams");
     if (CUDA_FIND_ENTRY(cuda_library_entry, cuGraphExecNodeSetParams) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecNodeSetParams, hGraphExec, hNode, nodeParams);
-    if (res == CUDA_SUCCESS && nodeParams->type == CU_GRAPH_NODE_TYPE_KERNEL) {
+    if (res != CUDA_SUCCESS) return res;
+    if (nodeParams->type == CU_GRAPH_NODE_TYPE_KERNEL) {
         const CUDA_KERNEL_NODE_PARAMS_v3 *k = &nodeParams->kernel;
-        launch_cost_set_kernel(hGraphExec, hNode, kernel_threads(k->gridDimX, k->gridDimY, k->gridDimZ,
-                                                                 k->blockDimX, k->blockDimY, k->blockDimZ));
+        launch_cost_set_node(hGraphExec, hNode, kernel_threads(k->gridDimX, k->gridDimY, k->gridDimZ,
+                                                               k->blockDimX, k->blockDimY, k->blockDimZ));
+    } else if (nodeParams->type == CU_GRAPH_NODE_TYPE_GRAPH) {
+        launch_cost_set_node(hGraphExec, hNode, graph_kernel_threads(nodeParams->graph.graph, 1, NULL));
     }
+    return res;
+}
+
+/** Recharge a child-graph node whose graph was replaced. */
+CUresult cuGraphExecChildGraphNodeSetParams(CUgraphExec hGraphExec, CUgraphNode hNode, CUgraph childGraph) {
+    LOG_DEBUG("cuGraphExecChildGraphNodeSetParams");
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecChildGraphNodeSetParams, hGraphExec, hNode,
+                                      childGraph);
+    if (res == CUDA_SUCCESS) launch_cost_set_node(hGraphExec, hNode, graph_kernel_threads(childGraph, 1, NULL));
     return res;
 }
 
