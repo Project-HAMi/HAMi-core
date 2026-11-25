@@ -697,7 +697,8 @@ static CUresult submit_graph(cuda_sym_t submit, CUgraphExec exec, CUstream strea
     graph_exec_state *state;
     CUstream accounting_stream = per_thread && stream == NULL ? CU_STREAM_PER_THREAD : stream;
     if (!upload) {
-        /* Same admission as cuLaunchKernel, charged for the whole graph at once. */
+        /* Same admission as cuLaunchKernel, charged for the whole graph at once. rate_limiter
+         * uses the current device, so a graph on several devices is charged to that one only. */
         ENSURE_RUNNING();
         pre_launch_kernel();
         if (pidfound == 1) {
