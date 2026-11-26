@@ -155,7 +155,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
     elseif (TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle"
             OR TEST_TARGET_NAME STREQUAL "test_graph_pool_lifetimes"
             OR TEST_TARGET_NAME STREQUAL "test_graph_submission_accounting"
-            OR TEST_TARGET_NAME STREQUAL "test_graph_allocation_admission")
+            OR TEST_TARGET_NAME STREQUAL "test_graph_allocation_admission"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_launch_limit")
         add_executable(${TEST_TARGET_NAME} ${TEST_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/allocator/allocator.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/graph.c
@@ -166,7 +167,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
         set_target_properties(${TEST_TARGET_NAME} PROPERTIES
             LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
         if (TEST_TARGET_NAME STREQUAL "test_graph_pool_lifetimes"
-            OR TEST_TARGET_NAME STREQUAL "test_graph_submission_accounting")
+            OR TEST_TARGET_NAME STREQUAL "test_graph_submission_accounting"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_launch_limit")
             target_sources(${TEST_TARGET_NAME} PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/../src/cuda/context.c)
         endif()
@@ -338,7 +340,8 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             OR TEST_TARGET_NAME STREQUAL "test_primary_context_charge"
             OR TEST_TARGET_NAME STREQUAL "test_graph_capture_lifecycle"
             OR TEST_TARGET_NAME STREQUAL "test_graph_pool_lifetimes"
-            OR TEST_TARGET_NAME STREQUAL "test_graph_submission_accounting")
+            OR TEST_TARGET_NAME STREQUAL "test_graph_submission_accounting"
+            OR TEST_TARGET_NAME STREQUAL "test_graph_launch_limit")
         target_link_libraries(${TEST_TARGET_NAME} -lpthread)
     elseif (TEST_TARGET_NAME STREQUAL "test_sm_limiter_step"
             OR TEST_TARGET_NAME STREQUAL "test_utilization_watcher_interval")
@@ -567,6 +570,8 @@ set_tests_properties(graph_pool_lifetimes PROPERTIES TIMEOUT 15)
 
 add_test(NAME graph_submission_accounting COMMAND test_graph_submission_accounting)
 set_tests_properties(graph_submission_accounting PROPERTIES TIMEOUT 20)
+add_test(NAME graph_launch_limit COMMAND test_graph_launch_limit)
+set_tests_properties(graph_launch_limit PROPERTIES TIMEOUT 10)
 add_test(NAME graph_allocation_admission COMMAND test_graph_allocation_admission)
 set_tests_properties(graph_allocation_admission PROPERTIES TIMEOUT 15)
 target_link_options(test_graph_allocation_admission PRIVATE "-Wl,--wrap=calloc")

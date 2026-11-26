@@ -199,6 +199,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemFreeAsync_ptsz"},
     {.name = "cuStreamGetCaptureInfo_v2"},
     {.name = "cuStreamGetCaptureInfo_v3"},
+    {.name = "cuGraphNodeGetParams"},
     {.name = "cuGraphAddMemAllocNode"},
     {.name = "cuGraphAddNode"},
     {.name = "cuGraphAddNode_v2"},
@@ -298,6 +299,12 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuGraphLaunch_ptsz"},
     {.name = "cuStreamBeginCapture_v2_ptsz"},
     {.name = "cuGraphExecDestroy"},
+    {.name = "cuGraphExecUpdate_v2"},
+    {.name = "cuGraphExecUpdate"},
+    {.name = "cuGraphExecKernelNodeSetParams_v2"},
+    {.name = "cuGraphExecKernelNodeSetParams"},
+    {.name = "cuGraphExecNodeSetParams"},
+    {.name = "cuGraphExecChildGraphNodeSetParams"},
     {.name = "cuGraphDestroy"},
 
     {.name = "cuGetProcAddress"},
@@ -337,7 +344,10 @@ void load_cuda_libraries() {
             cuda_library_entry[i].fn_ptr=real_dlsym(RTLD_NEXT,cuda_library_entry[i].name);
             if (!cuda_library_entry[i].fn_ptr){
                 LOG_INFO("can't find function %s in %s", cuda_library_entry[i].name,cuda_filename);
-                if (i == OVERRIDE_cuGraphAddNode_v2 || i == OVERRIDE_cuGraphAddNode_v3) continue;
+                /* Older spellings of these take other arguments; leave the slot empty instead. */
+                if (i == OVERRIDE_cuGraphAddNode_v2 || i == OVERRIDE_cuGraphAddNode_v3 ||
+                    i == OVERRIDE_cuGraphExecUpdate_v2 || i == OVERRIDE_cuGraphExecKernelNodeSetParams_v2)
+                    continue;
                 snprintf(tmpfunc, sizeof(tmpfunc), "%s", cuda_library_entry[i].name);
                 while (prior_function(tmpfunc)) {
                     cuda_library_entry[i].fn_ptr=real_dlsym(RTLD_NEXT,tmpfunc);
@@ -390,6 +400,12 @@ void *find_symbols_in_table(const char *symbol) {
         strcmp(symbol, "cuGraphUpload") != 0 &&
         strcmp(symbol, "cuGraphUpload_ptsz") != 0 &&
         strcmp(symbol, "cuGraphExecDestroy") != 0 &&
+        strcmp(symbol, "cuGraphExecUpdate") != 0 &&
+        strcmp(symbol, "cuGraphExecUpdate_v2") != 0 &&
+        strcmp(symbol, "cuGraphExecKernelNodeSetParams") != 0 &&
+        strcmp(symbol, "cuGraphExecKernelNodeSetParams_v2") != 0 &&
+        strcmp(symbol, "cuGraphExecNodeSetParams") != 0 &&
+        strcmp(symbol, "cuGraphExecChildGraphNodeSetParams") != 0 &&
         strcmp(symbol, "cuGraphDestroy") != 0) {
         return NULL;
     }

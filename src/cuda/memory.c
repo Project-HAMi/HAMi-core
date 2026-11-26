@@ -476,10 +476,23 @@ CUresult cuMipmappedArrayDestroy(CUmipmappedArray hMipmappedArray) {
     return res;
 }
 
+/* A kernel launched into a capturing stream is only recorded, not run. It is charged
+ * every time the captured graph is launched instead (see submit_graph in graph.c). */
+static int kernel_charged(CUstream stream) {
+    if (pidfound != 1) return 0;
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuStreamGetCaptureInfo_v3) == NULL &&
+        CUDA_FIND_ENTRY(cuda_library_entry, cuStreamGetCaptureInfo_v2) == NULL)
+        return 1;
+    CUstreamCaptureStatus cap;
+    cuuint64_t id;
+    CUgraph graph;
+    return graph_capture_info(stream, &cap, &id, &graph) != CUDA_SUCCESS || cap == CU_STREAM_CAPTURE_STATUS_NONE;
+}
+
 CUresult cuLaunchKernel ( CUfunction f, unsigned int  gridDimX, unsigned int  gridDimY, unsigned int  gridDimZ, unsigned int  blockDimX, unsigned int  blockDimY, unsigned int  blockDimZ, unsigned int  sharedMemBytes, CUstream hStream, void** kernelParams, void** extra ){
     ENSURE_RUNNING();
     pre_launch_kernel();
-    if (pidfound==1){ 
+    if (kernel_charged(hStream)){
         rate_limiter((int64_t)gridDimX * gridDimY * gridDimZ,
                    (int64_t)blockDimX * blockDimY * blockDimZ);
     }
@@ -490,7 +503,7 @@ CUresult cuLaunchKernel ( CUfunction f, unsigned int  gridDimX, unsigned int  gr
 CUresult cuLaunchKernelEx(const CUlaunchConfig *config, CUfunction f, void **kernelParams, void **extra) {
     ENSURE_RUNNING();
     pre_launch_kernel();
-    if (pidfound==1){
+    if (kernel_charged(config->hStream)){
         rate_limiter((int64_t)config->gridDimX * config->gridDimY * config->gridDimZ,
                    (int64_t)config->blockDimX * config->blockDimY * config->blockDimZ);
     }
@@ -501,7 +514,7 @@ CUresult cuLaunchKernelEx(const CUlaunchConfig *config, CUfunction f, void **ker
 CUresult cuLaunchCooperativeKernel ( CUfunction f, unsigned int  gridDimX, unsigned int  gridDimY, unsigned int  gridDimZ, unsigned int  blockDimX, unsigned int  blockDimY, unsigned int  blockDimZ, unsigned int  sharedMemBytes, CUstream hStream, void** kernelParams ){
     ENSURE_RUNNING();
     pre_launch_kernel();
-    if (pidfound==1){
+    if (kernel_charged(hStream)){
         rate_limiter((int64_t)gridDimX * gridDimY * gridDimZ,
                    (int64_t)blockDimX * blockDimY * blockDimZ);
     }
@@ -670,6 +683,11 @@ static CUresult graph_add_node(cuda_sym_t add, int edges, CUgraphNode *node, CUg
     graph_alloc_end(entry, res == CUDA_SUCCESS && charge ? params->alloc.dptr : 0, res);
     if (res == CUDA_SUCCESS && params != NULL && params->type == CU_GRAPH_NODE_TYPE_MEM_FREE)
         graph_mark_free(graph, params->free.dptr);
+#if CUDA_VERSION >= 12030
+    /* Conditional bodies are only reported here; the compute limiter needs them for launch costs. */
+    if (res == CUDA_SUCCESS && params != NULL && params->type == CU_GRAPH_NODE_TYPE_CONDITIONAL)
+        graph_conditional_added(*node, graph, params->conditional.phGraph_out, params->conditional.size);
+#endif
     return res;
 }
 

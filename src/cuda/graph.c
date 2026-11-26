@@ -1,5 +1,16 @@
+#include <pthread.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "include/libcuda_hook.h"
+#include "include/memory_limit.h"
 #include "allocator/allocator.h"
+
+extern int pidfound;
+extern void rate_limiter(int64_t grids, int64_t blocks);
+
+static void conditional_forget(CUgraph graph, CUgraphNode node);
 
 CUresult cuGraphCreate(CUgraph *phGraph, unsigned int flags){
 	LOG_DEBUG("cuGraphCreate");
@@ -246,14 +257,405 @@ CUresult cuGraphRemoveDependencies_v2(CUgraph hGraph, const CUgraphNode *from, c
 }
 
 CUresult cuGraphDestroyNode(CUgraphNode hNode) {
-	LOG_DEBUG("cuGraphDestroyNode");
-	return CUDA_OVERRIDE_CALL(cuda_library_entry,cuGraphDestroyNode,hNode);
+    LOG_DEBUG("cuGraphDestroyNode");
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphDestroyNode, hNode);
+    if (res == CUDA_SUCCESS) conditional_forget(NULL, hNode);
+    return res;
+}
+
+/* A graph replay never passes through cuLaunchKernel, so its kernels would skip
+ * rate_limiter and a graph-heavy process could run far above CUDA_DEVICE_SM_LIMIT.
+ * Each executable graph is charged, at every launch, the summed threads
+ * (grid x block) of the kernel nodes it was instantiated from: the unit
+ * cuLaunchKernel is charged per kernel. Costs live in an open-addressing table
+ * keyed by CUgraphExec; deletion shifts entries back so lookups stay short.
+ * The cost of each top-level kernel and child-graph node is kept too, because
+ * cuGraphExec*NodeSetParams changes one node of the exec without a new graph. */
+#define LAUNCH_COST_SLOTS 65536  /* power of two */
+#define LAUNCH_COST_MAX_DEPTH 8  /* child-graph nesting followed when summing */
+
+typedef struct {
+    CUgraphNode node;
+    int64_t threads;
+    size_t seq;  /* position among the listed nodes in cuGraphGetNodes order */
+} node_cost;
+
+typedef struct {
+    node_cost *items;  /* sorted by node */
+    size_t len, cap;
+    int64_t rest;        /* conditional bodies */
+} graph_cost;
+
+typedef struct {
+    CUgraphExec exec;
+    int64_t threads;
+    graph_cost cost;
+} launch_cost_slot;
+
+static launch_cost_slot launch_costs[LAUNCH_COST_SLOTS];
+static pthread_mutex_t launch_cost_mutex = PTHREAD_MUTEX_INITIALIZER;
+static size_t launch_cost_used;
+static int launch_cost_full_logged;
+
+static size_t launch_cost_home(CUgraphExec exec) {
+    uint64_t x = (uint64_t)(uintptr_t)exec;
+    x ^= x >> 33;
+    x *= 0xff51afd7ed558ccdULL;
+    x ^= x >> 33;
+    return (size_t)(x & (LAUNCH_COST_SLOTS - 1));
+}
+
+static int64_t saturating_add(int64_t a, int64_t b) {
+    return a > INT64_MAX - b ? INT64_MAX : a + b;
+}
+
+static int64_t kernel_threads(unsigned int gx, unsigned int gy, unsigned int gz,
+                              unsigned int bx, unsigned int by, unsigned int bz) {
+    int64_t grid = (int64_t)gx * gy * gz;
+    int64_t block = (int64_t)bx * by * bz;
+    return (block != 0 && grid > INT64_MAX / block) ? INT64_MAX : grid * block;
+}
+
+static int64_t graph_cost_total(const graph_cost *c) {
+    int64_t total = c->rest;
+    for (size_t i = 0; i < c->len; i++) total = saturating_add(total, c->items[i].threads);
+    return total;
+}
+
+static int node_cost_cmp(const void *a, const void *b) {
+    uintptr_t x = (uintptr_t)((const node_cost *)a)->node, y = (uintptr_t)((const node_cost *)b)->node;
+    return x < y ? -1 : x > y;
+}
+
+/** Keep a node's cost; without memory the node is folded into rest and cannot be changed later. */
+static void graph_cost_add(graph_cost *c, CUgraphNode node, int64_t threads) {
+    if (c->len == c->cap) {
+        size_t grown = c->cap ? c->cap * 2 : 16;
+        node_cost *items = realloc(c->items, grown * sizeof(*items));
+        if (items == NULL) {
+            c->rest = saturating_add(c->rest, threads);
+            return;
+        }
+        c->items = items;
+        c->cap = grown;
+    }
+    c->items[c->len].node = node;
+    c->items[c->len].threads = threads;
+    c->items[c->len].seq = c->len;
+    c->len++;
+}
+
+/* Body graphs of conditional nodes. Drivers before 13.2 hand them out only when the node is
+ * created (cuGraphAddNode), so they are remembered here for launch costs. */
+typedef struct conditional_body {
+    CUgraphNode node;
+    CUgraph parent;
+    CUgraph *bodies;
+    unsigned int size;
+    struct conditional_body *next;
+} conditional_body;
+
+static conditional_body *conditional_bodies;
+static pthread_mutex_t conditional_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/** Remember the body graphs of a conditional node created in parent. */
+void graph_conditional_added(CUgraphNode node, CUgraph parent, const CUgraph *bodies, unsigned int size) {
+    if (node == NULL || bodies == NULL || size == 0) return;
+    conditional_body *c = calloc(1, sizeof(*c));
+    if (c == NULL) return;
+    c->bodies = malloc(size * sizeof(*c->bodies));
+    if (c->bodies == NULL) {
+        free(c);
+        return;
+    }
+    memcpy(c->bodies, bodies, size * sizeof(*c->bodies));
+    c->node = node;
+    c->parent = parent;
+    c->size = size;
+    pthread_mutex_lock(&conditional_mutex);
+    c->next = conditional_bodies;
+    conditional_bodies = c;
+    pthread_mutex_unlock(&conditional_mutex);
+}
+
+/** Unlink c, queue its body graphs (their own conditionals go too) and free it. */
+static void conditional_unlink(conditional_body **p, CUgraph **queue, size_t *len, size_t *cap) {
+    conditional_body *c = *p;
+    *p = c->next;
+    for (unsigned int i = 0; i < c->size; i++) {
+        if (*len == *cap) {
+            size_t grown = *cap ? *cap * 2 : 16;
+            CUgraph *q = realloc(*queue, grown * sizeof(**queue));
+            if (q == NULL) break;
+            *queue = q;
+            *cap = grown;
+        }
+        (*queue)[(*len)++] = c->bodies[i];
+    }
+    free(c->bodies);
+    free(c);
+}
+
+/** Forget the conditional nodes of a destroyed graph, or one destroyed node, and everything nested. */
+static void conditional_forget(CUgraph graph, CUgraphNode node) {
+    CUgraph *queue = NULL;
+    size_t len = 0, cap = 0;
+    pthread_mutex_lock(&conditional_mutex);
+    for (conditional_body **p = &conditional_bodies; *p != NULL;) {
+        if ((graph != NULL && (*p)->parent == graph) || (node != NULL && (*p)->node == node))
+            conditional_unlink(p, &queue, &len, &cap);
+        else
+            p = &(*p)->next;
+    }
+    while (len > 0) {
+        CUgraph body = queue[--len];
+        for (conditional_body **p = &conditional_bodies; *p != NULL;) {
+            if ((*p)->parent == body)
+                conditional_unlink(p, &queue, &len, &cap);
+            else
+                p = &(*p)->next;
+        }
+    }
+    pthread_mutex_unlock(&conditional_mutex);
+    free(queue);
+}
+
+/** Largest launch cost among a conditional node's bodies; IF and SWITCH run at most one body.
+ * A WHILE node reruns its body until the condition is false. The number of runs is not
+ * known at launch, so only one is charged and loops are undercharged. */
+static int64_t graph_kernel_threads(CUgraph graph, int depth, graph_cost *top);
+static int64_t conditional_threads(CUgraphNode node, int depth) {
+    CUgraph *bodies = NULL;
+    unsigned int size = 0;
+#if CUDA_VERSION >= 12030
+    /* Drivers from 13.2 report a conditional node's bodies, so the list is only needed before that. */
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuGraphNodeGetParams) != NULL) {
+        CUgraphNodeParams p;
+        memset(&p, 0, sizeof(p));
+        if (CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphNodeGetParams, node, &p) == CUDA_SUCCESS &&
+            p.type == CU_GRAPH_NODE_TYPE_CONDITIONAL && p.conditional.phGraph_out != NULL) {
+            int64_t most = 0;
+            for (unsigned int i = 0; i < p.conditional.size; i++) {
+                int64_t threads = graph_kernel_threads(p.conditional.phGraph_out[i], depth + 1, NULL);
+                if (threads > most) most = threads;
+            }
+            return most;
+        }
+    }
+#endif
+    pthread_mutex_lock(&conditional_mutex);
+    for (conditional_body *c = conditional_bodies; c != NULL; c = c->next) {
+        if (c->node != node) continue;
+        bodies = malloc(c->size * sizeof(*bodies));
+        if (bodies != NULL) {
+            memcpy(bodies, c->bodies, c->size * sizeof(*bodies));
+            size = c->size;
+        }
+        break;
+    }
+    pthread_mutex_unlock(&conditional_mutex);
+    int64_t most = 0;
+    for (unsigned int i = 0; i < size; i++) {
+        int64_t threads = graph_kernel_threads(bodies[i], depth + 1, NULL);
+        if (threads > most) most = threads;
+    }
+    free(bodies);
+    return most;
+}
+
+/** Sum grid x block over the kernel nodes of a graph and its child graphs.
+ * With top, the graph's own kernel and child-graph nodes are listed there one by one and the rest summed. */
+static int64_t graph_kernel_threads(CUgraph graph, int depth, graph_cost *top) {
+    size_t count = 0;
+    if (depth > LAUNCH_COST_MAX_DEPTH) return 0;
+    /* A driver without the node queries leaves the graph uncharged, as before. */
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuGraphGetNodes) == NULL ||
+        CUDA_FIND_ENTRY(cuda_library_entry, cuGraphNodeGetType) == NULL ||
+        CUDA_FIND_ENTRY(cuda_library_entry, cuGraphKernelNodeGetParams_v2) == NULL ||
+        CUDA_FIND_ENTRY(cuda_library_entry, cuGraphChildGraphNodeGetGraph) == NULL)
+        return 0;
+    if (CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphGetNodes, graph, NULL, &count) != CUDA_SUCCESS)
+        return 0;
+    if (count == 0) return 0;
+    CUgraphNode *nodes = malloc(count * sizeof(*nodes));
+    if (nodes == NULL) return 0;
+    int64_t total = 0;
+    if (CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphGetNodes, graph, nodes, &count) == CUDA_SUCCESS) {
+        for (size_t i = 0; i < count; i++) {
+            CUgraphNodeType type;
+            if (CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphNodeGetType, nodes[i], &type) != CUDA_SUCCESS)
+                continue;
+            if (type == CU_GRAPH_NODE_TYPE_KERNEL) {
+                CUDA_KERNEL_NODE_PARAMS p;
+                if (CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphKernelNodeGetParams_v2, nodes[i], &p) !=
+                    CUDA_SUCCESS)
+                    continue;
+                int64_t threads = kernel_threads(p.gridDimX, p.gridDimY, p.gridDimZ,
+                                                 p.blockDimX, p.blockDimY, p.blockDimZ);
+                total = saturating_add(total, threads);
+                if (top != NULL) graph_cost_add(top, nodes[i], threads);
+                continue;
+#if CUDA_VERSION >= 12030
+            } else if (type == CU_GRAPH_NODE_TYPE_CONDITIONAL) {
+                int64_t threads = conditional_threads(nodes[i], depth);
+                total = saturating_add(total, threads);
+                if (top != NULL) top->rest = saturating_add(top->rest, threads);
+#endif
+            } else if (type == CU_GRAPH_NODE_TYPE_GRAPH) {
+                CUgraph child;
+                if (CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphChildGraphNodeGetGraph, nodes[i], &child) ==
+                    CUDA_SUCCESS) {
+                    int64_t threads = graph_kernel_threads(child, depth + 1, NULL);
+                    total = saturating_add(total, threads);
+                    if (top != NULL) graph_cost_add(top, nodes[i], threads);
+                }
+            }
+        }
+    }
+    free(nodes);
+    if (top != NULL && top->len > 1) qsort(top->items, top->len, sizeof(*top->items), node_cost_cmp);
+    return total;
+}
+
+/** Remember the launch cost of an executable graph, taking ownership of cost; zero is not stored. */
+static void launch_cost_put(CUgraphExec exec, int64_t threads, graph_cost cost) {
+    if (exec == NULL || threads <= 0) {
+        free(cost.items);
+        return;
+    }
+    pthread_mutex_lock(&launch_cost_mutex);
+    size_t i = launch_cost_home(exec);
+    for (size_t n = 0; n < LAUNCH_COST_SLOTS; n++, i = (i + 1) & (LAUNCH_COST_SLOTS - 1)) {
+        /* Keep one slot empty so every probe, including the shift in launch_cost_drop, ends. */
+        if (launch_costs[i].exec == NULL && launch_cost_used >= LAUNCH_COST_SLOTS - 1) break;
+        if (launch_costs[i].exec == NULL || launch_costs[i].exec == exec) {
+            if (launch_costs[i].exec == NULL) launch_cost_used++;
+            free(launch_costs[i].cost.items);
+            launch_costs[i].exec = exec;
+            launch_costs[i].threads = threads;
+            launch_costs[i].cost = cost;
+            pthread_mutex_unlock(&launch_cost_mutex);
+            return;
+        }
+    }
+    if (!launch_cost_full_logged) {
+        launch_cost_full_logged = 1;
+        LOG_WARN("graph launch cost table full: graphs instantiated from now on are not rate limited");
+    }
+    pthread_mutex_unlock(&launch_cost_mutex);
+    free(cost.items);
+}
+
+/** Launch cost of an executable graph, or 0 when none was recorded. */
+static int64_t launch_cost_get(CUgraphExec exec) {
+    int64_t threads = 0;
+    pthread_mutex_lock(&launch_cost_mutex);
+    size_t i = launch_cost_home(exec);
+    for (size_t n = 0; n < LAUNCH_COST_SLOTS && launch_costs[i].exec != NULL;
+         n++, i = (i + 1) & (LAUNCH_COST_SLOTS - 1)) {
+        if (launch_costs[i].exec == exec) {
+            threads = launch_costs[i].threads;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&launch_cost_mutex);
+    return threads;
+}
+
+/** Forget an executable graph, shifting later entries back to keep probe chains intact. */
+static void launch_cost_drop(CUgraphExec exec) {
+    pthread_mutex_lock(&launch_cost_mutex);
+    size_t i = launch_cost_home(exec);
+    size_t n = 0;
+    for (; n < LAUNCH_COST_SLOTS && launch_costs[i].exec != NULL; n++, i = (i + 1) & (LAUNCH_COST_SLOTS - 1)) {
+        if (launch_costs[i].exec == exec) break;
+    }
+    if (n == LAUNCH_COST_SLOTS || launch_costs[i].exec == NULL) {
+        pthread_mutex_unlock(&launch_cost_mutex);
+        return;
+    }
+    free(launch_costs[i].cost.items);
+    size_t hole = i;
+    for (size_t j = (hole + 1) & (LAUNCH_COST_SLOTS - 1); launch_costs[j].exec != NULL;
+         j = (j + 1) & (LAUNCH_COST_SLOTS - 1)) {
+        size_t home = launch_cost_home(launch_costs[j].exec);
+        /* Move j into the hole unless its home lies cyclically in (hole, j]. */
+        if (((j - home) & (LAUNCH_COST_SLOTS - 1)) >= ((j - hole) & (LAUNCH_COST_SLOTS - 1))) {
+            launch_costs[hole] = launch_costs[j];
+            hole = j;
+        }
+    }
+    launch_costs[hole].exec = NULL;
+    launch_costs[hole].threads = 0;
+    launch_costs[hole].cost = (graph_cost){0};
+    launch_cost_used--;
+    pthread_mutex_unlock(&launch_cost_mutex);
+}
+
+/** After cuGraphExecUpdate, key the new costs by the nodes exec was instantiated with.
+ * cuGraphExec*NodeSetParams keeps taking those nodes, not the ones of the update graph.
+ * Nodes are paired by their position in cuGraphGetNodes, which matches the driver when both
+ * graphs add their nodes in the same order. The driver pairs by edges, so if the order
+ * differs the total stays right, but a later setter may replace another node's cost. */
+static void launch_cost_keep_nodes(CUgraphExec exec, graph_cost *cost) {
+    pthread_mutex_lock(&launch_cost_mutex);
+    size_t i = launch_cost_home(exec);
+    for (size_t n = 0; n < LAUNCH_COST_SLOTS && launch_costs[i].exec != NULL;
+         n++, i = (i + 1) & (LAUNCH_COST_SLOTS - 1)) {
+        if (launch_costs[i].exec != exec) continue;
+        const graph_cost *old = &launch_costs[i].cost;
+        CUgraphNode *keys = old->len == cost->len && cost->len > 0 ? malloc(cost->len * sizeof(*keys)) : NULL;
+        if (keys != NULL) {
+            for (size_t j = 0; j < old->len; j++) keys[old->items[j].seq] = old->items[j].node;
+            for (size_t j = 0; j < cost->len; j++) cost->items[j].node = keys[cost->items[j].seq];
+            free(keys);
+            qsort(cost->items, cost->len, sizeof(*cost->items), node_cost_cmp);
+        }
+        break;
+    }
+    pthread_mutex_unlock(&launch_cost_mutex);
+}
+
+/** Store a new launch cost for exec, or forget it when the graph has no kernels. */
+static void launch_cost_record(CUgraphExec exec, CUgraph graph, int updated) {
+    graph_cost cost = {0};
+    int64_t threads = graph_kernel_threads(graph, 0, &cost);
+    if (updated) launch_cost_keep_nodes(exec, &cost);
+    if (threads > 0) {
+        launch_cost_put(exec, threads, cost);
+    } else {
+        free(cost.items);
+        launch_cost_drop(exec);
+    }
+}
+
+/** Charge one kernel or child-graph node of exec its new launch size; nodes exec was not built with keep their cost. */
+static void launch_cost_set_node(CUgraphExec exec, CUgraphNode node, int64_t threads) {
+    pthread_mutex_lock(&launch_cost_mutex);
+    size_t i = launch_cost_home(exec);
+    for (size_t n = 0; n < LAUNCH_COST_SLOTS && launch_costs[i].exec != NULL;
+         n++, i = (i + 1) & (LAUNCH_COST_SLOTS - 1)) {
+        if (launch_costs[i].exec != exec) continue;
+        graph_cost *c = &launch_costs[i].cost;
+        node_cost key = {.node = node};
+        node_cost *k = c->len ? bsearch(&key, c->items, c->len, sizeof(*c->items), node_cost_cmp) : NULL;
+        if (k != NULL) {
+            k->threads = threads;
+            launch_costs[i].threads = graph_cost_total(c);
+        }
+        break;
+    }
+    pthread_mutex_unlock(&launch_cost_mutex);
 }
 
 /** Commit executable-graph tracking on success or discard it after native failure. */
-static CUresult track_exec(CUresult res, graph_exec_state *state, CUgraphExec *phGraphExec) {
-    if (res == CUDA_SUCCESS) graph_exec_commit(state, *phGraphExec);
-    else graph_exec_discard(state);
+static CUresult track_exec(CUresult res, graph_exec_state *state, CUgraph graph, CUgraphExec *phGraphExec) {
+    if (res == CUDA_SUCCESS) {
+        graph_exec_commit(state, *phGraphExec);
+        launch_cost_record(*phGraphExec, graph, 0);
+    } else {
+        graph_exec_discard(state);
+    }
     return res;
 }
 
@@ -266,7 +668,7 @@ CUresult cuGraphInstantiate(CUgraphExec *phGraphExec, CUgraph hGraph, CUgraphNod
     if (res != CUDA_SUCCESS) return res;
     res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphInstantiate, phGraphExec, hGraph,
                                       phErrorNode, logBuffer, bufferSize);
-    return track_exec(res, state, phGraphExec);
+    return track_exec(res, state, hGraph, phGraphExec);
 }
 
 /** Prepare graph-accounting state before instantiating a graph with flags. */
@@ -277,7 +679,7 @@ CUresult cuGraphInstantiateWithFlags(CUgraphExec *phGraphExec, CUgraph hGraph, u
     if (res != CUDA_SUCCESS) return res;
     res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphInstantiateWithFlags, phGraphExec,
                                       hGraph, flags);
-    return track_exec(res, state, phGraphExec);
+    return track_exec(res, state, hGraph, phGraphExec);
 }
 
 /** Instantiate a graph with parameters and reserve quota for any requested upload. */
@@ -296,7 +698,7 @@ static CUresult instantiate_with_params(cuda_sym_t instantiate, CUgraphExec *exe
     }
     res = instantiate(exec, graph, params);
     if (upload) graph_exec_end(state, stream, res);
-    return track_exec(res, state, exec);
+    return track_exec(res, state, graph, exec);
 }
 
 CUresult cuGraphInstantiateWithParams(CUgraphExec *exec, CUgraph graph,
@@ -310,6 +712,16 @@ CUresult cuGraphInstantiateWithParams(CUgraphExec *exec, CUgraph graph,
 static CUresult submit_graph(cuda_sym_t submit, CUgraphExec exec, CUstream stream, int per_thread, int upload) {
     graph_exec_state *state;
     CUstream accounting_stream = per_thread && stream == NULL ? CU_STREAM_PER_THREAD : stream;
+    if (!upload) {
+        /* Same admission as cuLaunchKernel, charged for the whole graph at once. rate_limiter
+         * uses the current device, so a graph on several devices is charged to that one only. */
+        ENSURE_RUNNING();
+        pre_launch_kernel();
+        if (pidfound == 1) {
+            int64_t threads = launch_cost_get(exec);
+            if (threads > 0) rate_limiter(threads, 1);
+        }
+    }
     CUresult res = graph_exec_begin(exec, accounting_stream, upload, &state);
     if (res != CUDA_SUCCESS) return res;
     res = submit(exec, stream);
@@ -401,7 +813,80 @@ CUresult cuStreamEndCapture(CUstream stream, CUgraph *graph) {
 CUresult cuGraphExecDestroy(CUgraphExec hGraphExec) {
 	LOG_DEBUG("cuGraphExecDestroy");
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecDestroy, hGraphExec);
-    if (res == CUDA_SUCCESS) graph_exec_destroyed(hGraphExec);
+    if (res == CUDA_SUCCESS) {
+        graph_exec_destroyed(hGraphExec);
+        launch_cost_drop(hGraphExec);
+    }
+    return res;
+}
+
+/** Recharge an executable graph after its topology or parameters were replaced. */
+CUresult cuGraphExecUpdate_v2(CUgraphExec hGraphExec, CUgraph hGraph, CUgraphExecUpdateResultInfo *resultInfo) {
+    LOG_DEBUG("cuGraphExecUpdate_v2");
+    /* Drivers before 12.0 only export the legacy signature, which takes different arguments. */
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuGraphExecUpdate_v2) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecUpdate_v2, hGraphExec, hGraph, resultInfo);
+    if (res == CUDA_SUCCESS) launch_cost_record(hGraphExec, hGraph, 1);
+    return res;
+}
+
+/** Recharge an executable graph updated through the pre-12.0 signature. */
+CUresult cuGraphExecUpdate(CUgraphExec hGraphExec, CUgraph hGraph, CUgraphNode *hErrorNode_out,
+                           CUgraphExecUpdateResult *updateResult_out) {
+    LOG_DEBUG("cuGraphExecUpdate");
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecUpdate, hGraphExec, hGraph, hErrorNode_out,
+                                      updateResult_out);
+    if (res == CUDA_SUCCESS) launch_cost_record(hGraphExec, hGraph, 1);
+    return res;
+}
+
+/** Recharge one kernel node of an executable graph after its launch size changed. */
+CUresult cuGraphExecKernelNodeSetParams_v2(CUgraphExec hGraphExec, CUgraphNode hNode,
+                                           const CUDA_KERNEL_NODE_PARAMS *nodeParams) {
+    LOG_DEBUG("cuGraphExecKernelNodeSetParams_v2");
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuGraphExecKernelNodeSetParams_v2) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecKernelNodeSetParams_v2, hGraphExec, hNode,
+                                      nodeParams);
+    if (res == CUDA_SUCCESS)
+        launch_cost_set_node(hGraphExec, hNode, kernel_threads(nodeParams->gridDimX, nodeParams->gridDimY,
+            nodeParams->gridDimZ, nodeParams->blockDimX, nodeParams->blockDimY, nodeParams->blockDimZ));
+    return res;
+}
+
+/** Recharge one kernel node through the pre-12.0 signature. */
+CUresult cuGraphExecKernelNodeSetParams(CUgraphExec hGraphExec, CUgraphNode hNode,
+                                        const CUDA_KERNEL_NODE_PARAMS_v1 *nodeParams) {
+    LOG_DEBUG("cuGraphExecKernelNodeSetParams");
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecKernelNodeSetParams, hGraphExec, hNode,
+                                      nodeParams);
+    if (res == CUDA_SUCCESS)
+        launch_cost_set_node(hGraphExec, hNode, kernel_threads(nodeParams->gridDimX, nodeParams->gridDimY,
+            nodeParams->gridDimZ, nodeParams->blockDimX, nodeParams->blockDimY, nodeParams->blockDimZ));
+    return res;
+}
+
+/** Recharge a kernel or child-graph node changed through the generic node setter. */
+CUresult cuGraphExecNodeSetParams(CUgraphExec hGraphExec, CUgraphNode hNode, CUgraphNodeParams *nodeParams) {
+    LOG_DEBUG("cuGraphExecNodeSetParams");
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuGraphExecNodeSetParams) == NULL) return CUDA_ERROR_NOT_SUPPORTED;
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecNodeSetParams, hGraphExec, hNode, nodeParams);
+    if (res != CUDA_SUCCESS) return res;
+    if (nodeParams->type == CU_GRAPH_NODE_TYPE_KERNEL) {
+        const CUDA_KERNEL_NODE_PARAMS_v3 *k = &nodeParams->kernel;
+        launch_cost_set_node(hGraphExec, hNode, kernel_threads(k->gridDimX, k->gridDimY, k->gridDimZ,
+                                                               k->blockDimX, k->blockDimY, k->blockDimZ));
+    } else if (nodeParams->type == CU_GRAPH_NODE_TYPE_GRAPH) {
+        launch_cost_set_node(hGraphExec, hNode, graph_kernel_threads(nodeParams->graph.graph, 1, NULL));
+    }
+    return res;
+}
+
+/** Recharge a child-graph node whose graph was replaced. */
+CUresult cuGraphExecChildGraphNodeSetParams(CUgraphExec hGraphExec, CUgraphNode hNode, CUgraph childGraph) {
+    LOG_DEBUG("cuGraphExecChildGraphNodeSetParams");
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphExecChildGraphNodeSetParams, hGraphExec, hNode,
+                                      childGraph);
+    if (res == CUDA_SUCCESS) launch_cost_set_node(hGraphExec, hNode, graph_kernel_threads(childGraph, 1, NULL));
     return res;
 }
 
@@ -410,6 +895,7 @@ CUresult cuGraphDestroy(CUgraph hGraph) {
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphDestroy, hGraph);
     if (res == CUDA_SUCCESS) {
         graph_release(hGraph);
+        conditional_forget(hGraph, NULL);
     }
     return res;
 }

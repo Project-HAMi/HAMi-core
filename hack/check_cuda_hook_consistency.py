@@ -24,6 +24,9 @@ OPTIONAL_WRAPPER_SYMBOLS = {"cuCtxFromGreenCtx", "cuEventCreate", "cuEventRecord
 
 OPTIONAL_DLSYM_SYMBOLS.add("cuGraphMemFreeNodeGetParams")
 OPTIONAL_WRAPPER_SYMBOLS.add("cuGraphMemFreeNodeGetParams")
+# Only called internally to read conditional bodies (driver 13.2+).
+OPTIONAL_DLSYM_SYMBOLS.add("cuGraphNodeGetParams")
+OPTIONAL_WRAPPER_SYMBOLS.add("cuGraphNodeGetParams")
 
 
 
