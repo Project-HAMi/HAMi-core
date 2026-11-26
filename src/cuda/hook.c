@@ -199,6 +199,7 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuMemFreeAsync_ptsz"},
     {.name = "cuStreamGetCaptureInfo_v2"},
     {.name = "cuStreamGetCaptureInfo_v3"},
+    {.name = "cuGraphNodeGetParams"},
     {.name = "cuGraphAddMemAllocNode"},
     {.name = "cuGraphAddNode"},
     {.name = "cuGraphAddNode_v2"},

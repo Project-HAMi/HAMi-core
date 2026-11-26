@@ -232,6 +232,7 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuMemFreeAsync_ptsz),
     CUDA_OVERRIDE_ENUM(cuStreamGetCaptureInfo_v2),
     CUDA_OVERRIDE_ENUM(cuStreamGetCaptureInfo_v3),
+    CUDA_OVERRIDE_ENUM(cuGraphNodeGetParams),
     CUDA_OVERRIDE_ENUM(cuGraphAddMemAllocNode),
     CUDA_OVERRIDE_ENUM(cuGraphAddNode),
     CUDA_OVERRIDE_ENUM(cuGraphAddNode_v2),

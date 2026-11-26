@@ -37,6 +37,8 @@ static struct {
     CUgraphNodeType type;
     CUdeviceptr ptr;
     unsigned int grid, block;
+    CUgraph *bodies;
+    unsigned int size;
 } graph_nodes[8192];
 static CUresult graph_query_result;
 static int graph_node_queries;
@@ -169,6 +171,8 @@ static CUresult driver_generic_node(CUgraphNode *node, CUgraph graph, const CUgr
         *node = (CUgraphNode)++serial;
         graph_nodes[serial].graph = graph;
         graph_nodes[serial].type = CU_GRAPH_NODE_TYPE_CONDITIONAL;
+        graph_nodes[serial].bodies = params->conditional.phGraph_out;
+        graph_nodes[serial].size = params->conditional.size;
         return CUDA_SUCCESS;
     }
 #endif
@@ -179,6 +183,18 @@ static CUresult driver_generic_node(CUgraphNode *node, CUgraph graph, const CUgr
     graph_nodes[serial].child = params->graph.graph;
     return CUDA_SUCCESS;
 }
+#if CUDA_VERSION >= 12030
+static CUresult node_params_result;
+/** Report a conditional node's bodies like cuGraphNodeGetParams on a 13.2+ driver. */
+static CUresult driver_node_get_params(CUgraphNode node, CUgraphNodeParams *params) {
+    REQUIRE((uintptr_t)node < 8192);
+    if (node_params_result != CUDA_SUCCESS) return node_params_result;
+    params->type = graph_nodes[(uintptr_t)node].type;
+    params->conditional.phGraph_out = graph_nodes[(uintptr_t)node].bodies;
+    params->conditional.size = graph_nodes[(uintptr_t)node].size;
+    return CUDA_SUCCESS;
+}
+#endif
 static void setup_graph_queries(void) {
     cuda_library_entry[OVERRIDE_cuGraphGetNodes].fn_ptr = driver_graph_nodes;
     cuda_library_entry[OVERRIDE_cuGraphNodeGetType].fn_ptr = driver_node_type;

@@ -110,6 +110,43 @@ static void test_conditional_bodies(void) {
     REQUIRE(limited_threads == 4 * 32);
     destroy(graph, exec);
 }
+
+/** With cuGraphNodeGetParams the driver's bodies are used, so a conditional node that was not
+ * recorded at creation is still charged; if the call fails the recorded bodies are used. */
+static void test_conditional_bodies_from_driver(void) {
+    static CUgraph bodies[2];
+    bodies[0] = make_graph();
+    bodies[1] = make_graph();
+    add_kernel(bodies[0], 8, 64);
+    add_kernel(bodies[1], 2, 64);
+    CUgraph unrecorded = make_graph();
+    add_kernel(unrecorded, 4, 32);
+    graph_nodes[++serial].graph = unrecorded;
+    graph_nodes[serial].type = CU_GRAPH_NODE_TYPE_CONDITIONAL;
+    graph_nodes[serial].bodies = bodies;
+    graph_nodes[serial].size = 2;
+    CUgraphExec exec = instantiate(unrecorded);
+    reset_limits();
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_threads == 4 * 32);
+    REQUIRE(cuGraphExecDestroy(exec) == CUDA_SUCCESS);
+
+    cuda_library_entry[OVERRIDE_cuGraphNodeGetParams].fn_ptr = (void *)driver_node_get_params;
+    exec = instantiate(unrecorded);
+    reset_limits();
+    REQUIRE(cuGraphLaunch(exec, NULL) == CUDA_SUCCESS);
+    REQUIRE(limited_threads == 4 * 32 + 8 * 64);
+    REQUIRE(cuGraphExecDestroy(exec) == CUDA_SUCCESS);
+
+    test_conditional_bodies();
+    node_params_result = CUDA_ERROR_NOT_SUPPORTED;
+    test_conditional_bodies();
+    node_params_result = CUDA_SUCCESS;
+    cuda_library_entry[OVERRIDE_cuGraphNodeGetParams].fn_ptr = NULL;
+    REQUIRE(cuGraphDestroy(unrecorded) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(bodies[0]) == CUDA_SUCCESS);
+    REQUIRE(cuGraphDestroy(bodies[1]) == CUDA_SUCCESS);
+}
 #endif
 
 /** An executable graph updated in place is charged for its new graph; a failed update keeps the old cost. */
@@ -341,6 +378,7 @@ int main(void) {
     test_destroy_keeps_other_costs();
 #if CUDA_VERSION >= 12030
     test_conditional_bodies();
+    test_conditional_bodies_from_driver();
 #endif
     test_exec_update();
     test_exec_kernel_set_params();

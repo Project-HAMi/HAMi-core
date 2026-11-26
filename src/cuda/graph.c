@@ -345,7 +345,7 @@ static void graph_cost_add(graph_cost *c, CUgraphNode node, int64_t threads) {
     c->len++;
 }
 
-/* Body graphs of conditional nodes. The driver hands them out only when the node is
+/* Body graphs of conditional nodes. Drivers before 13.2 hand them out only when the node is
  * created (cuGraphAddNode), so they are remembered here for launch costs. */
 typedef struct conditional_body {
     CUgraphNode node;
@@ -427,6 +427,22 @@ static int64_t graph_kernel_threads(CUgraph graph, int depth, graph_cost *top);
 static int64_t conditional_threads(CUgraphNode node, int depth) {
     CUgraph *bodies = NULL;
     unsigned int size = 0;
+#if CUDA_VERSION >= 12030
+    /* Drivers from 13.2 report a conditional node's bodies, so the list is only needed before that. */
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuGraphNodeGetParams) != NULL) {
+        CUgraphNodeParams p;
+        memset(&p, 0, sizeof(p));
+        if (CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphNodeGetParams, node, &p) == CUDA_SUCCESS &&
+            p.type == CU_GRAPH_NODE_TYPE_CONDITIONAL && p.conditional.phGraph_out != NULL) {
+            int64_t most = 0;
+            for (unsigned int i = 0; i < p.conditional.size; i++) {
+                int64_t threads = graph_kernel_threads(p.conditional.phGraph_out[i], depth + 1, NULL);
+                if (threads > most) most = threads;
+            }
+            return most;
+        }
+    }
+#endif
     pthread_mutex_lock(&conditional_mutex);
     for (conditional_body *c = conditional_bodies; c != NULL; c = c->next) {
         if (c->node != node) continue;
