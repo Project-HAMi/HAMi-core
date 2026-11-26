@@ -88,6 +88,8 @@ cuda_entry_t cuda_library_entry[] = {
     {.name = "cuEventQuery"},
     {.name = "cuStreamGetId"},
     {.name = "cuStreamGetCtx"},
+    {.name = "cuStreamGetCtx_v2"},
+    {.name = "cuStreamGetDevice"},
     {.name = "cuGreenCtxDestroy"},
     {.name = "cuCtxFromGreenCtx"},
     {.name = "cuStreamBeginCapture"},
@@ -345,7 +347,8 @@ void load_cuda_libraries() {
             if (!cuda_library_entry[i].fn_ptr){
                 LOG_INFO("can't find function %s in %s", cuda_library_entry[i].name,cuda_filename);
                 /* Older spellings of these take other arguments; leave the slot empty instead. */
-                if (i == OVERRIDE_cuGraphAddNode_v2 || i == OVERRIDE_cuGraphAddNode_v3 ||
+                if (i == OVERRIDE_cuStreamGetCtx_v2 ||
+                    i == OVERRIDE_cuGraphAddNode_v2 || i == OVERRIDE_cuGraphAddNode_v3 ||
                     i == OVERRIDE_cuGraphExecUpdate_v2 || i == OVERRIDE_cuGraphExecKernelNodeSetParams_v2)
                     continue;
                 snprintf(tmpfunc, sizeof(tmpfunc), "%s", cuda_library_entry[i].name);

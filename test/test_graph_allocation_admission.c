@@ -26,6 +26,9 @@ static CUgraph captured_graph;
 static CUresult end_result, capture_query_result, device_count_result;
 static int device_count = 1;
 static allocated_list async_list;
+static CUcontext current_context = (CUcontext)1, saved_context;
+static CUresult context_device_result;
+static CUdevice accounting_device;
 
 void *__real_calloc(size_t count, size_t size);
 
@@ -43,16 +46,73 @@ void ensure_hostpid(void) {}
 void lock_shrreg(void) {}
 void unlock_shrreg(void) {}
 unsigned int cuda_to_nvml_map(unsigned int dev) { return dev; }
-uint64_t get_current_device_memory_limit(const int dev) { REQUIRE(dev == 0); return 1024 * MIB; }
-size_t get_gpu_memory_usage(const int dev) { REQUIRE(dev == 0); return used; }
+uint64_t get_current_device_memory_limit(const int dev) { REQUIRE(dev == accounting_device); return 1024 * MIB; }
+size_t get_gpu_memory_usage(const int dev) { REQUIRE(dev == accounting_device); return used; }
 int clear_proc_slot_nolock(int force) { (void)force; return 0; }
-CUresult cuCtxGetDevice(CUdevice *dev) { *dev = 0; return CUDA_SUCCESS; }
+CUresult cuCtxGetDevice(CUdevice *dev) {
+    if (current_context == NULL) return CUDA_ERROR_INVALID_CONTEXT;
+    if (context_device_result != CUDA_SUCCESS) return context_device_result;
+    *dev = current_context == (CUcontext)1 ? accounting_device : 0;
+    return CUDA_SUCCESS;
+}
+
+static CUresult native_stream_device(CUstream stream, CUdevice *dev) {
+    if (stream != (CUstream)3) return CUDA_ERROR_INVALID_HANDLE;
+    *dev = accounting_device;
+    return CUDA_SUCCESS;
+}
+
+static CUresult native_stream_context(CUstream stream, CUcontext *ctx) {
+    if (stream == (CUstream)5) return CUDA_ERROR_NOT_SUPPORTED;
+    if (stream != (CUstream)3) return CUDA_ERROR_INVALID_HANDLE;
+    *ctx = (CUcontext)1;
+    return CUDA_SUCCESS;
+}
+
+static CUresult native_stream_context_v2(CUstream stream, CUcontext *ctx, CUgreenCtx *green) {
+    if (stream == (CUstream)5) {
+        *ctx = (CUcontext)1;
+        *green = (CUgreenCtx)2;
+        return CUDA_SUCCESS;
+    }
+    *green = NULL;
+    return native_stream_context(stream, ctx);
+}
+
+static CUresult native_current_pool(CUmemoryPool *pool, CUdevice dev) {
+    REQUIRE(dev == accounting_device);
+    *pool = (CUmemoryPool)11;
+    return CUDA_SUCCESS;
+}
+
+static CUresult native_pool_attribute(CUmemoryPool pool, CUmemPool_attribute attr, void *value) {
+    REQUIRE(pool == (CUmemoryPool)11 && attr == CU_MEMPOOL_ATTR_RESERVED_MEM_HIGH);
+    *(cuuint64_t *)value = 4 * MIB;
+    return CUDA_SUCCESS;
+}
+
+static CUresult native_current(CUcontext *ctx) {
+    *ctx = current_context;
+    return CUDA_SUCCESS;
+}
+
+static CUresult native_push(CUcontext ctx) {
+    saved_context = current_context;
+    current_context = ctx;
+    return CUDA_SUCCESS;
+}
+
+static CUresult native_pop(CUcontext *ctx) {
+    *ctx = current_context;
+    current_context = saved_context;
+    return CUDA_SUCCESS;
+}
 int add_gpu_device_memory_usage(int32_t pid, int dev, size_t bytes, int type) {
-    (void)pid; (void)type; REQUIRE(dev == 0); used += bytes; return 0;
+    (void)pid; (void)type; REQUIRE(dev == accounting_device); used += bytes; return 0;
 }
 /** Release a simulated charge without allowing an accounting underflow. */
 int rm_gpu_device_memory_usage(int32_t pid, int dev, size_t bytes, int type) {
-    (void)pid; (void)type; REQUIRE(dev == 0 && used >= bytes); used -= bytes; return 0;
+    (void)pid; (void)type; REQUIRE(dev == accounting_device && used >= bytes); used -= bytes; return 0;
 }
 
 /** Report the visible device count or an injected driver failure. */
@@ -268,11 +328,63 @@ static void check_admission(int kind) {
     REQUIRE(used == 256 * MIB && undo_calls == 0);
 }
 
+/** A named stream selects its own device even with another or no current context. */
+static void check_async_stream_device(void) {
+    CUdeviceptr ptr = 99;
+    CUstream stream = (CUstream)3;
+    int before = native_calls;
+    device_count = 2;
+    accounting_device = 1;
+    current_context = (CUcontext)2;
+    REQUIRE(cuMemAllocAsync(&ptr, 900 * MIB, stream) == CUDA_ERROR_OUT_OF_MEMORY);
+    REQUIRE(cuMemAllocAsync(&ptr, 1, (CUstream)4) == CUDA_ERROR_INVALID_HANDLE);
+
+    cuda_library_entry[OVERRIDE_cuStreamGetDevice].fn_ptr = NULL;
+    cuda_library_entry[OVERRIDE_cuStreamGetCtx].fn_ptr = native_stream_context;
+    cuda_library_entry[OVERRIDE_cuCtxGetCurrent].fn_ptr = native_current;
+    cuda_library_entry[OVERRIDE_cuCtxPushCurrent_v2].fn_ptr = native_push;
+    cuda_library_entry[OVERRIDE_cuCtxPopCurrent_v2].fn_ptr = native_pop;
+    REQUIRE(cuMemAllocAsync(&ptr, 900 * MIB, stream) == CUDA_ERROR_OUT_OF_MEMORY);
+    REQUIRE(current_context == (CUcontext)2);
+    current_context = NULL;
+    REQUIRE(cuMemAllocAsync(&ptr, 900 * MIB, stream) == CUDA_ERROR_OUT_OF_MEMORY);
+    REQUIRE(current_context == NULL);
+    context_device_result = CUDA_ERROR_DEINITIALIZED;
+    REQUIRE(cuMemAllocAsync(&ptr, 1, stream) == CUDA_ERROR_DEINITIALIZED);
+    REQUIRE(current_context == NULL);
+    context_device_result = CUDA_SUCCESS;
+    REQUIRE(cuMemAllocAsync(&ptr, 1, NULL) == CUDA_ERROR_INVALID_CONTEXT);
+    REQUIRE(cuMemAllocAsync(&ptr, 1, CU_STREAM_LEGACY) == CUDA_ERROR_INVALID_CONTEXT);
+    REQUIRE(cuMemAllocAsync_ptsz(&ptr, 1, NULL) == CUDA_ERROR_INVALID_CONTEXT);
+    REQUIRE(ptr == 99 && native_calls == before && used == 256 * MIB);
+
+    cuda_library_entry[OVERRIDE_cuDeviceGetMemPool].fn_ptr = native_current_pool;
+    cuda_library_entry[OVERRIDE_cuMemPoolGetAttribute].fn_ptr = native_pool_attribute;
+    REQUIRE(cuMemAllocAsync(&ptr, 4 * MIB, stream) == CUDA_SUCCESS);
+    REQUIRE(current_context == NULL && used == 260 * MIB && native_calls == before + 1);
+    REQUIRE(cuMemFreeAsync(ptr, stream) == CUDA_SUCCESS && used == 256 * MIB);
+
+    /* The v2 lookup supplies the primary context for a named green stream. */
+    cuda_library_entry[OVERRIDE_cuStreamGetCtx_v2].fn_ptr = native_stream_context_v2;
+    CUstream green_stream = (CUstream)5;
+    CUgraph graph;
+    end_result = CUDA_SUCCESS;
+    REQUIRE(cuStreamBeginCapture_v2(green_stream, CU_STREAM_CAPTURE_MODE_RELAXED) == CUDA_SUCCESS);
+    REQUIRE(cuMemAllocAsync(&ptr, 4 * MIB, green_stream) == CUDA_SUCCESS);
+    REQUIRE(current_context == NULL && used == 260 * MIB && native_calls == before + 2);
+    REQUIRE(cuMemFreeAsync(ptr, green_stream) == CUDA_SUCCESS);
+    REQUIRE(cuStreamEndCapture(green_stream, &graph) == CUDA_SUCCESS);
+    REQUIRE(used == 260 * MIB);
+    graph_release(graph);
+    REQUIRE(used == 256 * MIB);
+}
+
 /** Run admission regressions for explicit and captured graph allocations. */
 int main(void) {
     log_utils_init();
     device_allocasync = &async_list;
     cuda_library_entry[OVERRIDE_cuDeviceGetCount].fn_ptr = native_device_count;
+    cuda_library_entry[OVERRIDE_cuStreamGetDevice].fn_ptr = native_stream_device;
     cuda_library_entry[OVERRIDE_cuGraphAddMemAllocNode].fn_ptr = native_add;
     cuda_library_entry[OVERRIDE_cuGraphDestroyNode].fn_ptr = native_undo;
     cuda_library_entry[OVERRIDE_cuGraphAddNode].fn_ptr = native_generic;
@@ -310,6 +422,7 @@ int main(void) {
     end_result = CUDA_ERROR_STREAM_CAPTURE_INVALIDATED;
     REQUIRE(cuStreamEndCapture((CUstream)3, &graph) == end_result);
     REQUIRE(used == 256 * MIB);
+    check_async_stream_device();
     puts("PASS: graph allocation admission, rollback, and concurrent reservation");
     return 0;
 }
