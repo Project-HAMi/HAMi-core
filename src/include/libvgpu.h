@@ -22,21 +22,32 @@ extern void load_cuda_libraries();
 
 #define FUNC_ATTR_VISIBLE  __attribute__((visibility("default")))
 
+/*
+ * DLSYM_HOOK_FUNC matches the name as written in the table, or, when
+ * exported_names is set, the name it expands to through cuda.h. The expanded
+ * name is the one the hook is exported under, so a dlsym caller asking for
+ * cuDeviceGetUuid still gets the native v1 function, not the
+ * cuDeviceGetUuid_v2 hook.
+ */
+#define DLSYM_HOOK_STR(f) #f
+#define DLSYM_HOOK_NAME(f) DLSYM_HOOK_STR(f)
+
 #if defined(DLSYM_HOOK_DEBUG)
 #define DLSYM_HOOK_FUNC(f)                                       \
-    if (0 == strcmp(symbol, #f)) {                               \
+    if (0 == strcmp(symbol, exported_names ? DLSYM_HOOK_NAME(f) : #f)) { \
         LOG_DEBUG("Detect dlsym for %s\n", #f);                  \
         return (void*) f; }                                      \
 
-#else 
+#else
 
 #define DLSYM_HOOK_FUNC(f)                                       \
-    if (0 == strcmp(symbol, #f)) {                               \
+    if (0 == strcmp(symbol, exported_names ? DLSYM_HOOK_NAME(f) : #f)) { \
         return (void*) f; }                                      \
 
-#endif     
+#endif
 
 void* __dlsym_hook_section(void* handle, const char* symbol);
+void* __dlsym_hook_section_exported(const char* symbol);
 void* __dlsym_hook_section_nvml(void* handle, const char* symbol);
 
 typedef void* (*fp_dlsym)(void*, const char*);

@@ -1,0 +1,19 @@
+/*
+ * Dynamic symbols of libvgpu.so in non-Debug builds.
+ *
+ * A program that links libcuda or libnvidia-ml directly reaches the hooks
+ * through LD_PRELOAD symbol interposition, so every cu* and nvml* hook must be
+ * exported. Everything else stays local.
+ */
+{
+  global:
+    dlsym;
+    vgpu_hostpid_found;
+    cu[A-Z]*;
+    nvml[A-Z]*;
+  local:
+    /* Allocator helpers, not CUDA driver API functions. */
+    cuMemoryAllocate;
+    cuMemoryFree;
+    *;
+};

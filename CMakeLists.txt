@@ -30,7 +30,10 @@ if (CMAKE_BUILD_TYPE STREQUAL Debug)
     set(LIBRARY_COMPILE_FLAGS -shared -fPIC -g -D_GNU_SOURCE -Wall)
     set(TEST_COMPILE_FLAGS -O1)
 else()
-    set(LIBRARY_COMPILE_FLAGS -shared -fPIC -D_GNU_SOURCE -fvisibility=hidden -Wall)
+    # src/libvgpu.map decides which symbols are exported. Do not compile with
+    # -fvisibility=hidden: a hidden symbol cannot be exported by the version
+    # script, and the cu* and nvml* hooks must be exported.
+    set(LIBRARY_COMPILE_FLAGS -shared -fPIC -D_GNU_SOURCE -Wall)
     set(TEST_COMPILE_FLAGS -O1)
 endif()
 

@@ -105,7 +105,10 @@ void* libvgpu_dlsym_dispatch(void* handle, const char* symbol) {
         //Compatible with cuda 12.8+ fix
         if (strcmp(symbol,"cuGetExportTable")!=0)
             pthread_once(&pre_cuinit_flag,(void(*)(void))preInit);
-        void *f = real_dlsym(vgpulib,symbol);
+        /* Look the hook up in the table rather than with dlsym on this
+         * library, which only sees exported symbols and so finds nothing
+         * when the library is built with -fvisibility=hidden. */
+        void *f = __dlsym_hook_section_exported(symbol);
         if (f!=NULL)
             return f;
     }
@@ -132,8 +135,11 @@ FUNC_ATTR_VISIBLE void* dlsym(void* handle, const char* symbol) {
 }
 #endif
 
-/** Resolve supported CUDA and NVML hooks by their exported spelling. */
-void* __dlsym_hook_section(void* handle, const char* symbol) {
+/*
+ * Resolve supported CUDA hooks. exported_names selects how a table entry is
+ * matched; see DLSYM_HOOK_FUNC.
+ */
+static void* dlsym_hook_lookup(const char* symbol, int exported_names) {
     DLSYM_HOOK_FUNC(cuStreamSynchronize_ptsz);
     DLSYM_HOOK_FUNC(cuMemcpyAsync_ptsz);
     DLSYM_HOOK_FUNC(cuMemAllocAsync_ptsz);
@@ -148,7 +154,10 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     for (it=0;it<CUDA_ENTRY_END;it++){
         if (strcmp(cuda_library_entry[it].name,symbol) == 0){
             if (cuda_library_entry[it].fn_ptr == NULL) {
-                LOG_WARN("NEED TO RETURN NULL");
+                /* The dlsym hook falls back to the real dlsym on NULL, so
+                 * only warn for cuGetProcAddress lookups. */
+                if (!exported_names)
+                    LOG_WARN("NEED TO RETURN NULL");
                 return NULL;
             }else{
                 break;
@@ -437,7 +446,19 @@ void* __dlsym_hook_section(void* handle, const char* symbol) {
     return NULL;
 }
 
+/* Match table names; used by cuGetProcAddress, which resolves versions first. */
+void* __dlsym_hook_section(void* handle, const char* symbol) {
+    (void)handle;
+    return dlsym_hook_lookup(symbol, 0);
+}
+
+/* Match exported names; used by the dlsym hook. */
+void* __dlsym_hook_section_exported(const char* symbol) {
+    return dlsym_hook_lookup(symbol, 1);
+}
+
 void* __dlsym_hook_section_nvml(void* handle, const char* symbol) {
+    const int exported_names = 0;
     DLSYM_HOOK_FUNC(nvmlInit);
     /** nvmlShutdown */
     DLSYM_HOOK_FUNC(nvmlShutdown);
