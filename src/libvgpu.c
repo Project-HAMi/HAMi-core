@@ -154,7 +154,10 @@ static void* dlsym_hook_lookup(const char* symbol, int exported_names) {
     for (it=0;it<CUDA_ENTRY_END;it++){
         if (strcmp(cuda_library_entry[it].name,symbol) == 0){
             if (cuda_library_entry[it].fn_ptr == NULL) {
-                LOG_WARN("NEED TO RETURN NULL");
+                /* The dlsym hook falls back to the real dlsym on NULL, so
+                 * only warn for cuGetProcAddress lookups. */
+                if (!exported_names)
+                    LOG_WARN("NEED TO RETURN NULL");
                 return NULL;
             }else{
                 break;
