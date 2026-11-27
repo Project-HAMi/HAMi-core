@@ -46,6 +46,11 @@ int rm_gpu_device_memory_usage(int32_t pid, int dev, size_t bytes, int type) {
     (void)pid; (void)dev; (void)type; REQUIRE(used >= bytes); used -= bytes; return 0;
 }
 CUresult cuCtxGetDevice(CUdevice *dev) { *dev = 0; return CUDA_SUCCESS; }
+static CUresult native_stream_device(CUstream stream, CUdevice *dev) {
+    (void)stream;
+    *dev = 0;
+    return CUDA_SUCCESS;
+}
 
 /** Report capture state or the configured native query failure. */
 static CUresult native_info(CUstream stream, CUstreamCaptureStatus *status, cuuint64_t *id,
@@ -255,6 +260,7 @@ int main(void) {
     cuda_library_entry[OVERRIDE_cuDeviceGetCount].fn_ptr = native_device_count;
     cuda_library_entry[OVERRIDE_cuStreamGetCaptureInfo_v3].fn_ptr = native_info;
     cuda_library_entry[OVERRIDE_cuCtxGetCurrent].fn_ptr = native_current;
+    cuda_library_entry[OVERRIDE_cuStreamGetDevice].fn_ptr = native_stream_device;
     cuda_library_entry[OVERRIDE_cuStreamBeginCapture_v2].fn_ptr = native_begin;
     cuda_library_entry[OVERRIDE_cuStreamEndCapture].fn_ptr = native_end;
     cuda_library_entry[OVERRIDE_cuGraphDestroy].fn_ptr = native_destroy;

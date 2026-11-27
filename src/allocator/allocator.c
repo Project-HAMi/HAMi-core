@@ -1947,12 +1947,44 @@ static CUresult allocate_captured(CUdeviceptr *address, size_t size, CUdevice de
     return res;
 }
 
-/** Reserve captured allocation quota before native default-pool allocation. */
+/** Resolve the device whose current pool cuMemAllocAsync will use. */
+static CUresult async_stream_device(CUstream stream, CUdevice *dev) {
+    if (stream == NULL || stream == CU_STREAM_LEGACY || stream == CU_STREAM_PER_THREAD)
+        return cuCtxGetDevice(dev);
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuStreamGetDevice) != NULL)
+        return CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetDevice, stream, dev);
+
+    /* Older drivers expose the stream's context but no direct device query. */
+    CUcontext owner, current;
+    CUresult res;
+    if (CUDA_FIND_ENTRY(cuda_library_entry, cuStreamGetCtx_v2) != NULL) {
+        /* For a green stream, v2 returns its device's primary context in owner. */
+        CUgreenCtx green;
+        res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCtx_v2, stream, &owner, &green);
+    } else if (CUDA_FIND_ENTRY(cuda_library_entry, cuStreamGetCtx) != NULL) {
+        res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamGetCtx, stream, &owner);
+    } else {
+        return CUDA_ERROR_NOT_SUPPORTED;
+    }
+    if (res != CUDA_SUCCESS) return res;
+    res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxGetCurrent, &current);
+    if (res != CUDA_SUCCESS) return res;
+    if (current == owner) return cuCtxGetDevice(dev);
+
+    res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxPushCurrent_v2, owner);
+    if (res != CUDA_SUCCESS) return res;
+    res = cuCtxGetDevice(dev);
+    CUcontext popped;
+    CUresult pop = CUDA_OVERRIDE_CALL(cuda_library_entry, cuCtxPopCurrent_v2, &popped);
+    return res == CUDA_SUCCESS ? pop : res;
+}
+
+/** Reserve captured allocation quota before native stream-selected allocation. */
 int add_chunk_async(CUdeviceptr *address, size_t size, CUstream hStream) {
     size_t addr = 0;
-    CUresult res = CUDA_SUCCESS;
     CUdevice dev;
-    cuCtxGetDevice(&dev);
+    CUresult res = async_stream_device(hStream, &dev);
+    if (res != CUDA_SUCCESS) return res;
     int capturing;
     res = allocate_captured(address, size, dev, NULL, hStream, 0, &capturing);
     if (capturing) return res;
@@ -1967,7 +1999,7 @@ int add_chunk_async(CUdeviceptr *address, size_t size, CUstream hStream) {
         return res;
     }
     *address = e->entry->address;
-    /* cuMemAllocAsync draws from the device's default pool. */
+    /* cuMemAllocAsync draws from the stream device's current pool. */
     CUmemoryPool pool;
     res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuDeviceGetMemPool,&pool,dev);
     if (res != CUDA_SUCCESS) {

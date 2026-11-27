@@ -120,6 +120,8 @@ typedef enum {
     CUDA_OVERRIDE_ENUM(cuEventQuery),
     CUDA_OVERRIDE_ENUM(cuStreamGetId),
     CUDA_OVERRIDE_ENUM(cuStreamGetCtx),
+    CUDA_OVERRIDE_ENUM(cuStreamGetCtx_v2),
+    CUDA_OVERRIDE_ENUM(cuStreamGetDevice),
     CUDA_OVERRIDE_ENUM(cuGreenCtxDestroy),
     CUDA_OVERRIDE_ENUM(cuCtxFromGreenCtx),
     CUDA_OVERRIDE_ENUM(cuStreamBeginCapture),
