@@ -100,7 +100,6 @@ rm /tmp/cudevshr.cache
 | `GPU_CORE_UTILIZATION_POLICY` | `force` 始终应用 SM 限制，`disable` 关闭 SM 限制。未设置时保持默认行为。 |
 | `CUDA_DEVICE_MEMORY_SHARED_CACHE` | 共享缓存文件路径（默认 `/tmp/cudevshr.cache`）。 |
 | `CUDA_VISIBLE_DEVICES` | 在将 CUDA 设备编号映射到物理设备时生效。 |
-| `CUDA_REDIRECT` | 拦截 `dlsym` 时加载的 `libvgpu.so` 路径（默认 `/usr/local/vgpu/libvgpu.so`）。 |
 | `RECORD_KERNEL_INTERVAL` | 记录 kernel 启动时间的最小间隔，单位为秒（默认 `1`）。 |
 | `LIBCUDA_LOG_LEVEL` | 日志级别，见[日志](#日志)。 |
 

@@ -46,7 +46,7 @@ static int launch_preloaded(char **argv) {
         return 1;
     }
     close(fd); unlink(cache);
-    setenv("LD_PRELOAD", lib, 1); setenv("CUDA_REDIRECT", lib, 1);
+    setenv("LD_PRELOAD", lib, 1);
     setenv("CUDA_DEVICE_MEMORY_LIMIT", "1024m", 1);
     setenv("CUDA_DEVICE_MEMORY_SHARED_CACHE", cache, 1); setenv("HAMI_GRAPH_TEST_CACHE", cache, 1);
     setenv("CUDA_DEVICE_SM_LIMIT", "100", 1); setenv("LIBVGPU_HOSTPID_BROKER", "0", 1);

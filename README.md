@@ -100,7 +100,6 @@ rm /tmp/cudevshr.cache
 | `GPU_CORE_UTILIZATION_POLICY` | `force` always applies the SM limit and `disable` turns it off. Unset keeps the default behavior. |
 | `CUDA_DEVICE_MEMORY_SHARED_CACHE` | Path of the shared cache file (default `/tmp/cudevshr.cache`). |
 | `CUDA_VISIBLE_DEVICES` | Honored when mapping CUDA device indexes to physical devices. |
-| `CUDA_REDIRECT` | Path of `libvgpu.so` to load when intercepting `dlsym` (default `/usr/local/vgpu/libvgpu.so`). |
 | `RECORD_KERNEL_INTERVAL` | Minimum number of seconds between recording kernel launch times (default `1`). |
 | `LIBCUDA_LOG_LEVEL` | Log verbosity, see [Logging](#logging). |
 
