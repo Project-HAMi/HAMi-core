@@ -21,7 +21,6 @@ extern int set_host_pid(int hostpid);
 extern void allocator_init(void);
 void preInit();
 void childReinitPostInit();
-void *vgpulib;
 
 pthread_once_t pre_cuinit_flag = PTHREAD_ONCE_INIT;
 pthread_once_t post_cuinit_flag = PTHREAD_ONCE_INIT;
@@ -73,15 +72,6 @@ static void initialize_dlsym(void) {
             }
             if (real_dlsym == NULL)
                 LOG_ERROR("real dlsym not found after trying libc.so.6");
-        }
-    }
-
-    if (vgpulib == NULL) {
-        char *path_search = getenv("CUDA_REDIRECT");
-        if (path_search != NULL && strlen(path_search) > 0) {
-            vgpulib = dlopen(path_search, RTLD_LAZY);
-        } else {
-            vgpulib = dlopen("/usr/local/vgpu/libvgpu.so", RTLD_LAZY);
         }
     }
 }

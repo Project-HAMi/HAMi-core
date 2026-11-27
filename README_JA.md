@@ -100,7 +100,6 @@ rm /tmp/cudevshr.cache
 | `GPU_CORE_UTILIZATION_POLICY` | `force`は常にSM制限を適用し、`disable`は無効にします。未設定の場合はデフォルトの動作です。 |
 | `CUDA_DEVICE_MEMORY_SHARED_CACHE` | 共有キャッシュファイルのパス（デフォルトは`/tmp/cudevshr.cache`）。 |
 | `CUDA_VISIBLE_DEVICES` | CUDAデバイス番号を物理デバイスに対応付ける際に参照されます。 |
-| `CUDA_REDIRECT` | `dlsym`をインターセプトする際にロードする`libvgpu.so`のパス（デフォルトは`/usr/local/vgpu/libvgpu.so`）。 |
 | `RECORD_KERNEL_INTERVAL` | カーネル起動時刻を記録する最小間隔（秒、デフォルトは`1`）。 |
 | `LIBCUDA_LOG_LEVEL` | ログの詳細度。[ログ](#ログ)を参照してください。 |
 
