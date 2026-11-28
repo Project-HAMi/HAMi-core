@@ -122,15 +122,22 @@ static int64_t delta(int up_limit, int user_current, int64_t share, int device_i
   return share;
 }
 
-unsigned int nvml_to_cuda_map(unsigned int nvmldev){
+unsigned int nvml_to_cuda_map(unsigned int nvmldev) {
     unsigned int devcount;
-    CHECK_NVML_API(nvmlDeviceGetCount_v2(&devcount));
-    int i=0;
-    for (i=0;i<devcount;i++){
-        if (cuda_to_nvml_map(i)==nvmldev)
-          return i;
+    nvmlReturn_t status = nvmlDeviceGetCount_v2(&devcount);
+    if (status != NVML_SUCCESS) {
+        LOG_WARN("NVML error in nvml_to_cuda_map: %d", status);
+        return ~0u;
     }
-    return -1;
+    if (devcount > CUDA_DEVICE_MAX_COUNT) {
+        devcount = CUDA_DEVICE_MAX_COUNT;
+    }
+    for (unsigned int i = 0; i < devcount; i++) {
+        if (cuda_to_nvml_map(i) == nvmldev) {
+            return i;
+        }
+    }
+    return ~0u;
 }
 
 unsigned int cuda_to_nvml_map(unsigned int cudadev){
