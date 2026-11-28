@@ -172,6 +172,59 @@ static void test_destroy_failure_keeps_accounting(void) {
     expect_accounting(32, 1, 1);
 }
 
+static void expect_charged_2d(const CUDA_ARRAY_DESCRIPTOR *desc, size_t bytes) {
+    CUarray array;
+
+    reset_calls();
+    EXPECT(cuArrayCreate_v2(&array, desc) == CUDA_SUCCESS);
+    EXPECT(create_calls == 1);
+    expect_accounting(bytes, 1, 0);
+    EXPECT(cuArrayDestroy(array) == CUDA_SUCCESS);
+    expect_accounting(bytes, 1, 1);
+}
+
+static void expect_charged_3d(const CUDA_ARRAY3D_DESCRIPTOR *desc, size_t bytes) {
+    CUarray array;
+
+    reset_calls();
+    EXPECT(cuArray3DCreate_v2(&array, desc) == CUDA_SUCCESS);
+    EXPECT(create_3d_calls == 1);
+    expect_accounting(bytes, 1, 0);
+    EXPECT(cuArrayDestroy(array) == CUDA_SUCCESS);
+    expect_accounting(bytes, 1, 1);
+}
+
+static void test_normalized_and_compressed_formats(void) {
+    CUDA_ARRAY_DESCRIPTOR unorm8 = {64, 64, CU_AD_FORMAT_UNORM_INT8X1, 1};
+    CUDA_ARRAY_DESCRIPTOR snorm16x4 = {4, 2, CU_AD_FORMAT_SNORM_INT16X4, 4};
+    CUDA_ARRAY_DESCRIPTOR bc1 = {5, 5, CU_AD_FORMAT_BC1_UNORM, 4};
+    CUDA_ARRAY3D_DESCRIPTOR bc7 = {8, 8, 2, CU_AD_FORMAT_BC7_UNORM, 4, 0};
+
+    expect_charged_2d(&unorm8, 64 * 64);
+    expect_charged_2d(&snorm16x4, 4 * 2 * 8);
+    /* 5x5 texels round up to 2x2 blocks of 8 bytes. */
+    expect_charged_2d(&bc1, 2 * 2 * 8);
+    expect_charged_3d(&bc7, 2 * 2 * 2 * 16);
+}
+
+static void test_unsized_descriptors_are_forwarded(void) {
+    CUDA_ARRAY_DESCRIPTOR nv12 = {64, 64, CU_AD_FORMAT_NV12, 3};
+    CUDA_ARRAY3D_DESCRIPTOR sparse = {64, 64, 1, CU_AD_FORMAT_FLOAT, 1, CUDA_ARRAY3D_SPARSE};
+    CUDA_ARRAY3D_DESCRIPTOR deferred = {64, 64, 1, CU_AD_FORMAT_FLOAT, 1,
+                                        CUDA_ARRAY3D_DEFERRED_MAPPING};
+    CUarray array;
+
+    /* Formats and flags with no size here keep the driver-only path. */
+    reset_calls();
+    EXPECT(cuArrayCreate_v2(&array, &nv12) == CUDA_SUCCESS);
+    EXPECT(cuArray3DCreate_v2(&array, &sparse) == CUDA_SUCCESS);
+    EXPECT(cuArray3DCreate_v2(&array, &deferred) == CUDA_SUCCESS);
+    EXPECT(create_calls == 1);
+    EXPECT(create_3d_calls == 2);
+    EXPECT(cuArrayDestroy(array) == CUDA_SUCCESS);
+    expect_accounting(0, 0, 0);
+}
+
 static void test_invalid_descriptors(void) {
     CUDA_ARRAY_DESCRIPTOR valid = {4, 2, CU_AD_FORMAT_UNSIGNED_INT16, 2};
     CUDA_ARRAY_DESCRIPTOR invalid_channels = {4, 2, CU_AD_FORMAT_UNSIGNED_INT16, 3};
@@ -179,14 +232,20 @@ static void test_invalid_descriptors(void) {
     CUDA_ARRAY3D_DESCRIPTOR invalid_format = {1, 1, 1, (CUarray_format)33, 1, 0};
     CUarray array;
 
+    /* The driver keeps deciding what is invalid, as before accounting. */
     reset_calls();
+    create_result = CUDA_ERROR_INVALID_VALUE;
+    create_3d_result = CUDA_ERROR_INVALID_VALUE;
     EXPECT(cuArrayCreate_v2(NULL, &valid) == CUDA_ERROR_INVALID_VALUE);
     EXPECT(cuArrayCreate_v2(&array, NULL) == CUDA_ERROR_INVALID_VALUE);
     EXPECT(cuArrayCreate_v2(&array, &invalid_channels) == CUDA_ERROR_INVALID_VALUE);
-    EXPECT(cuArrayCreate_v2(&array, &overflow) == CUDA_ERROR_INVALID_VALUE);
     EXPECT(cuArray3DCreate_v2(&array, &invalid_format) == CUDA_ERROR_INVALID_VALUE);
-    EXPECT(create_calls == 0);
-    EXPECT(create_3d_calls == 0);
+    EXPECT(create_calls == 3);
+    EXPECT(create_3d_calls == 1);
+
+    /* A size that overflows can never be allocated or charged. */
+    EXPECT(cuArrayCreate_v2(&array, &overflow) == CUDA_ERROR_INVALID_VALUE);
+    EXPECT(create_calls == 3);
     expect_accounting(0, 0, 0);
 }
 
@@ -200,6 +259,8 @@ int main(void) {
     test_3d_array_create_and_destroy();
     test_limit_and_driver_failures();
     test_destroy_failure_keeps_accounting();
+    test_normalized_and_compressed_formats();
+    test_unsized_descriptors_are_forwarded();
     test_invalid_descriptors();
 
     printf("CUDA array accounting: %d failures\n", failures);
