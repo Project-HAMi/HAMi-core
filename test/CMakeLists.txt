@@ -188,6 +188,10 @@ foreach(TEST_SCRIPT ${TEST_SCRIPTS})
             ${HOOK_SOURCE}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/log_utils.c)
         target_compile_definitions(${TEST_TARGET_NAME} PRIVATE _GNU_SOURCE)
+        target_compile_options(${TEST_TARGET_NAME} PRIVATE
+            -ffunction-sections -fdata-sections)
+        set_target_properties(${TEST_TARGET_NAME} PROPERTIES
+            LINK_FLAGS "-Wl,--no-export-dynamic,--gc-sections")
     elseif (TEST_TARGET_NAME STREQUAL "test_array_memory_accounting")
         # Links the production array hooks and replaces their driver and
         # accounting dependencies, so it needs no NVIDIA driver or GPU.

@@ -37,6 +37,7 @@ static uintptr_t next_array = 0x1000;
 } while (0)
 
 void ensure_initialized(void) {}
+void ensure_hostpid(void) {}
 int is_gpu_core_limit_enabled(void) { return 0; }
 int wait_status_self(int status) { return status == 1; }
 CUresult cuCtxGetDevice(CUdevice *device) {

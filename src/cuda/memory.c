@@ -36,14 +36,24 @@ static CUresult checked_array_multiply(size_t *value, size_t multiplier) {
 }
 
 static CUresult get_array_format_bytes(CUarray_format format, size_t *bytes) {
-    unsigned int format_index = (unsigned int)format;
-
-    if (format_index >= sizeof(cuarray_format_bytes) / sizeof(cuarray_format_bytes[0]) ||
-        cuarray_format_bytes[format_index] == 0) {
+    switch (format) {
+    case CU_AD_FORMAT_UNSIGNED_INT8:
+    case CU_AD_FORMAT_SIGNED_INT8:
+        *bytes = 1;
+        return CUDA_SUCCESS;
+    case CU_AD_FORMAT_UNSIGNED_INT16:
+    case CU_AD_FORMAT_SIGNED_INT16:
+    case CU_AD_FORMAT_HALF:
+        *bytes = 2;
+        return CUDA_SUCCESS;
+    case CU_AD_FORMAT_UNSIGNED_INT32:
+    case CU_AD_FORMAT_SIGNED_INT32:
+    case CU_AD_FORMAT_FLOAT:
+        *bytes = 4;
+        return CUDA_SUCCESS;
+    default:
         return CUDA_ERROR_INVALID_VALUE;
     }
-    *bytes = cuarray_format_bytes[format_index];
-    return CUDA_SUCCESS;
 }
 
 static CUresult compute_array_alloc_bytes_checked(const CUDA_ARRAY_DESCRIPTOR *desc,
