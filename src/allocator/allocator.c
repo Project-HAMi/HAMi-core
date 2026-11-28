@@ -188,10 +188,15 @@ int add_chunk_only(CUdeviceptr address, size_t size, CUdevice dev) {
 
 int check_memory_type(CUdeviceptr address) {
     allocated_list_entry *cursor;
-    for (cursor=device_overallocated->head;cursor!=NULL;cursor=cursor->next){
-        if ((cursor->entry->address <= address) && (cursor->entry->address+cursor->entry->length>=address))
+    pthread_mutex_lock(&mutex);
+    for (cursor = device_overallocated->head; cursor != NULL; cursor = cursor->next) {
+        if ((cursor->entry->address <= address) &&
+            (cursor->entry->address + cursor->entry->length >= address)) {
+            pthread_mutex_unlock(&mutex);
             return CU_MEMORYTYPE_DEVICE;
+        }
     }
+    pthread_mutex_unlock(&mutex);
     return CU_MEMORYTYPE_HOST;
 }
 
@@ -199,14 +204,14 @@ int remove_chunk(allocated_list *a_list, CUdeviceptr dptr) {
     size_t t_size;
     CUdevice t_dev;
 
+    pthread_mutex_lock(&mutex);
     if (a_list->length == 0) {
+        pthread_mutex_unlock(&mutex);
         /* Nothing tracked here, so the pointer was not allocated through this
          * list. Forward the free to the real driver rather than returning -1
          * (see the not-found path below). */
         return cuMemoryFree(dptr);
     }
-
-    pthread_mutex_lock(&mutex);
 
     allocated_list_entry *val;
     for (val = a_list->head; val != NULL; val = val->next) {
@@ -237,7 +242,10 @@ int remove_chunk_only(CUdeviceptr dptr) {
     allocated_list *a_list = device_overallocated;
     size_t t_size;
     CUdevice t_dev;
+
+    pthread_mutex_lock(&mutex);
     if (a_list->length == 0) {
+        pthread_mutex_unlock(&mutex);
         return -1;
     }
     allocated_list_entry *val;
@@ -247,9 +255,11 @@ int remove_chunk_only(CUdeviceptr dptr) {
             t_dev = val->entry->dev;
             LIST_REMOVE(a_list, val);
             rm_gpu_device_memory_usage(getpid(), t_dev, t_size, 2);
+            pthread_mutex_unlock(&mutex);
             return 0;
         }
     }
+    pthread_mutex_unlock(&mutex);
     return -1;
 }
 
