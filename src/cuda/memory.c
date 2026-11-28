@@ -69,7 +69,9 @@ CUresult cuMemAllocManaged(CUdeviceptr* dptr, size_t bytesize, unsigned int flag
     ENSURE_RUNNING();
     CUdevice dev;
     CHECK_DRV_API(cuCtxGetDevice(&dev));
+    memory_op_enter();
     if (reserve_device_memory(dev, bytesize) != 0) {
+        memory_op_leave();
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemAllocManaged, dptr, bytesize, flags);
@@ -77,11 +79,13 @@ CUresult cuMemAllocManaged(CUdeviceptr* dptr, size_t bytesize, unsigned int flag
         if (add_chunk_only(*dptr, bytesize, dev) != 0) {
             CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFree_v2, *dptr);
             release_device_memory(dev, bytesize);
+            memory_op_leave();
             return CUDA_ERROR_OUT_OF_MEMORY;
         }
     } else {
         release_device_memory(dev, bytesize);
     }
+    memory_op_leave();
     return res;
 }
 
@@ -95,18 +99,22 @@ CUresult cuMemAllocPitch_v2(CUdeviceptr* dptr, size_t* pPitch, size_t WidthInByt
     ENSURE_RUNNING();
     CUdevice dev;
     CHECK_DRV_API(cuCtxGetDevice(&dev));
+    memory_op_enter();
     if (reserve_device_memory(dev, bytesize) != 0) {
+        memory_op_leave();
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemAllocPitch_v2, dptr, pPitch, WidthInBytes, Height, ElementSizeBytes);
     if (res != CUDA_SUCCESS) {
         release_device_memory(dev, bytesize);
+        memory_op_leave();
         return res;
     }
     /* Driver pitch may exceed guess_pitch due to alignment; account for real size. */
     if (Height != 0 && pPitch != NULL && *pPitch > SIZE_MAX / Height) {
         CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFree_v2, *dptr);
         release_device_memory(dev, bytesize);
+        memory_op_leave();
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
     actual = (pPitch != NULL) ? (*pPitch * Height) : bytesize;
@@ -114,6 +122,7 @@ CUresult cuMemAllocPitch_v2(CUdeviceptr* dptr, size_t* pPitch, size_t WidthInByt
         if (reserve_device_memory(dev, actual - bytesize) != 0) {
             CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFree_v2, *dptr);
             release_device_memory(dev, bytesize);
+            memory_op_leave();
             return CUDA_ERROR_OUT_OF_MEMORY;
         }
     } else if (actual < bytesize) {
@@ -122,8 +131,10 @@ CUresult cuMemAllocPitch_v2(CUdeviceptr* dptr, size_t* pPitch, size_t WidthInByt
     if (add_chunk_only(*dptr, actual, dev) != 0) {
         CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemFree_v2, *dptr);
         release_device_memory(dev, actual);
+        memory_op_leave();
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
+    memory_op_leave();
     return CUDA_SUCCESS;
 }
 
@@ -543,7 +554,11 @@ CUresult cuMemCreate ( CUmemGenericAllocationHandle* handle, size_t size, const 
     if (do_oom_check && cuCtxGetDevice(&dev) != CUDA_SUCCESS) {
         dev = prop->location.id;
     }
+    if (do_oom_check) {
+        memory_op_enter();
+    }
     if (do_oom_check && reserve_device_memory(dev, size) != 0) {
+        memory_op_leave();
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,
@@ -553,26 +568,31 @@ CUresult cuMemCreate ( CUmemGenericAllocationHandle* handle, size_t size, const 
             if (add_chunk_only(*handle, size, dev) != 0) {
                 CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemRelease, *handle);
                 release_device_memory(dev, size);
+                memory_op_leave();
                 return CUDA_ERROR_OUT_OF_MEMORY;
             }
             if (vmm_handle_created(*handle) != 0) {
                 remove_chunk_only(*handle);
                 CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemRelease, *handle);
+                memory_op_leave();
                 return CUDA_ERROR_OUT_OF_MEMORY;
             }
         } else {
             release_device_memory(dev, size);
         }
+        memory_op_leave();
     }
     return res;
 }
 
 CUresult cuMemRelease(CUmemGenericAllocationHandle handle) {
     LOG_INFO("cuMemRelease:%llx", handle);
+    memory_op_enter();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemRelease, handle);
     if (res == CUDA_SUCCESS) {
         vmm_handle_released(handle);
     }
+    memory_op_leave();
     return res;
 }
 
@@ -589,10 +609,12 @@ CUresult cuMemMap( CUdeviceptr ptr, size_t size, size_t offset, CUmemGenericAllo
 
 CUresult cuMemUnmap(CUdeviceptr ptr, size_t size) {
     LOG_INFO("cuMemUnmap:%lld(%llx)", size, ptr);
+    memory_op_enter();
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemUnmap, ptr, size);
     if (res == CUDA_SUCCESS) {
         vmm_unmapped(ptr, size);
     }
+    memory_op_leave();
     return res;
 }
 
@@ -640,13 +662,18 @@ CUresult cuGraphAddMemAllocNode(CUgraphNode *phGraphNode, CUgraph hGraph,
     size_t size = charge ? nodeParams->bytesize : 0;
     graph_charge_entry *entry = NULL;
     if (charge) {
+        module_graph_enter();
         cuuint64_t id = graph_capture_id_of(hGraph);
         CUresult res = graph_alloc_begin(hGraph, dev, size, id, id != 0, &entry);
-        if (res != CUDA_SUCCESS) return res;
+        if (res != CUDA_SUCCESS) {
+            module_graph_leave();
+            return res;
+        }
     }
     CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuGraphAddMemAllocNode,
         phGraphNode, hGraph, dependencies, numDependencies, nodeParams);
     graph_alloc_end(entry, res == CUDA_SUCCESS && charge ? nodeParams->dptr : 0, res);
+    if (charge) module_graph_leave();
     return res;
 }
 
@@ -664,15 +691,22 @@ static CUresult graph_add_node(cuda_sym_t add, int edges, CUgraphNode *node, CUg
         params->alloc.poolProps.location.type == CU_MEM_LOCATION_TYPE_DEVICE;
     graph_charge_entry *entry = NULL;
     if (charge) {
+        module_graph_enter();
         cuuint64_t id = graph_capture_id_of(graph);
         CUresult res = graph_alloc_begin(graph, params->alloc.poolProps.location.id,
             params->alloc.bytesize, id, id != 0, &entry);
-        if (res != CUDA_SUCCESS) return res;
+        if (res != CUDA_SUCCESS) {
+            module_graph_leave();
+            return res;
+        }
     }
 #if CUDA_VERSION >= 13000
     if (child != NULL) {
         CUresult res = graph_child_begin(graph, child);
-        if (res != CUDA_SUCCESS) return res;
+        if (res != CUDA_SUCCESS) {
+            if (charge) module_graph_leave();
+            return res;
+        }
     }
 #endif
     CUresult res = edges ? add(node, graph, deps, data, count, params)
@@ -681,6 +715,7 @@ static CUresult graph_add_node(cuda_sym_t add, int edges, CUgraphNode *node, CUg
     if (child != NULL) graph_child_end(graph, child, res);
 #endif
     graph_alloc_end(entry, res == CUDA_SUCCESS && charge ? params->alloc.dptr : 0, res);
+    if (charge) module_graph_leave();
     if (res == CUDA_SUCCESS && params != NULL && params->type == CU_GRAPH_NODE_TYPE_MEM_FREE)
         graph_mark_free(graph, params->free.dptr);
 #if CUDA_VERSION >= 12030
@@ -730,9 +765,12 @@ CUresult cuMemHostGetFlags(unsigned int *pFlags, void *p){
     return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemHostGetFlags,pFlags,p);
 }
 
-CUresult cuMemPoolTrimTo(CUmemoryPool pool, size_t minBytesToKeep){
+CUresult cuMemPoolTrimTo(CUmemoryPool pool, size_t minBytesToKeep) {
     LOG_DEBUG("cuMemPoolTrimTo");
-    return CUDA_OVERRIDE_CALL(cuda_library_entry,cuMemPoolTrimTo,pool,minBytesToKeep);
+    memory_op_enter();
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuMemPoolTrimTo, pool, minBytesToKeep);
+    memory_op_leave();
+    return res;
 }
 
 CUresult cuMemPoolSetAttribute(CUmemoryPool pool, CUmemPool_attribute attr, void *value) {

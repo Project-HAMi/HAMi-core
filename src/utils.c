@@ -116,6 +116,18 @@ static nvmlReturn_t get_used_gpu_memory_by_pid(pid_t hostpid, int cudadev,
     return res;
 }
 
+int get_process_gpu_memory(pid_t hostpid, int cudadev, uint64_t *used) {
+    unsigned long long raw = 0;  // NOLINT(runtime/int)
+    if (used == NULL) {
+        return -1;
+    }
+    if (get_used_gpu_memory_by_pid(hostpid, cudadev, &raw) != NVML_SUCCESS) {
+        return -1;
+    }
+    *used = (uint64_t)raw;
+    return 0;
+}
+
 static pthread_mutex_t lazy_sizing_lock = PTHREAD_MUTEX_INITIALIZER;
 static pid_t lazy_sizing_hostpid;
 

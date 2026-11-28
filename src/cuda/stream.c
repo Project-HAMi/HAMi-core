@@ -14,11 +14,15 @@ CUresult cuStreamDestroy_v2 ( CUstream hStream ){
 }
 
 /** Synchronize a stream and release graph charges covered by the submission snapshot. */
-CUresult cuStreamSynchronize(CUstream hstream){
-    LOG_DEBUG("cuStreamSync %p",hstream);
+CUresult cuStreamSynchronize(CUstream hstream) {
+    LOG_DEBUG("cuStreamSync %p", hstream);
     uint64_t submitted = graph_sync_begin();
-    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry,cuStreamSynchronize,hstream);
-    if (res == CUDA_SUCCESS) graph_synchronized(NULL, hstream, 0, submitted);
+    CUresult res = CUDA_OVERRIDE_CALL(cuda_library_entry, cuStreamSynchronize, hstream);
+    if (res == CUDA_SUCCESS) {
+        memory_op_enter();
+        graph_synchronized(NULL, hstream, 0, submitted);
+        memory_op_leave();
+    }
     return res;
 }
 

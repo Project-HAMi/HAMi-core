@@ -34,3 +34,4 @@ int find_own_hostpid(hostpid_probe_fn probe, void *ctx, int max_attempts,
 
 //Nvml part utils
 int need_cuda_virtualize();
+int get_process_gpu_memory(pid_t hostpid, int cudadev, uint64_t *used);

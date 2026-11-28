@@ -30,6 +30,10 @@ void rate_limiter(int64_t grid, int64_t block) { REQUIRE(grid == 24 && block == 
 
 void ensure_initialized(void) {}
 void ensure_hostpid(void) {}
+void memory_op_enter(void) {}
+void memory_op_leave(void) {}
+void module_graph_enter(void) {}
+void module_graph_leave(void) {}
 int is_gpu_core_limit_enabled(void) { return 0; }
 int wait_status_self(int status) { REQUIRE(status == 1); return 1; }
 
