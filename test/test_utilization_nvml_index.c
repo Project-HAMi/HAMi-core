@@ -26,6 +26,7 @@ typedef unsigned long long nvml_ull;  // NOLINT(runtime/int)
 #define MIB (1024ULL * 1024ULL)
 
 static unsigned int fake_device_count;
+static nvmlReturn_t fake_count_v2_result = NVML_SUCCESS;
 static unsigned int fake_sm_util[MAX_FAKE_DEVICES];
 static nvml_ull fake_used_mem[MAX_FAKE_DEVICES];
 static unsigned int handle_requests[MAX_FAKE_DEVICES + 1];
@@ -42,6 +43,9 @@ nvmlReturn_t nvmlDeviceGetCount(unsigned int *deviceCount) {
 }
 
 nvmlReturn_t nvmlDeviceGetCount_v2(unsigned int *deviceCount) {
+    if (fake_count_v2_result != NVML_SUCCESS) {
+        return fake_count_v2_result;
+    }
     *deviceCount = fake_device_count;
     return NVML_SUCCESS;
 }
@@ -219,6 +223,20 @@ int main(void) {
 
     static const unsigned int identity[] = {0, 1, 2};
     run_case("CUDA_VISIBLE_DEVICES=0,1,2 on a 3-GPU node", 3, identity, 3);
+
+    /* nvml_to_cuda_map must return -1 on NVML errors and clamp devcount (issue #447). */
+    printf("--- nvml_to_cuda_map error and bounds cases ---\n");
+    fake_count_v2_result = NVML_ERROR_UNINITIALIZED;
+    check(nvml_to_cuda_map(0) == ~0u,
+          "nvml_to_cuda_map returns -1 on NVML_ERROR_UNINITIALIZED");
+    fake_count_v2_result = NVML_ERROR_UNKNOWN;
+    check(nvml_to_cuda_map(0) == ~0u,
+          "nvml_to_cuda_map returns -1 on NVML_ERROR_UNKNOWN");
+    fake_count_v2_result = NVML_SUCCESS;
+    fake_device_count = CUDA_DEVICE_MAX_COUNT + 4;
+    set_visible_devices(identity, 3);
+    check(nvml_to_cuda_map(CUDA_DEVICE_MAX_COUNT) == ~0u,
+          "nvml_to_cuda_map clamps devcount to CUDA_DEVICE_MAX_COUNT");
 
     printf("%s\n", failures == 0 ? "PASS" : "FAIL");
     return failures == 0 ? 0 : 1;
