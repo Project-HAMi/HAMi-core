@@ -316,7 +316,7 @@ void nvml_postInit() {
 nvmlReturn_t _nvmlDeviceGetMemoryInfo(nvmlDevice_t device,void* memory,int version) {
     LOG_DEBUG("into nvmlDeviceGetMemoryInfo");
     if (memory == NULL) {
-        return NVML_SUCCESS;
+        return NVML_ERROR_INVALID_ARGUMENT;
     }
     unsigned int dev_id;
 
